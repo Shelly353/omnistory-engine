@@ -1,7 +1,7 @@
 // backend/routes/ai.js
 const express = require('express');
 const router = express.Router();
-const DEEPSEEK_KEY = DEEPSEEK_API_KEY;
+const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY;
 
 router.post('/generate-chapter', async (req, res) => {
     const { title, synopsis, characters, hooks, currentText } = req.body;
