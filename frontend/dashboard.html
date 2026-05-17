@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OmniStory - 创作大厅</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen font-sans">
+
+    <header class="h-16 border-b border-gray-800 bg-gray-900/50 backdrop-blur flex items-center justify-between px-8 sticky top-0 z-50">
+        <div class="flex items-center space-x-3">
+            <div class="bg-purple-600 p-1.5 rounded-lg">
+                <i data-lucide="orbit" class="text-white w-5 h-5"></i>
+            </div>
+            <span class="font-bold text-xl tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-400">OMNI-STORY HUB</span>
+        </div>
+        <div class="text-xs text-gray-500 font-mono">ENGINE V2.0 // ACTIVE</div>
+    </header>
+
+    <main class="max-w-6xl mx-auto p-8">
+        <div class="flex justify-between items-end mb-10">
+            <div>
+                <h1 class="text-4xl font-black text-white mb-2 tracking-tight">我的创作纪元</h1>
+                <p class="text-gray-500">所有宇宙的起源，都在此处交汇。</p>
+            </div>
+            <button id="btn-new-creation" class="flex items-center space-x-2 px-6 py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl shadow-[0_0_20px_rgba(147,51,234,0.4)] transition-all transform hover:scale-105 active:scale-95">
+                <i data-lucide="sparkles" class="w-5 h-5"></i>
+                <span>开启新篇章</span>
+            </button>
+        </div>
+
+        <div id="universe-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            <div class="h-64 rounded-2xl bg-gray-900 border border-gray-800 animate-pulse"></div>
+        </div>
+    </main>
+
+    <div id="creation-modal" class="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-[100] hidden">
+        <div class="bg-gray-900 border border-purple-500/30 rounded-2xl p-8 w-full max-w-lg shadow-2xl">
+            <h3 class="text-2xl font-bold text-white mb-4 flex items-center">
+                <i data-lucide="wand-2" class="text-purple-400 mr-2"></i> 初始概念锚定
+            </h3>
+            <p class="text-gray-400 text-sm mb-6">输入一个核心概念，系统将为您开启无限推演模式。</p>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs text-gray-500 mb-2 font-bold uppercase tracking-widest">宇宙命名</label>
+                    <input type="text" id="universe-title" class="w-full bg-gray-950 border border-gray-800 p-4 rounded-xl text-white focus:border-purple-500 outline-none transition" placeholder="例如：决裂纪元">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-2 font-bold uppercase tracking-widest">核心冲突/概念</label>
+                    <textarea id="universe-concept" class="w-full bg-gray-950 border border-gray-800 p-4 rounded-xl text-white h-32 focus:border-purple-500 outline-none transition resize-none" placeholder="例如：父辈是好友，儿子们是仇人..."></textarea>
+                </div>
+            </div>
+
+            <div class="flex space-x-4 mt-8">
+                <button id="btn-cancel-creation" class="flex-1 py-3 bg-gray-800 text-gray-400 font-bold rounded-xl hover:bg-gray-700 transition">取消</button>
+                <button id="btn-confirm-creation" class="flex-1 py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-500 transition shadow-[0_0_15px_rgba(147,51,234,0.3)]">进入推演</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="export-modal" class="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-[100] hidden">
+        <div class="bg-gray-900 border border-blue-500/30 rounded-2xl p-8 w-full max-w-sm shadow-2xl">
+            <h3 class="text-xl font-bold text-white mb-4 flex items-center">
+                <i data-lucide="download-cloud" class="text-blue-400 mr-2"></i> 宇宙结晶导出
+            </h3>
+            <p class="text-gray-400 text-sm mb-6">该操作将抓取本宇宙下所有篇章的正文内容，按时间线融合为单一文件。</p>
+            
+            <input type="hidden" id="export-project-id">
+            
+            <div class="space-y-3 mb-6">
+                <button onclick="executeExport('txt')" class="w-full py-3 bg-gray-950 border border-gray-800 rounded-xl text-white hover:border-blue-500 hover:text-blue-400 transition flex items-center justify-center font-bold">
+                    <i data-lucide="file-text" class="w-4 h-4 mr-2"></i> 导出纯文本 (.TXT)
+                </button>
+                <button onclick="executeExport('md')" class="w-full py-3 bg-gray-950 border border-gray-800 rounded-xl text-white hover:border-blue-500 hover:text-blue-400 transition flex items-center justify-center font-bold">
+                    <i data-lucide="file-code" class="w-4 h-4 mr-2"></i> 导出 Markdown (.MD)
+                </button>
+            </div>
+
+            <button onclick="document.getElementById('export-modal').classList.add('hidden')" class="w-full py-3 bg-gray-800 text-gray-400 font-bold rounded-xl hover:bg-gray-700 transition">取消操作</button>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        const universeGrid = document.getElementById('universe-grid');
+        const creationModal = document.getElementById('creation-modal');
+        const exportModal = document.getElementById('export-modal');
+
+        // 加载项目列表
+        async function loadUniverses() {
+            try {
+                const res = await fetch(`${API_BASE}/projects`);
+                const data = await res.json();
+                universeGrid.innerHTML = '';
+
+                if (data.success && data.projects) {
+                    data.projects.forEach(proj => {
+                        const card = document.createElement('div');
+                        card.className = "group relative bg-gray-900 border border-gray-800 rounded-2xl p-6 hover:border-purple-500/50 hover:shadow-[0_0_30px_rgba(147,51,234,0.1)] transition-all cursor-pointer flex flex-col justify-between";
+                        card.onclick = () => window.location.href = `index.html?id=${proj.id}`;
+
+                        // 注入右上角的导出和删除按钮
+                        card.innerHTML = `
+                            <div>
+                                <div class="flex justify-between items-start mb-4">
+                                    <div class="p-2 bg-gray-950 rounded-lg group-hover:bg-purple-900/30 transition-colors">
+                                        <i data-lucide="book" class="w-6 h-6 text-purple-400"></i>
+                                    </div>
+                                    <div class="flex space-x-3">
+                                        <button class="text-gray-600 hover:text-blue-400 transition transform hover:scale-110" onclick="event.stopPropagation(); openExportModal('${proj.id}')" title="一键导出全书">
+                                            <i data-lucide="download" class="w-5 h-5"></i>
+                                        </button>
+                                        <button class="text-gray-600 hover:text-red-500 transition transform hover:scale-110" onclick="event.stopPropagation(); deleteProject('${proj.id}', '${proj.title}')" title="彻底删除宇宙">
+                                            <i data-lucide="trash-2" class="w-5 h-5"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <h3 class="text-xl font-bold text-white mb-2 truncate" title="${proj.title}">${proj.title}</h3>
+                                <div class="space-y-3 mt-6">
+                                    <div class="flex justify-between items-center text-xs text-gray-500">
+                                        <span>宇宙状态</span>
+                                        <span class="text-gray-300">活跃扩展中...</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-8 flex items-center justify-between">
+                                <span class="text-[10px] font-mono text-gray-600 uppercase tracking-widest">${proj.id.slice(0,8)}</span>
+                                <i data-lucide="arrow-right" class="w-4 h-4 text-purple-500 opacity-0 group-hover:opacity-100 transform translate-x-0 group-hover:translate-x-1 transition-all"></i>
+                            </div>
+                        `;
+                        universeGrid.appendChild(card);
+                    });
+                    lucide.createIcons();
+                }
+            } catch (e) {
+                console.error("加载大厅失败", e);
+            }
+        }
+
+        // --- 核心：创建、删除与导出交互逻辑 ---
+
+        // 1. 创建项目逻辑
+        document.getElementById('btn-new-creation').onclick = () => creationModal.classList.remove('hidden');
+        document.getElementById('btn-cancel-creation').onclick = () => creationModal.classList.add('hidden');
+        document.getElementById('btn-confirm-creation').onclick = async () => {
+            const title = document.getElementById('universe-title').value;
+            const concept = document.getElementById('universe-concept').value;
+            if (!title) return alert("请赐予宇宙一个名字！");
+
+            const res = await fetch(`${API_BASE}/projects/create`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title })
+            });
+            const data = await res.json();
+            if (data.success) {
+                localStorage.setItem(`genesis_initial_concept_${data.id}`, concept);
+                window.location.href = `index.html?id=${data.id}`;
+            }
+        };
+
+        // 2. 彻底删除逻辑 (附带二次确认拦截)
+        window.deleteProject = async (id, title) => {
+            const confirmed = confirm(`⚠️ 危险操作！\n\n您正在尝试彻底湮灭《${title}》的宇宙！\n此操作将同时删除该宇宙下属的所有章节、正文、人物设定及伏笔网络，且不可恢复。\n\n您确定要继续吗？`);
+            if (!confirmed) return;
+
+            try {
+                const res = await fetch(`${API_BASE}/projects/${id}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (data.success) {
+                    alert("💥 目标宇宙已彻底湮灭，一切痕迹皆被抹除。");
+                    loadUniverses(); // 重新加载卡片
+                } else {
+                    alert("湮灭失败: " + data.error);
+                }
+            } catch (e) { alert("网络通信错误"); }
+        };
+
+        // 3. 导出逻辑与浏览器下载触发器
+        window.openExportModal = (id) => {
+            document.getElementById('export-project-id').value = id;
+            exportModal.classList.remove('hidden');
+        };
+
+        window.executeExport = async (format) => {
+            const id = document.getElementById('export-project-id').value;
+            const btnIcons = document.querySelectorAll('#export-modal button i');
+            
+            // 给用户一点下载反馈
+            btnIcons.forEach(i => i.setAttribute('data-lucide', 'loader'));
+            lucide.createIcons();
+
+            try {
+                const res = await fetch(`${API_BASE}/projects/export/${id}?format=${format}`);
+                const data = await res.json();
+                
+                if (data.success) {
+                    // 🚀 黑科技：将文字打包成文件并在浏览器中触发本地下载
+                    const blob = new Blob([data.content], { type: 'text/plain;charset=utf-8' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${data.title}_全书提取.${format}`; // 设置下载文件的名字
+                    document.body.appendChild(a);
+                    a.click(); // 模拟点击下载
+                    
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    
+                    exportModal.classList.add('hidden');
+                } else {
+                    alert("导出失败：" + data.error);
+                }
+            } catch (e) {
+                alert("网络断开，导出失败");
+            } finally {
+                // 恢复图标
+                exportModal.classList.add('hidden');
+                setTimeout(() => window.location.reload(), 500); // 刷新重置界面
+            }
+        };
+
+        // 启动！
+        loadUniverses();
+    </script>
+</body>
+</html>
