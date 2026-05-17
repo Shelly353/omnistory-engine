@@ -5,8 +5,17 @@ const { createClient } = require('@supabase/supabase-js');
 
 // 💥 修改前可能是：const supabaseKey = SUPABASE_KEY; 或者是裸写的别的
 // 💥 统一修改为：
+// 1. 严格使用 process.env 读取，并确保这里的全大写字母与你 Render 后台配置的 Key 完全一致！
+// 如果你 Render 后台填的是 SUPABASE_ANON_KEY，请把下面这行的 SUPABASE_KEY 改掉。
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
+const supabaseKey = process.env.SUPABASE_KEY; 
+
+// 2. 增加防弹检测，如果没拿到，让它在控制台说人话，而不是直接崩溃
+if (!supabaseUrl || !supabaseKey) {
+    console.error("🚨 致命错误：crystallize.js 未能读取到 Supabase 环境变量！请检查拼写。");
+}
+
+// 3. 初始化客户端
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // 🔍 阶段一：预览提取
