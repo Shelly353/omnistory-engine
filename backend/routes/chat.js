@@ -3,7 +3,7 @@ const express = require('express');
 const router = express.Router();
 
 // 我们暂时使用环境变量里的 KEY，如果你没在 .env 写，就暂时填明文
-const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY || "sk-a0e880edff8a4d488fe5d0ddfc0799e5";
+const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY;
 
 router.post('/deduce', async (req, res) => {
     const { conversation } = req.body;
