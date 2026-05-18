@@ -1433,19 +1433,27 @@ if (data.success) {
     // ==========================================
     // ⚙️ 引擎初始化
     // ==========================================
-    function checkInitialConcept() {
+ function checkInitialConcept() {
+        // 1. 💥 无论本地有没有缓存记录，先强行设置顶部标题，并尝试从云端数据库拉取所有数据！
+        if (document.getElementById('top-project-title')) {
+            document.getElementById('top-project-title').innerText = "宇宙 ID: " + PROJECT_ID.slice(0,8);
+        }
+        loadWorkspaceTree(); 
+        loadGlobalAssets();
+        loadProjectSettings(); 
+        
+        // 2. 解除模糊遮罩，让手机端也能看到界面
+        if (mainWorkspace) mainWorkspace.classList.remove('opacity-30', 'blur-sm');
+
+        // 3. 处理本地的推演室沙盒记录
         const savedChat = localStorage.getItem(GENESIS_CHAT_KEY);
         if (savedChat) {
             genesisConversation = JSON.parse(savedChat);
             renderChatHistory(); 
-            document.getElementById('top-project-title').innerText = "宇宙 ID: " + PROJECT_ID.slice(0,8);
-            if(mainWorkspace) mainWorkspace.classList.remove('opacity-30', 'blur-sm');
-            loadWorkspaceTree(); 
-            loadGlobalAssets();
-            loadProjectSettings(); 
         } else {
             const initialConcept = localStorage.getItem(`genesis_initial_concept_${PROJECT_ID}`);
             if (initialConcept) {
+                // 如果是刚从大厅带来的新点子，打开遮罩进入创世推演
                 if(sandbox) sandbox.classList.remove('hidden');
                 if(mainWorkspace) mainWorkspace.classList.add('opacity-30', 'blur-sm');
                 const systemBootPrompt = window.OmniPrompts ? window.OmniPrompts.genesisSystem(initialConcept) : "开始推演";
