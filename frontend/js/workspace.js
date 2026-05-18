@@ -962,7 +962,7 @@ if (data.success) {
     if (btnOpenTimeline) btnOpenTimeline.addEventListener('click', () => { renderTimelineModal(); if(timelineModal) timelineModal.classList.remove('hidden'); });
     if (btnCloseTimeline) btnCloseTimeline.addEventListener('click', () => { if(timelineModal) timelineModal.classList.add('hidden');});
 
-    //if (btnOpenRelation) btnOpenRelation.addEventListener('click', () => { if(relationModal) relationModal.classList.remove('hidden'); setTimeout(renderRelationGraph, 100); });
+    if (btnOpenRelation) btnOpenRelation.addEventListener('click', () => { if(relationModal) relationModal.classList.remove('hidden'); setTimeout(renderRelationGraph, 100); });
     //if (btnTriggerHook) btnTriggerHook.addEventListener('click', () => { if (currentSelectedString && hookModal) hookModal.classList.remove('hidden'); });f (btnCloseRelation) btnCloseRelation.addEventListener('click', () => { if(relationModal) relationModal.classList.add('hidden');});
 
     if (btnOpenAssetModal) btnOpenAssetModal.addEventListener('click', () => { loadGlobalAssets(); if(assetModal) assetModal.classList.remove('hidden'); });
