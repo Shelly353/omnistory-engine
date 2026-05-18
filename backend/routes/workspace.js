@@ -5,8 +5,8 @@ const { createClient } = require('@supabase/supabase-js');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_ANON_KEY;
-const supabaseKey = process.env.DEEPSEEK_API_KEY; 
 const supabase = createClient(supabaseUrl, supabaseKey);
+
 
 // 1. 获取大纲树
 router.get('/tree/:projectId', async (req, res) => {
