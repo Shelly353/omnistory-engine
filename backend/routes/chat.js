@@ -20,8 +20,8 @@ router.post('/deduce', async (req, res) => {
     const messages = [
         { role: "system", content: systemPrompt },
         memorySummary ? { role: "system", content: `【长期记忆摘要】\n以下是较早对话中需要继续遵守的关键上下文。不要逐字复述，只在推演时保持一致：\n${memorySummary}` } : null,
-        requirePanelJson ? { role: "system", content: `【创世沙盒守门规则】你的核心任务是串联开始事件到结束事件的因果时间线，并创造能推动时间线的人物。任何建议都必须来自已有设定，尤其是人物性格、欲望、目标、动机、缺陷、恐惧。提出事件前先说明当前缺口；提出事件时必须说明触发原因、行动人物、行为来源、不可逆后果、推向终局的作用，并做反傻瓜测试。禁止低智商反派、明显骗局、无理由背叛、靠巧合推进、角色为了剧情突然变笨。` } : null,
-        requirePanelJson ? { role: "system", content: `【实时灵感可视化面板更新协议】每次回复末尾必须追加一个 json 代码块，包含当前已确认的 genre、worldview、rules、characters、relations、timeline、chapters。字段不存在时使用空字符串或空数组。聊天正文可以简洁，但 json 代码块必须是合法 JSON。` } : null,
+        requirePanelJson ? { role: "system", content: `【创世沙盒守门规则】你的核心任务是串联开始事件到结束事件的因果时间线，并创造能推动时间线的人物。任何建议都必须来自已有设定，尤其是人物性格、欲望、目标、动机、缺陷、恐惧。提出事件前先说明当前缺口；提出事件时必须说明触发原因、行动人物、行为来源、不可逆后果、推向终局的作用，并做反傻瓜测试。禁止低智商反派、明显骗局、无理由背叛、靠巧合推进、角色为了剧情突然变笨。创世收束前必须确认叙事逻辑：区分真实时间线 timeline 与读者阅读顺序 narrative_logic.presentation_order，说明顺叙/倒叙/双线/多视角等选择如何服务人物弧线、悬念和信息释放。` } : null,
+        requirePanelJson ? { role: "system", content: `【实时灵感可视化面板更新协议】每次回复末尾必须追加一个 json 代码块，包含当前已确认的 genre、worldview、rules、characters、relations、timeline、narrative_logic、chapters。字段不存在时使用空字符串、空对象或空数组。聊天正文可以简洁，但 json 代码块必须是合法 JSON。narrative_logic 必须包含 mode、description、presentation_order；presentation_order 的每项包含 order、source_chapter_number、title、purpose、transition。` } : null,
         ...conversation
     ].filter(Boolean);
 

@@ -86,6 +86,36 @@ document.addEventListener('DOMContentLoaded', () => {
             return null;
         }
     }
+
+    function getNarrativeLogic(bible) {
+        const chapters = bible?.chapters || [];
+        const logic = bible?.narrative_logic || {};
+        const presentationOrder = Array.isArray(logic.presentation_order) && logic.presentation_order.length > 0
+            ? logic.presentation_order
+            : chapters.map((chapter, index) => ({
+                order: index + 1,
+                source_chapter_number: chapter.chapter_number || index + 1,
+                title: chapter.title || '',
+                purpose: '按真实时间线推进',
+                transition: ''
+            }));
+
+        return {
+            mode: logic.mode || '顺叙',
+            description: logic.description || '',
+            presentation_order: presentationOrder
+        };
+    }
+
+    function escapePreviewValue(value) {
+        return String(value ?? '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[char]);
+    }
     
     // ==========================================
     // 💥 DOM 元素全量声明 (已补齐所有遗漏的沙盒开关按钮) 💥
@@ -190,6 +220,9 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const genreOptions = ["屋里有鬼", "金羊毛", "神灯出窍", "面临困境", "成长仪式", "伙伴情谊", "推理侦探", "愚者成功", "进退两难", "超级英雄", "未分类/其他"];
         const genreSelectHTML = genreOptions.map(g => `<option value="${g}" ${bible.genre === g ? 'selected' : ''}>${g}</option>`).join('');
+        const narrativeLogic = getNarrativeLogic(bible);
+        const narrativeModes = ["顺叙", "倒叙", "双线叙事", "多视角", "框架叙事", "非线性", "其他"];
+        const narrativeModeHTML = narrativeModes.map(m => `<option value="${m}" ${narrativeLogic.mode === m ? 'selected' : ''}>${m}</option>`).join('');
 
         let html = `
             <div class="bg-gray-800/50 p-5 rounded-xl border border-gray-700">
@@ -267,7 +300,41 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             
             <div class="bg-gray-800/50 p-5 rounded-xl border border-gray-700 mt-6">
-                <h4 class="text-pink-400 font-bold mb-3 flex items-center"><i data-lucide="book" class="w-4 h-4 mr-2"></i>5. 预设章节大纲 (表头：章节号 | 标题 | 核心梗概)</h4>
+                <h4 class="text-amber-400 font-bold mb-3 flex items-center"><i data-lucide="route" class="w-4 h-4 mr-2"></i>5. 叙事逻辑与呈现顺序</h4>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                    <div>
+                        <label class="text-[10px] text-gray-500 font-bold uppercase mb-1 block">叙事结构</label>
+                        <select id="prev-narrative-mode" class="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-amber-300 text-sm focus:border-amber-500 transition">${narrativeModeHTML}</select>
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="text-[10px] text-gray-500 font-bold uppercase mb-1 block">结构理由</label>
+                        <textarea id="prev-narrative-desc" class="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-gray-200 text-sm h-20 focus:border-amber-500 transition" placeholder="说明为什么采用这种叙事结构，以及它如何服务人物弧线、悬念和信息释放。">${escapePreviewValue(narrativeLogic.description)}</textarea>
+                    </div>
+                </div>
+                <div class="text-[10px] text-gray-500 mb-2 italic">这里决定 SOP 之后创建大纲和写作的阅读顺序；时间轴仍保留真实发生顺序。</div>
+                <div class="space-y-2" id="prev-narrative-order-list">
+                    ${narrativeLogic.presentation_order.map(item => `
+                        <div class="prev-narrative-item bg-gray-900 p-2 rounded-lg border border-gray-700">
+                            <div class="flex space-x-2 items-center mb-2">
+                                <span class="text-gray-500 font-bold text-xs pl-1">读者第</span>
+                                <input type="number" class="w-14 bg-gray-950 border border-gray-600 rounded-md p-1.5 text-white text-xs text-center nar-order" value="${item.order || 1}">
+                                <span class="text-gray-500 font-bold text-xs">段</span>
+                                <span class="text-gray-500 text-xs">取自原第</span>
+                                <input type="number" class="w-14 bg-gray-950 border border-gray-600 rounded-md p-1.5 text-white text-xs text-center nar-source" value="${item.source_chapter_number || item.chapter_number || 1}">
+                                <span class="text-gray-500 text-xs">章</span>
+                                <input type="text" class="flex-1 bg-gray-950 border border-gray-600 rounded-md p-2 text-amber-300 font-bold text-xs nar-title" value="${escapePreviewValue(item.title)}" placeholder="呈现标题">
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                <input type="text" class="bg-gray-950 border border-gray-600 rounded-md p-2 text-gray-300 text-xs nar-purpose" value="${escapePreviewValue(item.purpose)}" placeholder="叙事作用：悬念/对照/信息差/情绪推进">
+                                <input type="text" class="bg-gray-950 border border-gray-600 rounded-md p-2 text-gray-300 text-xs nar-transition" value="${escapePreviewValue(item.transition)}" placeholder="与下一段的衔接方式">
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+
+            <div class="bg-gray-800/50 p-5 rounded-xl border border-gray-700 mt-6">
+                <h4 class="text-pink-400 font-bold mb-3 flex items-center"><i data-lucide="book" class="w-4 h-4 mr-2"></i>6. 预设章节大纲 (表头：章节号 | 标题 | 核心梗概)</h4>
                 <div class="space-y-2" id="prev-chap-list">
                     ${(bible.chapters||[]).map(ch => `
                         <div class="flex space-x-2 prev-chap-item bg-gray-900 p-2 rounded-lg border border-gray-700 items-center">
@@ -545,6 +612,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     chapter_number: parseFloat(el.querySelector('.tl-chap')?.value) || 1,
                     description: el.querySelector('.tl-desc')?.value.trim() || ""
                 })).filter(t => t.time_label !== ""),
+                narrative_logic: {
+                    mode: document.getElementById('prev-narrative-mode') ? document.getElementById('prev-narrative-mode').value.trim() : "顺叙",
+                    description: document.getElementById('prev-narrative-desc') ? document.getElementById('prev-narrative-desc').value.trim() : "",
+                    presentation_order: Array.from(document.querySelectorAll('.prev-narrative-item')).map(el => ({
+                        order: parseFloat(el.querySelector('.nar-order')?.value) || 1,
+                        source_chapter_number: parseFloat(el.querySelector('.nar-source')?.value) || 1,
+                        title: el.querySelector('.nar-title')?.value.trim() || "",
+                        purpose: el.querySelector('.nar-purpose')?.value.trim() || "",
+                        transition: el.querySelector('.nar-transition')?.value.trim() || ""
+                    })).filter(item => item.title !== "" || item.source_chapter_number)
+                },
                 chapters: Array.from(document.querySelectorAll('.prev-chap-item')).map(el => ({
                     chapter_number: parseFloat(el.querySelector('.chap-num')?.value) || 1,
                     title: el.querySelector('.chap-title')?.value.trim() || "",
