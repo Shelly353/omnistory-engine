@@ -6,6 +6,7 @@ const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const HOST = '0.0.0.0';
 
 // 1. 中间件
 app.use(cors());
@@ -40,9 +41,9 @@ app.use((err, req, res, next) => {
 // 未来这里会挂载 projects.js, ai.js 等等...
 
 // 4. 启动引擎
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
     console.log(`\n=========================================`);
     console.log(`🚀 OmniStory Engine V2 is ALIVE!`);
-    console.log(`🌌 宇宙大厅入口: http://localhost:${PORT}/dashboard.html`);
+    console.log(`🌌 宇宙大厅入口: http://${HOST}:${PORT}/dashboard.html`);
     console.log(`=========================================\n`);
 });
