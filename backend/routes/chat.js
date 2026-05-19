@@ -6,7 +6,7 @@ const router = express.Router();
 const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY;
 
 router.post('/deduce', async (req, res) => {
-    const { conversation } = req.body;
+    const { conversation = [], memorySummary = '' } = req.body;
     
     // 我们给 AI 的超级系统指令 (System Prompt)
     const systemPrompt = `你是一位顶级的网文主编和世界观架构师。用户正在使用一个名为 OmniStory 的推演沙盒。
@@ -19,8 +19,9 @@ router.post('/deduce', async (req, res) => {
 
     const messages = [
         { role: "system", content: systemPrompt },
+        memorySummary ? { role: "system", content: `【长期记忆摘要】\n以下是较早对话中需要继续遵守的关键上下文。不要逐字复述，只在推演时保持一致：\n${memorySummary}` } : null,
         ...conversation
-    ];
+    ].filter(Boolean);
 
     try {
         const dsResponse = await fetch('https://api.deepseek.com/chat/completions', {

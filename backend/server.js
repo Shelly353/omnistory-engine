@@ -9,7 +9,8 @@ const PORT = process.env.PORT || 3000;
 
 // 1. 中间件
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ limit: '2mb', extended: true }));
 
 // 2. 静态文件托管 (让浏览器能访问 frontend 里的 HTML 和 JS)
 app.use(express.static(path.join(__dirname, '../frontend')));
@@ -25,6 +26,16 @@ app.use('/api/chat', require('./routes/chat'));
 app.use('/api/crystallize', require('./routes/crystallize'));
 app.use('/api/workspace', require('./routes/workspace'));
 app.use('/api/ai', require('./routes/ai'));
+
+app.use((err, req, res, next) => {
+    if (err.type === 'entity.too.large') {
+        return res.status(413).json({
+            success: false,
+            error: '请求内容太长，请缩短对话或正文后重试。'
+        });
+    }
+    next(err);
+});
 
 // 未来这里会挂载 projects.js, ai.js 等等...
 

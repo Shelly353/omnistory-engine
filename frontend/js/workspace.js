@@ -14,6 +14,55 @@ document.addEventListener('DOMContentLoaded', () => {
     let relationNetwork = null;
     let saveTimeout;
     let currentSelectedString = "";
+
+    const RECENT_CHAT_LIMIT = 10;
+    const MEMORY_SUMMARY_LIMIT = 6000;
+    const MESSAGE_CONTENT_LIMIT = 3500;
+
+    function stripFencedBlocks(text) {
+        return (text || '').replace(/```[a-zA-Z]*\s*[\s\S]*?\s*```/g, '').trim();
+    }
+
+    function stripSystemAppendix(text) {
+        return (text || '').replace(/\n\n\(系统附加：[\s\S]*?\)$/g, '').trim();
+    }
+
+    function limitText(text, maxLength = MESSAGE_CONTENT_LIMIT) {
+        const value = (text || '').trim();
+        if (value.length <= maxLength) return value;
+        return value.slice(0, Math.floor(maxLength * 0.55)) + '\n\n[...中间内容已压缩...]\n\n' + value.slice(-Math.floor(maxLength * 0.35));
+    }
+
+    function cleanConversationMessage(msg) {
+        const content = msg.role === 'assistant'
+            ? stripFencedBlocks(msg.content) || '已更新设定数据。'
+            : stripSystemAppendix(msg.content);
+
+        return {
+            role: msg.role,
+            content: limitText(content)
+        };
+    }
+
+    function buildMemorySummary(messages, maxLength = MEMORY_SUMMARY_LIMIT) {
+        const cleaned = messages.map(cleanConversationMessage).filter(msg => msg.content);
+        if (cleaned.length === 0) return '';
+
+        let summary = '';
+        for (let i = cleaned.length - 1; i >= 0; i--) {
+            const label = cleaned[i].role === 'user' ? '用户' : 'AI';
+            const line = `${label}: ${cleaned[i].content}\n\n`;
+            if ((summary.length + line.length) > maxLength) break;
+            summary = line + summary;
+        }
+        return summary.trim();
+    }
+
+    function buildChatPayload(conversation, recentLimit = RECENT_CHAT_LIMIT) {
+        const recent = conversation.slice(-recentLimit).map(cleanConversationMessage).filter(msg => msg.content);
+        const memorySummary = buildMemorySummary(conversation.slice(0, -recentLimit));
+        return { conversation: recent, memorySummary };
+    }
     
     // ==========================================
     // 💥 DOM 元素全量声明 (已补齐所有遗漏的沙盒开关按钮) 💥
@@ -278,7 +327,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const res = await fetch('/api/chat/deduce', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ conversation: genesisConversation })
+                body: JSON.stringify(buildChatPayload(genesisConversation))
             });
             const data = await res.json();
             document.getElementById(loadingId)?.remove();
@@ -294,7 +343,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     } catch(e) { console.error("JSON实时解析失败:", e); }
                 }
                 const newIndex = genesisConversation.length;
-                genesisConversation.push({ role: 'assistant', content: data.reply });
+                genesisConversation.push({ role: 'assistant', content: aiReplyText || '已更新设定数据。' });
                 if(aiReplyText.length > 0) appendMessage('assistant', aiReplyText, newIndex);
                 localStorage.setItem(GENESIS_CHAT_KEY, JSON.stringify(genesisConversation));
             }
@@ -355,13 +404,14 @@ document.addEventListener('DOMContentLoaded', () => {
         subChatHistory.scrollTop = subChatHistory.scrollHeight;
         try {
             const res = await fetch('/api/chat/deduce', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversation: subConversation })
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(buildChatPayload(subConversation, 8))
             });
             const data = await res.json();
             document.getElementById(loadingId)?.remove();
             if (data.success) {
-                subConversation.push({ role: 'assistant', content: data.reply });
-                appendSubMsg('assistant', data.reply);
+                const cleanedReply = stripFencedBlocks(data.reply) || data.reply;
+                subConversation.push({ role: 'assistant', content: cleanedReply });
+                appendSubMsg('assistant', cleanedReply);
             }
         } catch(e) { document.getElementById(loadingId)?.remove(); }
     }
@@ -388,7 +438,7 @@ document.addEventListener('DOMContentLoaded', () => {
             subConversation.push({ role: 'user', content: extractMsg });
             try {
                 const res = await fetch('/api/chat/deduce', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversation: subConversation })
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(buildChatPayload(subConversation, 8))
                 });
                 const data = await res.json();
                 if(data.success) {
@@ -1076,7 +1126,7 @@ if (btnTriggerHook) {
                     // 3. 发送给后端
                     const res = await fetch('/api/chat/deduce', {
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ conversation: rewriteConvo })
+                        body: JSON.stringify(buildChatPayload(rewriteConvo, 1))
                     });
                     const data = await res.json();
                     if (data.success) {
@@ -1133,7 +1183,7 @@ if (btnTriggerHook) {
             try {
                 const res = await fetch('/api/chat/deduce', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ conversation: extractConvo })
+                    body: JSON.stringify(buildChatPayload(extractConvo, 12))
                 });
                 const data = await res.json();
 if (data.success) {
@@ -1521,14 +1571,15 @@ if (data.success) {
                 // 4. 发送给主脑
                 const res = await fetch('/api/chat/deduce', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ conversation: payloadConvo })
+                    body: JSON.stringify(buildChatPayload(payloadConvo, 12))
                 });
                 const data = await res.json();
                 const loader = document.getElementById(loadingId);
                 if (loader) loader.remove();
                 if (data.success) {
-                    currentChapterChatHistory.push({ role: 'assistant', content: data.reply });
-                    appendChapMsg('assistant', data.reply);
+                    const cleanedReply = stripFencedBlocks(data.reply) || data.reply;
+                    currentChapterChatHistory.push({ role: 'assistant', content: cleanedReply });
+                    appendChapMsg('assistant', cleanedReply);
                     localStorage.setItem(`sop_v3_${PROJECT_ID}_${currentLocalContext.chapterId}`, JSON.stringify(currentChapterChatHistory));
                 }
             } catch (e) { document.getElementById(loadingId)?.remove(); }
