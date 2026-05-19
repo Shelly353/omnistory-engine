@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const urlParams = new URLSearchParams(window.location.search);
     const PROJECT_ID = urlParams.get('id');
     const GENESIS_CHAT_KEY = `genesis_chat_${PROJECT_ID}`;
+    const LATEST_BIBLE_KEY = `latest_bible_${PROJECT_ID}`;
 
     if (!PROJECT_ID) { alert("非法侵入！即将返回大厅。"); window.location.href = 'dashboard.html'; return; }
 
@@ -62,6 +63,28 @@ document.addEventListener('DOMContentLoaded', () => {
         const recent = conversation.slice(-recentLimit).map(cleanConversationMessage).filter(msg => msg.content);
         const memorySummary = buildMemorySummary(conversation.slice(0, -recentLimit));
         return { conversation: recent, memorySummary };
+    }
+
+    function buildGenesisChatPayload() {
+        return {
+            ...buildChatPayload(genesisConversation),
+            requirePanelJson: true
+        };
+    }
+
+    function saveLatestBible(bible) {
+        if (!bible) return;
+        localStorage.setItem(LATEST_BIBLE_KEY, JSON.stringify(bible));
+    }
+
+    function loadLatestBible() {
+        try {
+            const savedBible = localStorage.getItem(LATEST_BIBLE_KEY);
+            return savedBible ? JSON.parse(savedBible) : null;
+        } catch (e) {
+            console.warn('最新面板数据读取失败:', e);
+            return null;
+        }
     }
     
     // ==========================================
@@ -294,10 +317,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if(text.length > 0) appendMessage(msg.role, text, index);
         });
 
-        // 💥 关键修复 3：在历史渲染完毕后，强制用最后一次抓取到的数据，点亮右侧表单！
-        if (latestParsedBible) {
-            renderHumanPreview(latestParsedBible);
-        }
+        // 💥 面板数据独立于聊天历史保存，避免清理大 JSON 后丢失右侧实时表单。
+        if (latestParsedBible) saveLatestBible(latestParsedBible);
+        const bibleForPreview = latestParsedBible || loadLatestBible();
+        if (bibleForPreview) renderHumanPreview(bibleForPreview);
     }
 
     function appendMessage(role, text, index) {
@@ -327,7 +350,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const res = await fetch('/api/chat/deduce', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(buildChatPayload(genesisConversation))
+                body: JSON.stringify(buildGenesisChatPayload())
             });
             const data = await res.json();
             document.getElementById(loadingId)?.remove();
@@ -338,6 +361,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (jsonMatch) {
                     try {
                         const parsedBible = JSON.parse(jsonMatch[1]);
+                        saveLatestBible(parsedBible);
                         renderHumanPreview(parsedBible); 
                         aiReplyText = aiReplyText.replace(jsonMatch[0], '').trim();
                     } catch(e) { console.error("JSON实时解析失败:", e); }
