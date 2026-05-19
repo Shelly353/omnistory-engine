@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const MESSAGE_CONTENT_LIMIT = 3500;
     const WorkspaceMemory = window.OmniWorkspaceMemory;
     const stripFencedBlocks = WorkspaceMemory.stripFencedBlocks;
+    const limitText = WorkspaceMemory.limitText;
     const buildChatPayloadBase = WorkspaceMemory.buildChatPayload;
 
     function buildChatPayload(conversation, recentLimit = RECENT_CHAT_LIMIT) {
@@ -34,6 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function buildGenesisChatPayload() {
         return {
             ...buildChatPayload(genesisConversation),
+            currentBible: compactBibleForPrompt(getCurrentBibleSnapshot()),
             requirePanelJson: true
         };
     }
@@ -97,6 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnCancelPreview = document.getElementById('btn-cancel-preview');
     
     const btnSend = document.getElementById('btn-send-chat'); 
+    const btnRefreshPreview = document.getElementById('btn-refresh-preview');
     const btnConfirmCrystallize = document.getElementById('btn-confirm-crystallize');
     const btnSendSubChat = document.getElementById('btn-send-sub-chat');
     const btnCancelSubChat = document.getElementById('btn-cancel-sub-chat');
@@ -153,6 +156,77 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
     function renderHumanPreview(bible) {
         window.OmniWorkspacePreview.renderHumanPreview(humanPreviewContainer, bible);
+    }
+
+    function collectBibleFromPreview() {
+        return {
+            genre: document.getElementById('prev-genre') ? document.getElementById('prev-genre').value.trim() : "",
+            worldview: document.getElementById('prev-worldview') ? document.getElementById('prev-worldview').value.trim() : "",
+            rules: document.getElementById('prev-rules') ? document.getElementById('prev-rules').value.trim() : "",
+            characters: Array.from(document.querySelectorAll('.prev-char-item')).map(el => ({
+                name: el.querySelector('.char-name')?.value.trim() || "",
+                role: el.querySelector('.char-role')?.value.trim() || "",
+                faction: el.querySelector('.char-faction')?.value.trim() || "",
+                description: el.querySelector('.char-desc')?.value.trim() || "",
+                age: el.querySelector('.char-age')?.value.trim() || "",
+                appearance: el.querySelector('.char-app')?.value.trim() || "",
+                profession: el.querySelector('.char-prof')?.value.trim() || "",
+                personality: el.querySelector('.char-pers')?.value.trim() || "",
+                core_desire: el.querySelector('.char-desire')?.value.trim() || "",
+                goal: el.querySelector('.char-goal')?.value.trim() || "",
+                motivation: el.querySelector('.char-motiv')?.value.trim() || "",
+                flaw: el.querySelector('.char-flaw')?.value.trim() || "",
+                fear: el.querySelector('.char-fear')?.value.trim() || "",
+                skills: el.querySelector('.char-skills')?.value.trim() || "",
+                background: el.querySelector('.char-bg')?.value.trim() || "",
+                character_arc: el.querySelector('.char-arc')?.value.trim() || "",
+            })).filter(c => c.name !== ""),
+            relations: Array.from(document.querySelectorAll('.prev-rel-item')).map(el => ({
+                from_name: el.querySelector('.rel-from')?.value.trim() || "",
+                to_name: el.querySelector('.rel-to')?.value.trim() || "",
+                label: el.querySelector('.rel-label')?.value.trim() || ""
+            })).filter(r => r.from_name !== "" && r.to_name !== ""),
+            timeline: Array.from(document.querySelectorAll('.prev-tl-item')).map(el => ({
+                time_label: el.querySelector('.tl-time')?.value.trim() || "",
+                chapter_number: parseFloat(el.querySelector('.tl-chap')?.value) || 1,
+                description: el.querySelector('.tl-desc')?.value.trim() || ""
+            })).filter(t => t.time_label !== ""),
+            narrative_logic: {
+                mode: document.getElementById('prev-narrative-mode') ? document.getElementById('prev-narrative-mode').value.trim() : "顺叙",
+                description: document.getElementById('prev-narrative-desc') ? document.getElementById('prev-narrative-desc').value.trim() : "",
+                presentation_order: Array.from(document.querySelectorAll('.prev-narrative-item')).map(el => ({
+                    order: parseFloat(el.querySelector('.nar-order')?.value) || 1,
+                    source_chapter_number: parseFloat(el.querySelector('.nar-source')?.value) || 1,
+                    title: el.querySelector('.nar-title')?.value.trim() || "",
+                    purpose: el.querySelector('.nar-purpose')?.value.trim() || "",
+                    transition: el.querySelector('.nar-transition')?.value.trim() || ""
+                })).filter(item => item.title !== "" || item.source_chapter_number)
+            },
+            chapters: Array.from(document.querySelectorAll('.prev-chap-item')).map(el => ({
+                chapter_number: parseFloat(el.querySelector('.chap-num')?.value) || 1,
+                title: el.querySelector('.chap-title')?.value.trim() || "",
+                content: el.querySelector('.chap-content')?.value.trim() || ""
+            })).filter(c => c.title !== "")
+        };
+    }
+
+    function getCurrentBibleSnapshot() {
+        if (document.getElementById('prev-genre')) return collectBibleFromPreview();
+        return loadLatestBible();
+    }
+
+    function compactBibleForPrompt(value) {
+        if (!value) return null;
+        if (typeof value === 'string') return limitText(value, 700);
+        if (Array.isArray(value)) return value.slice(0, 80).map(item => compactBibleForPrompt(item));
+        if (typeof value === 'object') {
+            return Object.fromEntries(
+                Object.entries(value)
+                    .filter(([, entryValue]) => entryValue !== '' && entryValue !== null && entryValue !== undefined)
+                    .map(([key, entryValue]) => [key, compactBibleForPrompt(entryValue)])
+            );
+        }
+        return value;
     }
 
   // ==========================================
@@ -358,60 +432,51 @@ document.addEventListener('DOMContentLoaded', () => {
         return window.OmniWorkspaceCloud.syncToCloud(PROJECT_ID, dataType, payload);
     };
 
+    if (btnRefreshPreview) {
+        btnRefreshPreview.onclick = async () => {
+            const originalHtml = btnRefreshPreview.innerHTML;
+            btnRefreshPreview.disabled = true;
+            btnRefreshPreview.innerHTML = `<i data-lucide="loader" class="w-3.5 h-3.5 mr-1.5 animate-spin"></i>提取中...`;
+            if (window.lucide) lucide.createIcons();
+
+            try {
+                const payload = buildChatPayload(genesisConversation, 16);
+                const currentBible = compactBibleForPrompt(getCurrentBibleSnapshot());
+                const extractionConversation = [
+                    currentBible ? { role: 'system', content: `【当前面板数据】\n${JSON.stringify(currentBible)}` } : null,
+                    payload.memorySummary ? { role: 'system', content: `【较早对话摘要】\n${payload.memorySummary}` } : null,
+                    ...payload.conversation,
+                    { role: 'user', content: '请根据当前面板数据与最近对话，提取并合并最新共识，输出完整世界圣经 JSON。用户后续通过对话否定或修改过的低质量人物/事件必须被替换，不要保留旧版本。' }
+                ].filter(Boolean);
+
+                const res = await fetch('/api/crystallize/preview', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ conversation: extractionConversation })
+                });
+                const data = await res.json();
+
+                if (!data.success) throw new Error(data.error || '提取失败');
+                saveLatestBible(data.bible);
+                renderHumanPreview(data.bible);
+                alert('✅ 已根据当前对话刷新右侧面板。');
+            } catch (e) {
+                console.error('手动刷新面板失败:', e);
+                alert('刷新面板失败：' + e.message);
+            } finally {
+                btnRefreshPreview.disabled = false;
+                btnRefreshPreview.innerHTML = originalHtml;
+                if (window.lucide) lucide.createIcons();
+            }
+        };
+    }
+
     // ==========================================
     // 💥 抓取全息 12 维数据入库 💥
     // ==========================================
     if (btnConfirmCrystallize) {
         btnConfirmCrystallize.addEventListener('click', async () => {
-            let finalBible = {
-                genre: document.getElementById('prev-genre') ? document.getElementById('prev-genre').value.trim() : "",
-                worldview: document.getElementById('prev-worldview') ? document.getElementById('prev-worldview').value.trim() : "",
-                rules: document.getElementById('prev-rules') ? document.getElementById('prev-rules').value.trim() : "",
-                characters: Array.from(document.querySelectorAll('.prev-char-item')).map(el => ({
-                    name: el.querySelector('.char-name')?.value.trim() || "",
-                    role: el.querySelector('.char-role')?.value.trim() || "",
-                    faction: el.querySelector('.char-faction')?.value.trim() || "",
-                    description: el.querySelector('.char-desc')?.value.trim() || "",
-                    age: el.querySelector('.char-age')?.value.trim() || "",
-                    appearance: el.querySelector('.char-app')?.value.trim() || "",
-                    profession: el.querySelector('.char-prof')?.value.trim() || "",
-                    personality: el.querySelector('.char-pers')?.value.trim() || "",
-                    core_desire: el.querySelector('.char-desire')?.value.trim() || "",
-                    goal: el.querySelector('.char-goal')?.value.trim() || "",
-                    motivation: el.querySelector('.char-motiv')?.value.trim() || "",
-                    flaw: el.querySelector('.char-flaw')?.value.trim() || "",
-                    fear: el.querySelector('.char-fear')?.value.trim() || "",
-                    skills: el.querySelector('.char-skills')?.value.trim() || "",
-                    background: el.querySelector('.char-bg')?.value.trim() || "",
-                    character_arc: el.querySelector('.char-arc')?.value.trim() || "",
-                })).filter(c => c.name !== ""),
-                relations: Array.from(document.querySelectorAll('.prev-rel-item')).map(el => ({
-                    from_name: el.querySelector('.rel-from')?.value.trim() || "",
-                    to_name: el.querySelector('.rel-to')?.value.trim() || "",
-                    label: el.querySelector('.rel-label')?.value.trim() || ""
-                })).filter(r => r.from_name !== "" && r.to_name !== ""),
-                timeline: Array.from(document.querySelectorAll('.prev-tl-item')).map(el => ({
-                    time_label: el.querySelector('.tl-time')?.value.trim() || "",
-                    chapter_number: parseFloat(el.querySelector('.tl-chap')?.value) || 1,
-                    description: el.querySelector('.tl-desc')?.value.trim() || ""
-                })).filter(t => t.time_label !== ""),
-                narrative_logic: {
-                    mode: document.getElementById('prev-narrative-mode') ? document.getElementById('prev-narrative-mode').value.trim() : "顺叙",
-                    description: document.getElementById('prev-narrative-desc') ? document.getElementById('prev-narrative-desc').value.trim() : "",
-                    presentation_order: Array.from(document.querySelectorAll('.prev-narrative-item')).map(el => ({
-                        order: parseFloat(el.querySelector('.nar-order')?.value) || 1,
-                        source_chapter_number: parseFloat(el.querySelector('.nar-source')?.value) || 1,
-                        title: el.querySelector('.nar-title')?.value.trim() || "",
-                        purpose: el.querySelector('.nar-purpose')?.value.trim() || "",
-                        transition: el.querySelector('.nar-transition')?.value.trim() || ""
-                    })).filter(item => item.title !== "" || item.source_chapter_number)
-                },
-                chapters: Array.from(document.querySelectorAll('.prev-chap-item')).map(el => ({
-                    chapter_number: parseFloat(el.querySelector('.chap-num')?.value) || 1,
-                    title: el.querySelector('.chap-title')?.value.trim() || "",
-                    content: el.querySelector('.chap-content')?.value.trim() || ""
-                })).filter(c => c.title !== "")
-            };
+            let finalBible = collectBibleFromPreview();
 
             btnConfirmCrystallize.disabled = true;
             btnConfirmCrystallize.innerHTML = `<i data-lucide="loader" class="w-4 h-4 animate-spin mr-1 inline"></i>铸造中...`;

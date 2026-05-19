@@ -112,7 +112,14 @@ router.post('/preview', async (req, res) => {
         if (result.error) throw new Error(result.error.message);
 
         let jsonStr = result.choices[0].message.content.trim();
-        if (jsonStr.startsWith("```json")) jsonStr = jsonStr.replace(/^```json/, "").replace(/```$/, "").trim();
+        const fencedMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+        if (fencedMatch) {
+            jsonStr = fencedMatch[1].trim();
+        } else {
+            const start = jsonStr.indexOf('{');
+            const end = jsonStr.lastIndexOf('}');
+            if (start !== -1 && end !== -1 && end > start) jsonStr = jsonStr.slice(start, end + 1);
+        }
         
         const bible = JSON.parse(jsonStr);
         res.json({ success: true, bible });
