@@ -21,6 +21,10 @@ app.get('/api/health', (req, res) => {
     res.json({ status: 'Engine V2 is Online', version: '2.0.0' });
 });
 
+app.get('/', (req, res) => {
+    res.status(200).send('OmniStory Engine V2 is Online');
+});
+
 // 👇 确保这两行存在且没有被 // 注释掉！
 app.use('/api/projects', require('./routes/projects'));
 app.use('/api/chat', require('./routes/chat'));
@@ -41,9 +45,16 @@ app.use((err, req, res, next) => {
 // 未来这里会挂载 projects.js, ai.js 等等...
 
 // 4. 启动引擎
-app.listen(PORT, HOST, () => {
+const server = app.listen(Number(PORT), HOST, () => {
+    const address = server.address();
     console.log(`\n=========================================`);
     console.log(`🚀 OmniStory Engine V2 is ALIVE!`);
     console.log(`🌌 宇宙大厅入口: http://${HOST}:${PORT}/dashboard.html`);
+    console.log(`🔌 Listening address: ${JSON.stringify(address)}`);
     console.log(`=========================================\n`);
+});
+
+server.on('error', (error) => {
+    console.error('❌ Server failed to listen:', error);
+    process.exit(1);
 });
