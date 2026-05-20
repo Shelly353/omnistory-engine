@@ -101,7 +101,7 @@ router.post('/preview', async (req, res) => {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}` },
             body: JSON.stringify({
-                model: "deepseek-chat",
+                model: "deepseek-v4-prot",
                 // 提示词已由前端 prompts.js 在对话开头注入，这里只需极简系统音
                 messages: [{ role: "system", content: "你是一个严格的JSON提取器。请提取对话中的设定，必须包含 genre、worldview、rules、characters、relations、timeline、narrative_logic、chapters；narrative_logic 需要包含 mode、description、presentation_order。" }, { role: "user", content: userContent }],
                 temperature: 0.1 
