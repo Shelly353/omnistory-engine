@@ -91,6 +91,47 @@ function getOrderedChapters(bible = {}) {
 }
 
 // 🔍 阶段一：预览提取
+router.get('/snapshot/:projectId', async (req, res) => {
+    const { projectId } = req.params;
+    try {
+        const { data: project, error: pErr } = await supabase.from('projects').select('*').eq('id', projectId).single();
+        if (pErr) throw pErr;
+
+        const { data: characters } = await supabase.from('characters').select('*').eq('project_id', projectId).order('created_at', { ascending: true });
+        const { data: relations } = await supabase.from('character_relations').select('*').eq('project_id', projectId);
+        const { data: timeline } = await supabase.from('timeline_events').select('*').eq('project_id', projectId).order('chapter_number', { ascending: true });
+        const { data: chapters } = await supabase.from('chapters').select('chapter_number, title, content').eq('project_id', projectId).order('chapter_number', { ascending: true });
+
+        const charMap = new Map((characters || []).map(c => [c.id, c.name]));
+        const bible = {
+            genre: project.genre || '',
+            worldview: project.worldview || '',
+            rules: project.rules || '',
+            characters: characters || [],
+            relations: (relations || []).map(rel => ({
+                from_name: charMap.get(rel.from_char_id) || '',
+                to_name: charMap.get(rel.to_char_id) || '',
+                label: rel.label || ''
+            })).filter(rel => rel.from_name && rel.to_name),
+            timeline: (timeline || []).map(item => ({
+                time_label: item.time_label || '',
+                chapter_number: item.chapter_number || 1,
+                description: item.description || ''
+            })),
+            narrative_logic: {},
+            chapters: (chapters || []).map(ch => ({
+                chapter_number: ch.chapter_number || 1,
+                title: ch.title || '',
+                content: ch.content || ''
+            }))
+        };
+
+        res.json({ success: true, bible });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 router.post('/preview', async (req, res) => {
     const { conversation } = req.body;
     try {

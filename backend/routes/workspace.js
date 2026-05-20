@@ -7,6 +7,70 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+const CLOUD_STATE_TABLE = 'workspace_cloud_state';
+const CLOUD_STATE_SETUP_SQL = `create table if not exists public.workspace_cloud_state (
+  project_id uuid not null,
+  data_type text not null,
+  payload jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now(),
+  primary key (project_id, data_type)
+);`;
+
+function isMissingCloudStateTable(error) {
+    return error && (error.code === '42P01' || String(error.message || '').includes(CLOUD_STATE_TABLE));
+}
+
+// 0. 跨设备工作区快照：保存
+router.post('/cloud-sync', async (req, res) => {
+    const { projectId, type = 'default', data = {} } = req.body;
+    if (!projectId) return res.status(400).json({ success: false, error: '缺少 projectId' });
+
+    try {
+        const { error } = await supabase.from(CLOUD_STATE_TABLE).upsert({
+            project_id: projectId,
+            data_type: type,
+            payload: data,
+            updated_at: new Date().toISOString()
+        }, { onConflict: 'project_id,data_type' });
+
+        if (error) {
+            if (isMissingCloudStateTable(error)) {
+                return res.status(501).json({ success: false, error: '云端快照表尚未创建', setupSql: CLOUD_STATE_SETUP_SQL });
+            }
+            throw error;
+        }
+
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 0. 跨设备工作区快照：读取
+router.get('/cloud-sync/:projectId', async (req, res) => {
+    const { projectId } = req.params;
+    const { type = 'default' } = req.query;
+
+    try {
+        const { data, error } = await supabase
+            .from(CLOUD_STATE_TABLE)
+            .select('payload, updated_at')
+            .eq('project_id', projectId)
+            .eq('data_type', type)
+            .maybeSingle();
+
+        if (error) {
+            if (isMissingCloudStateTable(error)) {
+                return res.status(501).json({ success: false, error: '云端快照表尚未创建', setupSql: CLOUD_STATE_SETUP_SQL });
+            }
+            throw error;
+        }
+
+        res.json({ success: true, payload: data?.payload || null, updated_at: data?.updated_at || null });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
 
 // 1. 获取大纲树
 router.get('/tree/:projectId', async (req, res) => {

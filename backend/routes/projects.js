@@ -34,6 +34,7 @@ router.delete('/:projectId', async (req, res) => {
         await supabase.from('chapters').delete().eq('project_id', projectId);
         await supabase.from('characters').delete().eq('project_id', projectId);
         await supabase.from('foreshadowing_hooks').delete().eq('project_id', projectId);
+        await supabase.from('workspace_cloud_state').delete().eq('project_id', projectId);
         
         // 最后删除宇宙主控记录
         const { error } = await supabase.from('projects').delete().eq('id', projectId);

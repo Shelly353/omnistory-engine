@@ -4,6 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const PROJECT_ID = urlParams.get('id');
     const GENESIS_CHAT_KEY = `genesis_chat_${PROJECT_ID}`;
     const LATEST_BIBLE_KEY = `latest_bible_${PROJECT_ID}`;
+    const GENESIS_CLOUD_TYPE = "上帝沙盒 · 创世圣经";
 
     if (!PROJECT_ID) { alert("非法侵入！即将返回大厅。"); window.location.href = 'dashboard.html'; return; }
 
@@ -314,6 +315,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 genesisConversation.push({ role: 'assistant', content: aiReplyText || '已更新设定数据。' });
                 if(aiReplyText.length > 0) appendMessage('assistant', aiReplyText, newIndex);
                 localStorage.setItem(GENESIS_CHAT_KEY, JSON.stringify(genesisConversation));
+                syncGenesisDraftToCloud();
             }
         } catch (error) { document.getElementById(loadingId)?.remove(); }
     }
@@ -332,6 +334,7 @@ document.addEventListener('DOMContentLoaded', () => {
             genesisConversation.push({ role: 'user', content: userMsgWithContext });
             appendMessage('user', text, newIndex);
             localStorage.setItem(GENESIS_CHAT_KEY, JSON.stringify(genesisConversation));
+            syncGenesisDraftToCloud();
             fetchChatResponse();
         };
     }
@@ -428,9 +431,64 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
     // ☁️ 独家云端神经元同步系统
     // ==========================================
-    window.syncToCloud = async (dataType, payload) => {
-        return window.OmniWorkspaceCloud.syncToCloud(PROJECT_ID, dataType, payload);
+    window.syncToCloud = async (dataType, payload, options = {}) => {
+        return window.OmniWorkspaceCloud.syncToCloud(PROJECT_ID, dataType, payload, options);
     };
+
+    async function syncGenesisDraftToCloud() {
+        if (genesisConversation.length === 0 && !getCurrentBibleSnapshot()) return;
+        await window.syncToCloud(GENESIS_CLOUD_TYPE, {
+            bible: getCurrentBibleSnapshot(),
+            chat: genesisConversation
+        }, { silent: true });
+    }
+
+    async function loadGenesisDraftFromCloud() {
+        try {
+            const res = await fetch(`/api/workspace/cloud-sync/${PROJECT_ID}?type=${encodeURIComponent(GENESIS_CLOUD_TYPE)}`);
+            if (!res.ok) return false;
+            const data = await res.json();
+            const payload = data.payload || null;
+            if (!data.success || !payload) return false;
+
+            if (Array.isArray(payload.chat) && payload.chat.length > 0) {
+                genesisConversation = payload.chat;
+                localStorage.setItem(GENESIS_CHAT_KEY, JSON.stringify(genesisConversation));
+            }
+            if (payload.bible) {
+                saveLatestBible(payload.bible);
+                renderHumanPreview(payload.bible);
+            }
+            if (genesisConversation.length > 0) renderChatHistory();
+            return genesisConversation.length > 0 || !!payload.bible;
+        } catch (e) {
+            console.warn('云端沙盒草稿恢复失败:', e);
+            return false;
+        }
+    }
+
+    async function loadBibleSnapshotFromDatabase() {
+        try {
+            const res = await fetch(`/api/crystallize/snapshot/${PROJECT_ID}`);
+            if (!res.ok) return false;
+            const data = await res.json();
+            if (!data.success || !data.bible) return false;
+
+            const hasBibleData = (data.bible.characters || []).length > 0
+                || (data.bible.timeline || []).length > 0
+                || (data.bible.chapters || []).length > 0
+                || data.bible.worldview
+                || data.bible.rules;
+
+            if (!hasBibleData) return false;
+            saveLatestBible(data.bible);
+            renderHumanPreview(data.bible);
+            return true;
+        } catch (e) {
+            console.warn('数据库圣经快照恢复失败:', e);
+            return false;
+        }
+    }
 
     if (btnRefreshPreview) {
         btnRefreshPreview.onclick = async () => {
@@ -459,6 +517,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!data.success) throw new Error(data.error || '提取失败');
                 saveLatestBible(data.bible);
                 renderHumanPreview(data.bible);
+                syncGenesisDraftToCloud();
                 alert('✅ 已根据当前对话刷新右侧面板。');
             } catch (e) {
                 console.error('手动刷新面板失败:', e);
@@ -489,7 +548,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await res.json();
 if (data.success) { 
                     // 💥 任务完成：静默将沙盒数据与聊天记录同步至云端
-                    await window.syncToCloud("上帝沙盒 · 创世圣经", { bible: finalBible, chat: genesisConversation });
+                    await window.syncToCloud(GENESIS_CLOUD_TYPE, { bible: finalBible, chat: genesisConversation });
                     alert("✨ 世界圣经已结晶并同步云端！"); 
                     window.location.reload(); 
                 }                else { alert("铸造入库失败: " + data.error); }
@@ -1433,7 +1492,7 @@ if (data.success) {
     // ==========================================
     // ⚙️ 引擎初始化
     // ==========================================
- function checkInitialConcept() {
+ async function checkInitialConcept() {
         // 1. 💥 无论本地有没有缓存记录，先强行设置顶部标题，并尝试从云端数据库拉取所有数据！
         if (document.getElementById('top-project-title')) {
             document.getElementById('top-project-title').innerText = "宇宙 ID: " + PROJECT_ID.slice(0,8);
@@ -1451,6 +1510,10 @@ if (data.success) {
             genesisConversation = JSON.parse(savedChat);
             renderChatHistory(); 
         } else {
+            const restoredFromCloud = await loadGenesisDraftFromCloud();
+            if (restoredFromCloud) return;
+            await loadBibleSnapshotFromDatabase();
+
             const initialConcept = localStorage.getItem(`genesis_initial_concept_${PROJECT_ID}`);
             if (initialConcept) {
                 // 如果是刚从大厅带来的新点子，打开遮罩进入创世推演
@@ -1460,6 +1523,7 @@ if (data.success) {
                 genesisConversation.push({ role: 'user', content: systemBootPrompt });
                 localStorage.setItem(GENESIS_CHAT_KEY, JSON.stringify(genesisConversation));
                 localStorage.removeItem(`genesis_initial_concept_${PROJECT_ID}`);
+                syncGenesisDraftToCloud();
                 fetchChatResponse();
             }
         }
