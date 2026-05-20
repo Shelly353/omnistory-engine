@@ -84,6 +84,29 @@
     </div>
 
     <script>
+        (() => {
+            const originalFetch = window.fetch.bind(window);
+            window.fetch = async (resource, options = {}) => {
+                const url = typeof resource === 'string' ? resource : resource?.url || '';
+                const isLocalApi = url.startsWith('/api/');
+                const token = localStorage.getItem('omnistory_access_token') || '';
+                const headers = new Headers(options.headers || {});
+
+                if (isLocalApi && token) headers.set('x-omnistory-token', token);
+
+                const response = await originalFetch(resource, { ...options, headers });
+                if (isLocalApi && response.status === 401) {
+                    const nextToken = prompt('请输入 OmniStory 访问口令：');
+                    if (nextToken) {
+                        localStorage.setItem('omnistory_access_token', nextToken.trim());
+                        headers.set('x-omnistory-token', nextToken.trim());
+                        return originalFetch(resource, { ...options, headers });
+                    }
+                }
+                return response;
+            };
+        })();
+
         const API_BASE = '/api';
         const universeGrid = document.getElementById('universe-grid');
         const creationModal = document.getElementById('creation-modal');

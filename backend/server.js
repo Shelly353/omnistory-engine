@@ -3,13 +3,24 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const { aiRateLimit, requireAiAccessToken, warnIfAiTokenMissing } = require('./security');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean);
 
 // 1. 中间件
-app.use(cors());
+app.set('trust proxy', 1);
+app.use(cors({
+    origin(origin, callback) {
+        if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return callback(null, true);
+        return callback(new Error('Not allowed by CORS'));
+    }
+}));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ limit: '2mb', extended: true }));
 
@@ -26,11 +37,12 @@ app.get('/', (req, res) => {
 });
 
 // 👇 确保这两行存在且没有被 // 注释掉！
-app.use('/api/projects', require('./routes/projects'));
-app.use('/api/chat', require('./routes/chat'));
-app.use('/api/crystallize', require('./routes/crystallize'));
-app.use('/api/workspace', require('./routes/workspace'));
-app.use('/api/ai', require('./routes/ai'));
+app.use('/api/projects', requireAiAccessToken, require('./routes/projects'));
+app.use('/api/workspace', requireAiAccessToken, require('./routes/workspace'));
+app.use('/api/chat', aiRateLimit, requireAiAccessToken, require('./routes/chat'));
+app.use('/api/crystallize/preview', aiRateLimit);
+app.use('/api/crystallize', requireAiAccessToken, require('./routes/crystallize'));
+app.use('/api/ai', aiRateLimit, requireAiAccessToken, require('./routes/ai'));
 
 app.use((err, req, res, next) => {
     if (err.type === 'entity.too.large') {
@@ -47,6 +59,7 @@ app.use((err, req, res, next) => {
 // 4. 启动引擎
 const server = app.listen(Number(PORT), HOST, () => {
     const address = server.address();
+    warnIfAiTokenMissing();
     console.log(`\n=========================================`);
     console.log(`🚀 OmniStory Engine V2 is ALIVE!`);
     console.log(`🌌 宇宙大厅入口: http://${HOST}:${PORT}/dashboard.html`);
