@@ -34,7 +34,7 @@ router.post('/deduce', async (req, res) => {
                 'Authorization': `Bearer ${DEEPSEEK_KEY}` 
             },
             body: JSON.stringify({
-                model: "deepseek-v4-pro",
+                model: "deepseek-v4-flash",
                 messages: messages,
                 temperature: 0.7
             })
