@@ -108,6 +108,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const localHooks = document.getElementById('local-hooks');
     const localSourceHooks = document.getElementById('local-source-hooks');
     const localCharacters = document.getElementById('local-characters');
+    const localEventScope = document.getElementById('local-event-scope');
+    const localDeviationPanel = document.getElementById('local-deviation-panel');
     const floatingToolbar = document.getElementById('floating-toolbar');
    const worldRulesContainer = document.getElementById('world-rules-container');
     
@@ -294,6 +296,83 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="text-[9px] text-gray-500 mt-1">发源于: 事件 ${hook.source_chapter_number || '-'} ${hook.target_chapter ? `➔ 爆发于: 事件 ${hook.target_chapter}` : ''}</div>
                 ${hook.annotation ? `<div class="text-[9px] text-gray-400 mt-1 leading-relaxed">注释: ${hook.annotation}</div>` : ''}
             </li>`;
+    }
+
+    function renderCompactInfo(label, text) {
+        return `<div class="bg-gray-900/70 border border-cyan-900/30 rounded p-2">
+            <div class="text-[10px] text-cyan-400 font-bold mb-1">${label}</div>
+            <div class="text-[11px] text-gray-300 whitespace-pre-wrap leading-relaxed">${text || '暂无'}</div>
+        </div>`;
+    }
+
+    function ensureAssetOverviewPanel() {
+        if (!assetModal || document.getElementById('asset-global-overview')) return;
+        const rightPane = assetModal.querySelector('.w-2\\/3');
+        if (!rightPane) return;
+        rightPane.insertAdjacentHTML('afterbegin', `
+            <div id="asset-global-overview" class="mb-4 grid grid-cols-2 gap-3 text-xs">
+                <div class="bg-gray-950 border border-cyan-900/40 rounded-xl p-3 max-h-40 overflow-y-auto">
+                    <h4 class="text-cyan-400 font-bold mb-2 flex items-center"><i data-lucide="scroll" class="w-3 h-3 mr-1"></i>世界观与规则</h4>
+                    <div id="asset-worldview-rules" class="text-gray-300 whitespace-pre-wrap leading-relaxed"></div>
+                </div>
+                <div class="bg-gray-950 border border-amber-900/40 rounded-xl p-3 max-h-40 overflow-y-auto">
+                    <h4 class="text-amber-400 font-bold mb-2 flex items-center"><i data-lucide="anchor" class="w-3 h-3 mr-1"></i>伏笔设定</h4>
+                    <div id="asset-hooks-overview" class="text-gray-300 space-y-1.5"></div>
+                </div>
+                <div class="bg-gray-950 border border-indigo-900/40 rounded-xl p-3 max-h-40 overflow-y-auto col-span-2">
+                    <h4 class="text-indigo-400 font-bold mb-2 flex items-center"><i data-lucide="clock" class="w-3 h-3 mr-1"></i>时间轴</h4>
+                    <div id="asset-timeline-overview" class="text-gray-300 grid grid-cols-2 gap-2"></div>
+                </div>
+            </div>
+        `);
+        const saveButton = document.getElementById('btn-save-asset');
+        if (saveButton && !document.getElementById('asset-character-detail')) {
+            saveButton.insertAdjacentHTML('beforebegin', `
+                <div id="asset-character-detail" class="bg-gray-950 border border-blue-900/30 rounded-xl p-3 text-xs text-gray-300 whitespace-pre-wrap leading-relaxed mb-4 max-h-52 overflow-y-auto">
+                    选择左侧角色后，这里会显示完整人物卡。
+                </div>
+            `);
+        }
+    }
+
+    async function loadGlobalAssetOverview() {
+        ensureAssetOverviewPanel();
+        const worldBox = document.getElementById('asset-worldview-rules');
+        const hooksBox = document.getElementById('asset-hooks-overview');
+        const timelineBox = document.getElementById('asset-timeline-overview');
+
+        try {
+            const [projectRes, hooksRes, timelineRes] = await Promise.all([
+                fetch(`/api/projects/${PROJECT_ID}`),
+                fetch(`/api/workspace/hooks/${PROJECT_ID}`),
+                fetch(`/api/workspace/timeline/${PROJECT_ID}`)
+            ]);
+            const [projectData, hooksData, timelineData] = await Promise.all([
+                projectRes.ok ? projectRes.json() : Promise.resolve({}),
+                hooksRes.ok ? hooksRes.json() : Promise.resolve({ hooks: [] }),
+                timelineRes.ok ? timelineRes.json() : Promise.resolve({ events: [] })
+            ]);
+
+            if (worldBox) {
+                const project = projectData.project || {};
+                worldBox.textContent = [`【世界观】\n${project.worldview || '暂无'}`, `【规则限制】\n${project.rules || '暂无'}`].join('\n\n');
+            }
+            if (hooksBox) {
+                const hooks = hooksData.hooks || [];
+                hooksBox.innerHTML = hooks.length > 0
+                    ? hooks.map(h => `<div class="border border-gray-800 rounded p-2"><span class="text-amber-300 font-bold">事件 ${h.source_chapter_number || '-'} -> ${h.target_chapter || '-'}</span><br>${h.description || ''}</div>`).join('')
+                    : `<div class="text-gray-500 italic">暂无伏笔设定</div>`;
+            }
+            if (timelineBox) {
+                const events = timelineData.events || [];
+                timelineBox.innerHTML = events.length > 0
+                    ? events.map(ev => `<div class="border border-gray-800 rounded p-2"><span class="text-indigo-300 font-bold">${ev.time_label || '未标记时间'} / 事件 ${ev.chapter_number}</span><br>${ev.description || ''}</div>`).join('')
+                    : `<div class="text-gray-500 italic">暂无时间轴事件</div>`;
+            }
+            if (window.lucide) lucide.createIcons();
+        } catch (e) {
+            console.error("加载全局资产总览失败:", e);
+        }
     }
 
   // ==========================================
@@ -636,14 +715,19 @@ if (data.success) {
                 const assetCharacterList = document.getElementById('asset-character-list');
                 if (assetCharacterList) {
                     assetCharacterList.innerHTML = data.characters.map(c => `
-                        <li class="cursor-pointer p-2 bg-gray-950 hover:bg-gray-800 rounded-lg mb-2 flex justify-between items-center group" onclick="editCharacter('${c.id}')">
-                            <span class="text-xs font-bold group-hover:text-blue-400">${c.name}</span>
-                            <i data-lucide="chevron-right" class="w-3 h-3 text-gray-600"></i>
+                        <li class="cursor-pointer p-2 bg-gray-950 hover:bg-gray-800 rounded-lg mb-2 group" onclick="editCharacter('${c.id}')">
+                            <div class="flex justify-between items-center">
+                                <span class="text-xs font-bold group-hover:text-blue-400">${c.name}</span>
+                                <i data-lucide="chevron-right" class="w-3 h-3 text-gray-600"></i>
+                            </div>
+                            <div class="text-[10px] text-gray-500 mt-1 truncate">${c.role || '定位未定'} · ${c.faction || '阵营未定'}</div>
+                            <div class="text-[10px] text-gray-600 mt-1 line-clamp-2">${c.description || '暂无简介'}</div>
                         </li>
                     `).join('');
                 }
                 if(window.lucide) lucide.createIcons();
             }
+            loadGlobalAssetOverview();
         } catch (e) { }
     }
 
@@ -783,53 +867,81 @@ if (data.success) {
         } catch (e) { alert('移出角色失败'); }
     };
 
-    // 💥 终极升级版：添加/新建本章登场角色
+    async function linkCharacterToCurrentChapter(characterId) {
+        const res = await fetch(`/api/workspace/context/character`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chapterId: currentLocalContext.chapterId, characterId })
+        });
+        const data = await res.json();
+        if (!data.success) {
+            if (data.setupSql) console.warn("章节人物关联表待创建 SQL:", data.setupSql);
+            alert(data.error || '拉入本章失败！');
+            return false;
+        }
+        loadChapterContext(currentLocalContext.chapterId, currentLocalContext.chapterNumber, currentLocalContext.title);
+        return true;
+    }
+
+    function ensureCharacterPickerModal() {
+        let modal = document.getElementById('character-picker-modal');
+        if (modal) return modal;
+        document.body.insertAdjacentHTML('beforeend', `
+            <div id="character-picker-modal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-[80] hidden flex items-center justify-center p-6">
+                <div class="bg-gray-900 border border-blue-500/50 rounded-2xl p-6 w-full max-w-2xl max-h-[80vh] shadow-2xl flex flex-col">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-bold text-white flex items-center"><i data-lucide="user-plus" class="w-5 h-5 mr-2 text-blue-400"></i>选择本章登场角色</h3>
+                        <button id="btn-close-character-picker" class="text-gray-500 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+                    </div>
+                    <div id="character-picker-list" class="grid grid-cols-2 gap-3 overflow-y-auto pr-1"></div>
+                    <div class="mt-4 border-t border-gray-800 pt-4 flex gap-2">
+                        <input id="new-local-character-name" class="flex-1 bg-gray-950 border border-gray-700 rounded-lg p-2 text-sm text-white" placeholder="全局资产没有这个人时，可在这里新建角色名">
+                        <button id="btn-create-and-link-character" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-lg">新建并拉入</button>
+                    </div>
+                </div>
+            </div>
+        `);
+        modal = document.getElementById('character-picker-modal');
+        document.getElementById('btn-close-character-picker').onclick = () => modal.classList.add('hidden');
+        document.getElementById('btn-create-and-link-character').onclick = async () => {
+            const name = document.getElementById('new-local-character-name').value.trim();
+            if (!name) return alert("请先输入角色名");
+            const res = await fetch('/api/workspace/character', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ projectId: PROJECT_ID, name, role: "新角色", faction: "待定", description: "推演中途临时加入，请及时补充设定。" })
+            });
+            const data = await res.json();
+            if (!data.success) return alert('新建全局角色失败！');
+            await loadGlobalAssets();
+            const created = (window.globalCharacters || []).find(c => c.name === name);
+            if (created && await linkCharacterToCurrentChapter(created.id)) modal.classList.add('hidden');
+        };
+        if (window.lucide) lucide.createIcons();
+        return modal;
+    }
+
+    // 💥 添加/新建本章登场角色：从全局资产选择，不再手输猜名字
     window.addLocalChar = async () => {
-        const target = prompt(`请输入要在本事件中登场的角色名（如：小师妹）：\n如果全局库没有此人，系统会自动为您新建！`);
-        if (!target) return;
+        if (!currentLocalContext.chapterId) return alert("请先选择一个事件！");
+        if (!window.globalCharacters || window.globalCharacters.length === 0) await loadGlobalAssets();
+        const modal = ensureCharacterPickerModal();
+        const list = document.getElementById('character-picker-list');
+        const activeIds = new Set((currentLocalContext.characters || []).map(c => c.id));
+        const candidates = (window.globalCharacters || []).filter(c => !activeIds.has(c.id));
+        list.innerHTML = candidates.length > 0 ? candidates.map(c => `
+            <button class="text-left bg-gray-950 hover:bg-blue-950/40 border border-gray-800 hover:border-blue-600 rounded-xl p-3 transition" onclick="selectLocalCharacter('${c.id}')">
+                <div class="text-sm font-bold text-blue-300">${c.name}</div>
+                <div class="text-[10px] text-gray-500 mt-0.5">${c.role || '未设定定位'} · ${c.faction || '阵营未定'}</div>
+                <div class="text-[11px] text-gray-400 mt-2 line-clamp-2">${c.description || '暂无简介'}</div>
+            </button>
+        `).join('') : `<div class="col-span-2 text-gray-500 italic text-sm">全局资产里没有可拉入的新角色。</div>`;
+        document.getElementById('new-local-character-name').value = "";
+        modal.classList.remove('hidden');
+        if (window.lucide) lucide.createIcons();
+    };
 
-        let gc = (window.globalCharacters || []).find(c => c.name === target);
-
-        // 如果全局资产库里根本没有这个人，触发“无缝新建”逻辑
-        if (!gc) {
-            if (confirm(`⚠️ 全局库中尚未建立【${target}】的档案。是否立刻为你凭空创造此角色并拉入本章？`)) {
-                try {
-                    // 1. 静默请求后端，在全局库新建该角色
-                    const resChar = await fetch('/api/workspace/character', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        // 给予默认的临时设定，稍后用户可以在右侧人物面板展开编辑
-                        body: JSON.stringify({ projectId: PROJECT_ID, name: target, role: "新角色", faction: "待定", description: "推演中途临时加入，请及时补充设定。" })
-                    });
-                    const dataChar = await resChar.json();
-                    if (dataChar.success) {
-                        // 2. 拿到新建好的角色基因，并刷新本地全局资产池
-                        await loadGlobalAssets();
-                        gc = window.globalCharacters.find(c => c.name === target);
-                    } else {
-                        return alert('新建全局角色失败！');
-                    }
-                } catch (e) { return alert('网络异常，无法创造角色！'); }
-            } else {
-                return; // 用户取消了新建
-            }
-        }
-
-        // 3. 此时角色绝对存在了（无论是旧的还是刚新建的），正式将他/她拉入当前事件！
-        if (gc) {
-            try {
-                const res = await fetch(`/api/workspace/context/character`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chapterId: currentLocalContext.chapterId, characterId: gc.id })
-                });
-                const data = await res.json();
-                if (!data.success) {
-                    if (data.setupSql) console.warn("章节人物关联表待创建 SQL:", data.setupSql);
-                    return alert(data.error || '拉入本章失败！');
-                }
-                // 重新加载本章数据，右侧马上就会长出这个新人物的 12 维卡片！
-                loadChapterContext(currentLocalContext.chapterId, currentLocalContext.chapterNumber, currentLocalContext.title);
-            } catch (e) { alert('拉入本章失败！'); }
-        }
+    window.selectLocalCharacter = async (characterId) => {
+        const modal = document.getElementById('character-picker-modal');
+        if (await linkCharacterToCurrentChapter(characterId)) modal?.classList.add('hidden');
     };
 
     window.jumpToSourceChapter = (chapNum) => {
@@ -881,6 +993,23 @@ if (data.success) {
                     sourceHooks.length > 0 ? `已种下：${sourceHooks.map(h => h.description).join('；')}` : ''
                 ].filter(Boolean).join('\n') || '暂无指定暗线';
                 const worldRules = getWorldRulesText();
+                if (localEventScope) {
+                    localEventScope.innerHTML = [
+                        renderCompactInfo('开始事件', eventContext.startInfo),
+                        renderCompactInfo('结束事件', eventContext.endInfo),
+                        renderCompactInfo('本章可调用角色', charNames),
+                        targetHooks.length > 0 ? renderCompactInfo('本章必须回应的伏笔事件', targetHooks.map(h => `事件 ${h.source_chapter_number || '-'} -> ${h.target_chapter || '-'}：${h.description}`).join('\n')) : ''
+                    ].filter(Boolean).join('');
+                }
+                if (localDeviationPanel) {
+                    const warnings = [];
+                    if (!worldRules || worldRules === '无特殊限制') warnings.push('世界观/规则限制尚未入库，AI 校验会变弱。');
+                    if (!data.characters || data.characters.length === 0) warnings.push('本章尚未绑定可调用角色，人物行为容易发散。');
+                    if (targetHooks.length > 0) warnings.push(`本章有 ${targetHooks.length} 个伏笔必须回收，SOP 和正文需逐一回应。`);
+                    localDeviationPanel.innerHTML = warnings.length > 0
+                        ? warnings.map(w => `<div class="bg-yellow-950/20 border border-yellow-900/30 rounded p-2">${w}</div>`).join('')
+                        : `<div class="bg-emerald-950/20 border border-emerald-900/30 rounded p-2 text-emerald-300">当前未发现明显设定偏离风险。</div>`;
+                }
                 const aiGreeting = window.OmniPrompts?.chapterSopIntro
                     ? window.OmniPrompts.chapterSopIntro(chapterNumber, title, eventContext.endInfo, charNames)
                     : `【写作 SOP 推演启动】\n开始事件：${eventContext.startInfo}\n结束事件：${eventContext.endInfo}\n请先说明两者之间缺失的关键因果细节。`;
@@ -893,7 +1022,7 @@ if (data.success) {
                     const savedFirstMsg = currentChapterChatHistory[0]?.content || '';
                     if (
                         currentChapterChatHistory.length === 1 &&
-                        (savedFirstMsg.includes('已成功锁定') || savedFirstMsg.includes('【写作 SOP 推演启动】') || savedFirstMsg.includes('【写作 SOP 推演后台指令】'))
+                        (savedFirstMsg.includes('已成功锁定') || savedFirstMsg.includes('【写作 SOP 推演启动】') || savedFirstMsg.includes('【写作 SOP 推演后台指令】') || savedFirstMsg.startsWith('我们先从事件'))
                     ) {
                         currentChapterChatHistory = [{ role: 'assistant', content: aiGreeting }];
                         localStorage.setItem(localSopKey, JSON.stringify(currentChapterChatHistory));
@@ -1073,6 +1202,27 @@ if (data.success) {
             document.getElementById('asset-char-role').value = char.role || "";
             document.getElementById('asset-char-faction').value = char.faction || "";
             document.getElementById('asset-char-desc').value = char.description || "";
+            const detail = document.getElementById('asset-character-detail');
+            if (detail) {
+                detail.textContent = [
+                    `【姓名】${char.name || '-'}`,
+                    `【定位】${char.role || '-'}`,
+                    `【阵营】${char.faction || '-'}`,
+                    `【年龄】${char.age || '-'}`,
+                    `【外貌】${char.appearance || '-'}`,
+                    `【职业】${char.profession || '-'}`,
+                    `【性格】${char.personality || '-'}`,
+                    `【核心欲望】${char.core_desire || '-'}`,
+                    `【目标】${char.goal || '-'}`,
+                    `【动机】${char.motivation || '-'}`,
+                    `【缺陷】${char.flaw || '-'}`,
+                    `【恐惧】${char.fear || '-'}`,
+                    `【能力/技能】${char.skills || '-'}`,
+                    `【背景】${char.background || '-'}`,
+                    `【成长弧光】${char.character_arc || '-'}`,
+                    `【简介】${char.description || '-'}`
+                ].join('\n');
+            }
         }
     };
 
@@ -1131,7 +1281,7 @@ if (data.success) {
     if (btnOpenRelation) btnOpenRelation.addEventListener('click', () => { if(relationModal) relationModal.classList.remove('hidden'); setTimeout(renderRelationGraph, 100); });
     if (btnCloseRelation) btnCloseRelation.addEventListener('click', () => { if(relationModal) relationModal.classList.add('hidden');});
 
-    if (btnOpenAssetModal) btnOpenAssetModal.addEventListener('click', () => { loadGlobalAssets(); if(assetModal) assetModal.classList.remove('hidden'); });
+    if (btnOpenAssetModal) btnOpenAssetModal.addEventListener('click', () => { loadGlobalAssets(); loadGlobalAssetOverview(); if(assetModal) assetModal.classList.remove('hidden'); });
     if (btnCloseAssetModal) btnCloseAssetModal.addEventListener('click', () => { if(assetModal) assetModal.classList.add('hidden');});
 
     if (btnAddChapter) btnAddChapter.addEventListener('click', () => { if(addChapterModal) addChapterModal.classList.remove('hidden'); });
@@ -1697,7 +1847,8 @@ if (data.success) {
 5. 主动提出【可种植伏笔】和【需要回收伏笔】：说明种下位置、回收位置、误导/信息差作用、回收方式，以及如果不回收会造成的逻辑断裂。
 6. 当作者说“推演差不多了”或“开始总结”时，先确认这段内容分成几章，再生成每章标题与详细摘要；每章必须列出可种植伏笔/需回收伏笔。
 7. 结束事件将成为下一部分的开始，结尾衔接必须清楚。
-8. 只能使用下方【可调用人物卡】中的角色来推导行为；不要查阅、调用或主动引入无关人物，除非作者明确要求新增角色。`;
+8. 只能使用下方【可调用人物卡】中的角色来推导行为；不要查阅、调用或主动引入无关人物，除非作者明确要求新增角色。
+9. 每次回复最后必须给作者 2-4 个可直接选择或改写的输入方向，例如“选 A/B/C”“补充某角色动机”“指定一个必须发生的事件”。禁止只说“你觉得呢”。`;
 
                 // 3. 把私货、工作流、防 OOC 指令、伏笔全塞进最后一句话里发给 AI！
                 let lastUserMsg = payloadConvo[payloadConvo.length - 1];

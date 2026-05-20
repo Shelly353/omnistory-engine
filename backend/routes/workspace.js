@@ -222,6 +222,18 @@ router.post('/hook', async (req, res) => {
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
+router.get('/hooks/:projectId', async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('foreshadowing_hooks')
+            .select('*')
+            .eq('project_id', req.params.projectId)
+            .order('source_chapter_number', { ascending: true });
+        if (error) throw error;
+        res.json({ success: true, hooks: data || [] });
+    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
 // 6. 全局资产：获取角色
 router.get('/characters/:projectId', async (req, res) => {
     try {
