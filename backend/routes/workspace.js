@@ -15,9 +15,25 @@ const CLOUD_STATE_SETUP_SQL = `create table if not exists public.workspace_cloud
   updated_at timestamptz not null default now(),
   primary key (project_id, data_type)
 );`;
+const CHAPTER_CHARACTER_TABLE = 'chapter_characters';
+const CHAPTER_CHARACTER_SETUP_SQL = `create table if not exists public.chapter_characters (
+  chapter_id uuid not null,
+  character_id uuid not null,
+  created_at timestamptz not null default now(),
+  primary key (chapter_id, character_id)
+);`;
 
 function isMissingCloudStateTable(error) {
     return error && (error.code === '42P01' || String(error.message || '').includes(CLOUD_STATE_TABLE));
+}
+
+function isMissingChapterCharacterTable(error) {
+    return error && (error.code === '42P01' || String(error.message || '').includes(CHAPTER_CHARACTER_TABLE));
+}
+
+function textMentionsCharacter(text, characterName) {
+    if (!text || !characterName) return false;
+    return String(text).includes(String(characterName));
 }
 
 // 0. 跨设备工作区快照：保存
@@ -88,7 +104,37 @@ router.post('/context', async (req, res) => {
         const { data: chapter, error: chapErr } = await supabase.from('chapters').select('*').eq('id', chapterId).single();
         if (chapErr) throw chapErr;
 
-        const { data: characters } = await supabase.from('characters').select('*').eq('project_id', projectId);
+        const { data: allCharacters, error: charErr } = await supabase.from('characters').select('*').eq('project_id', projectId);
+        if (charErr) throw charErr;
+
+        const { data: chapters } = await supabase
+            .from('chapters')
+            .select('id, chapter_number, title, content, content_text')
+            .eq('project_id', projectId)
+            .order('chapter_number', { ascending: true });
+        const sortedChapters = chapters || [];
+        const currentIndex = sortedChapters.findIndex(ch => Number(ch.chapter_number) === Number(chapterNumber));
+        const nextChapter = currentIndex >= 0 ? sortedChapters[currentIndex + 1] : null;
+        const eventScope = [chapter, nextChapter].filter(Boolean);
+
+        let linkedCharacterIds = new Set();
+        const scopedChapterIds = eventScope.map(ch => ch.id).filter(Boolean);
+        if (scopedChapterIds.length > 0) {
+            const { data: links, error: linkErr } = await supabase
+                .from(CHAPTER_CHARACTER_TABLE)
+                .select('character_id')
+                .in('chapter_id', scopedChapterIds);
+            if (linkErr && !isMissingChapterCharacterTable(linkErr)) throw linkErr;
+            linkedCharacterIds = new Set((links || []).map(link => link.character_id));
+        }
+
+        const eventText = eventScope
+            .map(ch => [ch.title, ch.content, ch.content_text].filter(Boolean).join('\n'))
+            .join('\n');
+        const characters = (allCharacters || []).filter(char =>
+            linkedCharacterIds.has(char.id) || textMentionsCharacter(eventText, char.name)
+        );
+
         const { data: hooks } = await supabase
             .from('foreshadowing_hooks')
             .select('*')
@@ -97,6 +143,48 @@ router.post('/context', async (req, res) => {
             .order('target_chapter', { ascending: true });
 
         res.json({ success: true, chapter, characters: characters || [], hooks: hooks || [] });
+    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+router.post('/context/character', async (req, res) => {
+    const { chapterId, characterId } = req.body;
+    if (!chapterId || !characterId) return res.status(400).json({ success: false, error: '缺少 chapterId 或 characterId' });
+
+    try {
+        const { error } = await supabase.from(CHAPTER_CHARACTER_TABLE).upsert({
+            chapter_id: chapterId,
+            character_id: characterId
+        }, { onConflict: 'chapter_id,character_id' });
+
+        if (error) {
+            if (isMissingChapterCharacterTable(error)) {
+                return res.status(501).json({ success: false, error: '章节人物关联表尚未创建', setupSql: CHAPTER_CHARACTER_SETUP_SQL });
+            }
+            throw error;
+        }
+
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+router.delete('/context/character/:chapterId/:characterId', async (req, res) => {
+    const { chapterId, characterId } = req.params;
+
+    try {
+        const { error } = await supabase
+            .from(CHAPTER_CHARACTER_TABLE)
+            .delete()
+            .eq('chapter_id', chapterId)
+            .eq('character_id', characterId);
+
+        if (error) {
+            if (isMissingChapterCharacterTable(error)) {
+                return res.status(501).json({ success: false, error: '章节人物关联表尚未创建', setupSql: CHAPTER_CHARACTER_SETUP_SQL });
+            }
+            throw error;
+        }
+
+        res.json({ success: true });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
