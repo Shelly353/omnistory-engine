@@ -44,7 +44,7 @@ ${currentText ? `【前文已写内容，请顺着情节继续往下写】:\n${c
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${DEEPSEEK_KEY}` },
             body: JSON.stringify({
-                model: "deepseek-v4-pro",
+                model: "deepseek-v4-flash",
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userContent }
@@ -95,7 +95,7 @@ router.post('/bridge-chapters', async (req, res) => {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}` },
             body: JSON.stringify({
-                model: "deepseek-chat",
+                model: "deepseek-v4-flash",
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userContent }
@@ -139,7 +139,7 @@ router.post('/extract-timeline', async (req, res) => {
                 'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}` 
             },
             body: JSON.stringify({
-                model: "deepseek-chat",
+                model: "deepseek-v4-flash",
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userContent }
