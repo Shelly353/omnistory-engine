@@ -37,6 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentSubChatTarget = ""; 
     let currentLocalContext = { chapterId: "", chapterNumber: "", title: "", synopsis: "", characters: [], hooks: [] };
     let relationNetwork = null;
+    let workspaceChapters = [];
     let saveTimeout;
     let currentSelectedString = "";
 
@@ -251,6 +252,32 @@ document.addEventListener('DOMContentLoaded', () => {
             );
         }
         return value;
+    }
+
+    function getAdjacentEventContext(chapterNumber) {
+        const currentIndex = workspaceChapters.findIndex(ch => Number(ch.chapter_number) === Number(chapterNumber));
+        const prev = currentIndex > 0 ? workspaceChapters[currentIndex - 1] : null;
+        const current = currentIndex >= 0 ? workspaceChapters[currentIndex] : null;
+        const next = currentIndex >= 0 ? workspaceChapters[currentIndex + 1] : null;
+
+        return {
+            prevInfo: prev ? `事件 ${prev.chapter_number}《${prev.title}》：${prev.content || '暂无梗概'}` : '无前置事件，这是当前叙事段落的起点。',
+            startInfo: current ? `事件 ${current.chapter_number}《${current.title}》：${current.content || '暂无梗概'}` : `事件 ${chapterNumber}《${currentLocalContext.title || ''}》`,
+            endInfo: next ? `事件 ${next.chapter_number}《${next.title}》：${next.content || '暂无梗概'}` : '暂无下一事件；请把当前事件自身的结果作为本段结束锚点，并提醒作者需要补充下一部分开始事件。'
+        };
+    }
+
+    function getWorldRulesText() {
+        return document.getElementById('world-rules-container') ? document.getElementById('world-rules-container').innerText.trim() : "无特殊限制";
+    }
+
+    function getCharacterDetailsForSop() {
+        if (!currentLocalContext.characters || currentLocalContext.characters.length === 0 || !window.globalCharacters) return "无详细资产设定";
+
+        return currentLocalContext.characters.map(lc => {
+            const gc = window.globalCharacters.find(c => c.name === lc.name) || {};
+            return `【角色：${lc.name}】定位:${gc.role || lc.role || '未知'} | 性格:${gc.personality || '未知'} | 欲望:${gc.core_desire || '未知'} | 目标:${gc.goal || '未知'} | 动机:${gc.motivation || '未知'} | 缺陷:${gc.flaw || '未知'} | 恐惧:${gc.fear || '未知'} | 弧光:${gc.character_arc || '未知'} | 简介:${gc.description || lc.description || '无'}`;
+        }).join('\n');
     }
 
   // ==========================================
@@ -676,8 +703,9 @@ if (data.success) {
 
             const data = await res.json();
             if (data.success && data.chapters.length > 0) {
+                workspaceChapters = data.chapters.slice().sort((a,b) => a.chapter_number - b.chapter_number);
                 if (chapterTree) chapterTree.innerHTML = '';
-                data.chapters.forEach(chap => {
+                workspaceChapters.forEach(chap => {
                     const li = document.createElement('li');
                     const icon = chap.plot_type === 'sub' ? 'git-branch' : 'git-commit';
                     li.className = `px-2 py-2 text-sm text-gray-400 hover:bg-gray-800 hover:text-white rounded-lg transition flex items-center justify-between group`;
@@ -698,6 +726,7 @@ if (data.success) {
                 if (chapterTree && chapterTree.firstElementChild) chapterTree.firstElementChild.querySelector('div').click();
                 loadTimelineSidebar();
             } else {
+                workspaceChapters = [];
                 if (chapterTree) chapterTree.innerHTML = `<li class="text-sm text-gray-600 p-2 italic">尚未生成事件...</li>`;
             }
         } catch (e) { }
@@ -818,14 +847,23 @@ if (data.success) {
                 // 💥 世界观强制重载，修复不显示的问题
                 await loadProjectSettings();
 
-                const aiGreeting = `✨ 已成功锁定【事件 ${chapterNumber}：${title}】。
-作为您的事件架构师，我已经准备就绪。请告诉我这部分剧情的初步构思，或者您打算以什么冲突作为切入点？`;
+                const eventContext = getAdjacentEventContext(chapterNumber);
+                const charNames = data.characters && data.characters.length > 0 ? data.characters.map(c => c.name).join('、') : '暂无指定人物';
+                const hookDescs = data.hooks && data.hooks.length > 0 ? data.hooks.map(h => h.description).join('；') : '暂无指定暗线';
+                const worldRules = getWorldRulesText();
+                const aiGreeting = window.OmniPrompts
+                    ? window.OmniPrompts.chapterSop(chapterNumber, title, eventContext.prevInfo, eventContext.endInfo, charNames, hookDescs, worldRules)
+                    : `【写作 SOP 推演启动】\n开始事件：${eventContext.startInfo}\n结束事件：${eventContext.endInfo}\n请先说明两者之间缺失的关键因果细节。`;
 
                 const localSopKey = `sop_v3_${PROJECT_ID}_${chapterId}`;
                 const savedSop = localStorage.getItem(localSopKey);
 
                 if (savedSop) {
                     currentChapterChatHistory = JSON.parse(savedSop);
+                    if (currentChapterChatHistory.length === 1 && currentChapterChatHistory[0]?.content?.includes('已成功锁定')) {
+                        currentChapterChatHistory = [{ role: 'assistant', content: aiGreeting }];
+                        localStorage.setItem(localSopKey, JSON.stringify(currentChapterChatHistory));
+                    }
                     if (chapHistoryDiv) { chapHistoryDiv.innerHTML = ''; currentChapterChatHistory.forEach(msg => appendChapMsg(msg.role, msg.content)); }
                 } else {
                     currentChapterChatHistory = [{ role: 'assistant', content: aiGreeting }];
@@ -1201,11 +1239,19 @@ if (btnTriggerHook) {
             if (window.lucide) lucide.createIcons();
 
             // 💥 核心修复：强硬指令，绝不允许自我放飞
-            const strictPrompt = `讨论结束。请严格基于我们刚才在对话中敲定的情节，提取一份最终的【章节内容大纲】。
+            const eventContext = getAdjacentEventContext(currentLocalContext.chapterNumber);
+            const strictPrompt = `讨论结束。请严格基于我们刚才在对话中敲定的内容，提取一份最终的【分章写作大纲】。
+【开始事件】：${eventContext.startInfo}
+【结束事件】：${eventContext.endInfo}
+【世界观与核心戒律】：${getWorldRulesText()}
+【可调用人物卡】：${getCharacterDetailsForSop()}
+
 要求：
-1. 绝不允许自我放飞，严禁编造我们没讨论过的后续情节！
-2. 必须清晰列出每个章节的【标题】。
-3. 必须包含每个章节的【内容摘要】，摘要必须结构化写明：本章的起因、发展经过、最终结果。
+1. 绝不允许自我放飞，严禁编造我们没讨论过的重大情节。
+2. 必须按已确认的章数输出；如果章数未确认，请按最合理章数输出并说明依据。
+3. 每章必须包含：标题、起因、经过、结果、参与人物、人物行为来源、世界观/核心戒律校验、与下一章衔接。
+4. 所有人物行为必须能从性格、欲望、目标、动机、缺陷、恐惧或成长弧线中找到来源。
+5. 结束事件必须成为下一部分的开始锚点。
 请直接输出这份最终大纲，不要掺杂任何废话，它将作为正文执笔的严格依据。`;
 
             // 深拷贝一份不污染原对话的提纯队列
@@ -1579,30 +1625,28 @@ if (data.success) {
                 let payloadConvo = JSON.parse(JSON.stringify(currentChapterChatHistory));
                 if (payloadConvo[0] && payloadConvo[0].role === 'assistant') payloadConvo[0].role = 'user';
 
-                // 提取右侧本章所有的登场群星（包括你刚新建的小师妹也会被立刻抓取）
-                let characterDetails = "无详细资产设定";
-                if (currentLocalContext.characters && currentLocalContext.characters.length > 0 && window.globalCharacters) {
-                    characterDetails = currentLocalContext.characters.map(lc => {
-                        const gc = window.globalCharacters.find(c => c.name === lc.name) || {};
-                        return `【角色：${lc.name}】性格:${gc.personality || '未知'} | 欲望:${gc.core_desire || '未知'} | 简介:${gc.description || '无'}`;
-                    }).join('\n');
-                }
-
-                // 提取世界观法则
-                const worldRules = document.getElementById('world-rules-container') ? document.getElementById('world-rules-container').innerText.trim() : "无特殊限制";
+                const characterDetails = getCharacterDetailsForSop();
+                const worldRules = getWorldRulesText();
+                const eventContext = getAdjacentEventContext(currentLocalContext.chapterNumber);
 
                 // 【核心：AI 工作流指令】
-                const hiddenWorkflow = `[系统隐秘工作流]：你现在是【事件架构师】，当前节点是事件 ${currentLocalContext.chapterNumber}：${currentLocalContext.title}。
+                const hiddenWorkflow = `[系统隐秘工作流]：你现在是【写作 SOP 事件架构师】，当前任务不是直接写正文，而是把一个事件段落拆成可写章节。
+【开始事件】：${eventContext.startInfo}
+【结束事件】：${eventContext.endInfo}
+
 请按以下逻辑交互，务必耐心：
-1. 先陪我推演具体事件的细节（重点关注起因、经过、结果）。
-2. 当我说“推演差不多了”或“开始总结”时，主动向我提问：(1)内容是否需要增删？ (2)哪些是伏笔（计划在哪回收）？ (3)打算分几章写？
-3. 等待我回答后，再生成每个章节的标题与详细摘要。`;
+1. 第一步必须先复述你理解的开始事件和结束事件，并指出两者之间缺失的关键因果细节。
+2. 陪作者讨论两个事件之间的行动、阻力、人物选择、代价、转折和信息释放；不要跳过讨论直接生成完整大纲。
+3. 每次提出事件细节，都要说明：行动人物、行为来源、冲突对象、不可逆后果、如何推动到结束事件。
+4. 用世界观和核心戒律校验事件是否合理；不合理时必须指出并给出修正方向。
+5. 当作者说“推演差不多了”或“开始总结”时，先确认这段内容分成几章，再生成每章标题与详细摘要。
+6. 结束事件将成为下一部分的开始，结尾衔接必须清楚。`;
 
                 // 3. 把私货、工作流、防 OOC 指令、伏笔全塞进最后一句话里发给 AI！
                 let lastUserMsg = payloadConvo[payloadConvo.length - 1];
                 if (lastUserMsg && lastUserMsg.role === 'user') {
                     // 如果有必须要回收的伏笔 (hookAlert)，它会变成红字警告随同发送！
-                    lastUserMsg.content += `\n\n${hiddenWorkflow}` + (currentLocalContext.hookAlert || "") + `\n\n[绝对戒律防OOC指令]：请严格遵循设定推演，严禁偏离人物档案。\n【世界法则】：\n${worldRules}\n【群星档案】：\n${characterDetails}`;
+                    lastUserMsg.content += `\n\n${hiddenWorkflow}` + (currentLocalContext.hookAlert || "") + `\n\n[绝对戒律防OOC指令]：请严格遵循设定推演，严禁偏离人物档案。\n【世界观与核心戒律】：\n${worldRules}\n【人物卡】：\n${characterDetails}`;
                 }
 
                 // 4. 发送给主脑
