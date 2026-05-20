@@ -44,7 +44,7 @@ ${currentText ? `【前文已写内容，请顺着情节继续往下写】:\n${c
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${DEEPSEEK_KEY}` },
             body: JSON.stringify({
-                model: "deepseek-chat",
+                model: "deepseek-v4-pro",
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userContent }
