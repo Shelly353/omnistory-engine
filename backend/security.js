@@ -1,5 +1,5 @@
 const WINDOW_MS = 60 * 1000;
-const MAX_AI_REQUESTS_PER_WINDOW = Number(process.env.AI_RATE_LIMIT_PER_MINUTE || 30);
+const MAX_AI_REQUESTS_PER_WINDOW = Number(process.env.AI_RATE_LIMIT_PER_MINUTE || 20);
 const requestBuckets = new Map();
 
 function getClientIp(req) {
