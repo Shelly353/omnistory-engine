@@ -89,7 +89,12 @@ router.post('/context', async (req, res) => {
         if (chapErr) throw chapErr;
 
         const { data: characters } = await supabase.from('characters').select('*').eq('project_id', projectId);
-        const { data: hooks } = await supabase.from('foreshadowing_hooks').select('*').eq('project_id', projectId).eq('target_chapter', chapterNumber);
+        const { data: hooks } = await supabase
+            .from('foreshadowing_hooks')
+            .select('*')
+            .eq('project_id', projectId)
+            .or(`target_chapter.eq.${chapterNumber},source_chapter_number.eq.${chapterNumber}`)
+            .order('target_chapter', { ascending: true });
 
         res.json({ success: true, chapter, characters: characters || [], hooks: hooks || [] });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }

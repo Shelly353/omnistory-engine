@@ -106,6 +106,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const chapHistoryDiv = document.getElementById('chapter-chat-history');
     const chapterChatInput = document.getElementById('chapter-chat-input');
     const localHooks = document.getElementById('local-hooks');
+    const localSourceHooks = document.getElementById('local-source-hooks');
     const localCharacters = document.getElementById('local-characters');
     const floatingToolbar = document.getElementById('floating-toolbar');
    const worldRulesContainer = document.getElementById('world-rules-container');
@@ -138,6 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnCloseTimeline = document.getElementById('btn-close-timeline');
     const btnAiExtractTimeline = document.getElementById('btn-ai-extract-timeline');
     const btnSaveTimeline = document.getElementById('btn-save-timeline');
+    const btnManualHook = document.getElementById('btn-manual-hook');
     
     const btnOpenRelation = document.getElementById('btn-open-relation');
     const btnCloseRelation = document.getElementById('btn-close-relation');
@@ -278,6 +280,20 @@ document.addEventListener('DOMContentLoaded', () => {
             const gc = window.globalCharacters.find(c => c.name === lc.name) || {};
             return `【角色：${lc.name}】定位:${gc.role || lc.role || '未知'} | 性格:${gc.personality || '未知'} | 欲望:${gc.core_desire || '未知'} | 目标:${gc.goal || '未知'} | 动机:${gc.motivation || '未知'} | 缺陷:${gc.flaw || '未知'} | 恐惧:${gc.fear || '未知'} | 弧光:${gc.character_arc || '未知'} | 简介:${gc.description || lc.description || '无'}`;
         }).join('\n');
+    }
+
+    function renderHookItem(hook, mode) {
+        const borderClass = mode === 'target' ? 'border-red-500 bg-red-950/30' : 'border-amber-800/50 bg-amber-950/10';
+        const textClass = mode === 'target' ? 'text-red-300' : 'text-amber-300';
+        const label = mode === 'target' ? '🔥[必须在此回收] ' : '[本章种下] ';
+        return `
+            <li class="group cursor-pointer bg-gray-900/60 p-2 rounded border ${borderClass} transition-all" onclick="jumpToSourceChapter(${hook.source_chapter_number})">
+                <div class="flex justify-between items-start mb-0.5">
+                    <span class="text-xs ${textClass} font-bold break-all">${label}${hook.description}</span>
+                </div>
+                <div class="text-[9px] text-gray-500 mt-1">发源于: 事件 ${hook.source_chapter_number || '-'} ${hook.target_chapter ? `➔ 爆发于: 事件 ${hook.target_chapter}` : ''}</div>
+                ${hook.annotation ? `<div class="text-[9px] text-gray-400 mt-1 leading-relaxed">注释: ${hook.annotation}</div>` : ''}
+            </li>`;
     }
 
   // ==========================================
@@ -849,7 +865,12 @@ if (data.success) {
 
                 const eventContext = getAdjacentEventContext(chapterNumber);
                 const charNames = data.characters && data.characters.length > 0 ? data.characters.map(c => c.name).join('、') : '暂无指定人物';
-                const hookDescs = data.hooks && data.hooks.length > 0 ? data.hooks.map(h => h.description).join('；') : '暂无指定暗线';
+                const sourceHooks = (data.hooks || []).filter(h => h.source_chapter_number == chapterNumber);
+                const targetHooks = (data.hooks || []).filter(h => h.target_chapter == chapterNumber);
+                const hookDescs = [
+                    targetHooks.length > 0 ? `需回收：${targetHooks.map(h => h.description).join('；')}` : '',
+                    sourceHooks.length > 0 ? `已种下：${sourceHooks.map(h => h.description).join('；')}` : ''
+                ].filter(Boolean).join('\n') || '暂无指定暗线';
                 const worldRules = getWorldRulesText();
                 const aiGreeting = window.OmniPrompts
                     ? window.OmniPrompts.chapterSop(chapterNumber, title, eventContext.prevInfo, eventContext.endInfo, charNames, hookDescs, worldRules)
@@ -871,20 +892,17 @@ if (data.success) {
                     localStorage.setItem(localSopKey, JSON.stringify(currentChapterChatHistory));
                 }
 
-                // 💥 伏笔区修复：如果是本章需要回收的伏笔，直接红字高亮警告！
+                // 💥 伏笔区修复：分为本章回收与本章种下两类
                 if (localHooks) {
-                    localHooks.innerHTML = data.hooks.length > 0 ? data.hooks.map(h => {
-                        const isTargetThisChap = h.target_chapter == chapterNumber;
-                        return `
-                        <li class="group cursor-pointer bg-gray-900/60 p-2 rounded border ${isTargetThisChap ? 'border-red-500 bg-red-950/30' : 'border-transparent hover:border-red-900/50'} transition-all" onclick="jumpToSourceChapter(${h.source_chapter_number})">
-                            <div class="flex justify-between items-start mb-0.5">
-                                <span class="text-xs ${isTargetThisChap ? 'text-red-400 font-black' : 'text-red-300 font-bold'} break-all">
-                                    ${isTargetThisChap ? '🔥[必须在此回收] ' : '[暗线] '}${h.description}
-                                </span>
-                            </div>
-                            <div class="text-[9px] text-gray-500 mt-1">发源于: 事件 ${h.source_chapter_number} ${h.target_chapter ? `➔ 爆发于: 事件 ${h.target_chapter}` : ''}</div>
-                        </li>`;
-                    }).join('') : `<li class="text-gray-600 italic text-xs">本时空无交织暗线。</li>`;
+                    localHooks.innerHTML = targetHooks.length > 0
+                        ? targetHooks.map(h => renderHookItem(h, 'target')).join('')
+                        : `<li class="text-gray-600 italic text-xs">本章暂无必须回收的伏笔。</li>`;
+                }
+
+                if (localSourceHooks) {
+                    localSourceHooks.innerHTML = sourceHooks.length > 0
+                        ? sourceHooks.map(h => renderHookItem(h, 'source')).join('')
+                        : `<li class="text-gray-600 italic text-xs">本章尚未种下伏笔。</li>`;
                 }
 
                 // 💥 人物卡修复：新增头部“拉入角色”按钮，支持展开 12维设定 和 移出按钮
@@ -916,7 +934,7 @@ if (data.success) {
                 }
 
                 // 💥 伏笔智能提取：如果有设定在当前事件爆发的伏笔，强制加入 AI 核心缓存工作流
-                const activeHooks = data.hooks.filter(h => h.target_chapter == chapterNumber);
+                const activeHooks = targetHooks;
                 if (activeHooks.length > 0) {
                     currentLocalContext.hookAlert = `\n\n【上帝视角最高级警告！！！】\n根据之前的设定，本事件（事件 ${chapterNumber}）必须填坑回收以下 ${activeHooks.length} 个伏笔，请在推演剧情时务必将它们合理融入其中：\n` + activeHooks.map((h, i) => `${i + 1}. ${h.description}`).join('\n');
                 } else { currentLocalContext.hookAlert = ''; }
@@ -1079,8 +1097,23 @@ if (data.success) {
         };
     }
 
+    function openHookComposer(prefill = "") {
+        if (!currentLocalContext.chapterId) return alert("请先选择一个章节！");
+        const descInput = document.getElementById('hook-desc');
+        const targetInput = document.getElementById('hook-target-chapter');
+        const annotationInput = document.getElementById('hook-annotation');
+        if (descInput) descInput.value = prefill;
+        if (targetInput) targetInput.value = "";
+        if (annotationInput) annotationInput.value = "";
+        if (hookModal) hookModal.classList.remove('hidden');
+    }
+
     if (btnOpenTimeline) btnOpenTimeline.addEventListener('click', () => { renderTimelineModal(); if(timelineModal) timelineModal.classList.remove('hidden'); });
     if (btnCloseTimeline) btnCloseTimeline.addEventListener('click', () => { if(timelineModal) timelineModal.classList.add('hidden');});
+    if (btnManualHook) btnManualHook.addEventListener('click', () => {
+        currentSelectedString = "";
+        openHookComposer("");
+    });
 
     if (btnOpenRelation) btnOpenRelation.addEventListener('click', () => { if(relationModal) relationModal.classList.remove('hidden'); setTimeout(renderRelationGraph, 100); });
     if (btnCloseRelation) btnCloseRelation.addEventListener('click', () => { if(relationModal) relationModal.classList.add('hidden');});
@@ -1249,7 +1282,7 @@ if (btnTriggerHook) {
 要求：
 1. 绝不允许自我放飞，严禁编造我们没讨论过的重大情节。
 2. 必须按已确认的章数输出；如果章数未确认，请按最合理章数输出并说明依据。
-3. 每章必须包含：标题、起因、经过、结果、参与人物、人物行为来源、世界观/核心戒律校验、与下一章衔接。
+3. 每章必须包含：标题、起因、经过、结果、参与人物、人物行为来源、可种植伏笔/需回收伏笔、世界观/核心戒律校验、与下一章衔接。
 4. 所有人物行为必须能从性格、欲望、目标、动机、缺陷、恐惧或成长弧线中找到来源。
 5. 结束事件必须成为下一部分的开始锚点。
 请直接输出这份最终大纲，不要掺杂任何废话，它将作为正文执笔的严格依据。`;
@@ -1381,23 +1414,30 @@ if (data.success) {
 
     if (btnConfirmHook) {
         btnConfirmHook.addEventListener('click', async () => {
+            const descInput = document.getElementById('hook-desc');
+            const description = (descInput?.value || currentSelectedString || "").trim();
             const targetChap = document.getElementById('hook-target-chapter').value;
+            if (!description) return alert("请填写伏笔内容！");
             if (!targetChap) return alert("必须指定引爆章节！");
             btnConfirmHook.disabled = true;
             try {
                 const res = await fetch('/api/workspace/hook', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ projectId: PROJECT_ID, description: currentSelectedString, target_chapter: targetChap, annotation: document.getElementById('hook-annotation') ? document.getElementById('hook-annotation').value.trim() : "", source_chapter_id: currentLocalContext.chapterId, source_chapter_number: currentLocalContext.chapterNumber })
+                    body: JSON.stringify({ projectId: PROJECT_ID, description, target_chapter: targetChap, annotation: document.getElementById('hook-annotation') ? document.getElementById('hook-annotation').value.trim() : "", source_chapter_id: currentLocalContext.chapterId, source_chapter_number: currentLocalContext.chapterNumber })
                 });
-                if ((await res.json()).success) {
+                const data = await res.json();
+                if (data.success) {
                     if(hookModal) hookModal.classList.add('hidden');
                     document.getElementById('hook-target-chapter').value = "";
+                    if (descInput) descInput.value = "";
                     if (document.getElementById('hook-annotation')) document.getElementById('hook-annotation').value = ""; 
                     if(floatingToolbar) floatingToolbar.classList.add('translate-y-20', 'opacity-0', 'pointer-events-none');
                     if(editorTextarea) editorTextarea.setSelectionRange(editorTextarea.selectionEnd, editorTextarea.selectionEnd); 
                     loadChapterContext(currentLocalContext.chapterId, currentLocalContext.chapterNumber, currentLocalContext.title);
+                } else {
+                    alert("保存伏笔失败：" + (data.error || "未知错误"));
                 }
-            } catch (e) { }
+            } catch (e) { alert("保存伏笔失败"); }
             finally { btnConfirmHook.disabled = false; }
         });
     }
@@ -1639,8 +1679,9 @@ if (data.success) {
 2. 陪作者讨论两个事件之间的行动、阻力、人物选择、代价、转折和信息释放；不要跳过讨论直接生成完整大纲。
 3. 每次提出事件细节，都要说明：行动人物、行为来源、冲突对象、不可逆后果、如何推动到结束事件。
 4. 用世界观和核心戒律校验事件是否合理；不合理时必须指出并给出修正方向。
-5. 当作者说“推演差不多了”或“开始总结”时，先确认这段内容分成几章，再生成每章标题与详细摘要。
-6. 结束事件将成为下一部分的开始，结尾衔接必须清楚。`;
+5. 主动提出【可种植伏笔】和【需要回收伏笔】：说明种下位置、回收位置、误导/信息差作用、回收方式，以及如果不回收会造成的逻辑断裂。
+6. 当作者说“推演差不多了”或“开始总结”时，先确认这段内容分成几章，再生成每章标题与详细摘要；每章必须列出可种植伏笔/需回收伏笔。
+7. 结束事件将成为下一部分的开始，结尾衔接必须清楚。`;
 
                 // 3. 把私货、工作流、防 OOC 指令、伏笔全塞进最后一句话里发给 AI！
                 let lastUserMsg = payloadConvo[payloadConvo.length - 1];
