@@ -202,11 +202,23 @@ document.addEventListener('DOMContentLoaded', () => {
         window.OmniWorkspacePreview.renderHumanPreview(humanPreviewContainer, bible);
     }
 
+    function stripReferenceMaterials(rules = "") {
+        return String(rules || '').replace(/\n*【参考资料摘录】[\s\S]*$/g, '').trim();
+    }
+
+    function buildRulesWithReferenceMaterials(rules = "", materials = "") {
+        const cleanRules = stripReferenceMaterials(rules);
+        const cleanMaterials = String(materials || '').trim();
+        return [cleanRules, cleanMaterials ? `【参考资料摘录】\n${cleanMaterials}` : ''].filter(Boolean).join('\n\n');
+    }
+
     function collectBibleFromPreview() {
+        const rulesInput = document.getElementById('prev-rules') ? document.getElementById('prev-rules').value.trim() : "";
+        const sourceMaterials = document.getElementById('prev-source-materials') ? document.getElementById('prev-source-materials').value.trim() : "";
         return {
             genre: document.getElementById('prev-genre') ? document.getElementById('prev-genre').value.trim() : "",
             worldview: document.getElementById('prev-worldview') ? document.getElementById('prev-worldview').value.trim() : "",
-            rules: document.getElementById('prev-rules') ? document.getElementById('prev-rules').value.trim() : "",
+            rules: buildRulesWithReferenceMaterials(rulesInput, sourceMaterials),
             characters: Array.from(document.querySelectorAll('.prev-char-item')).map(el => ({
                 name: el.querySelector('.char-name')?.value.trim() || "",
                 role: el.querySelector('.char-role')?.value.trim() || "",

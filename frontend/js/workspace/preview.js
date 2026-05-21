@@ -47,6 +47,17 @@ window.OmniWorkspacePreview = (() => {
         return { border: 'border-blue-800/60', badge: 'bg-blue-950 text-blue-300 border-blue-800', label: '已复用' };
     }
 
+    function splitReferenceMaterials(rules = '') {
+        const text = String(rules || '');
+        const marker = '【参考资料摘录】';
+        const index = text.indexOf(marker);
+        if (index === -1) return { rules: text, materials: '' };
+        return {
+            rules: text.slice(0, index).trim(),
+            materials: text.slice(index + marker.length).trim()
+        };
+    }
+
     function renderCharacterCard(c = {}, bible = {}) {
         const eventCount = getCharacterEventCount(c, bible);
         const usage = getCharacterUsageStyle(eventCount);
@@ -83,6 +94,7 @@ window.OmniWorkspacePreview = (() => {
         const genreOptions = ["屋里有鬼", "金羊毛", "神灯出窍", "面临困境", "成长仪式", "伙伴情谊", "推理侦探", "愚者成功", "进退两难", "超级英雄", "未分类/其他"];
         const genreSelectHTML = genreOptions.map(g => `<option value="${g}" ${bible.genre === g ? 'selected' : ''}>${g}</option>`).join('');
         const narrativeLogic = getNarrativeLogic(bible);
+        const splitRules = splitReferenceMaterials(bible.rules || '');
         const narrativeModes = ["顺叙", "倒叙", "双线叙事", "多视角", "框架叙事", "非线性", "其他"];
         const narrativeModeHTML = narrativeModes.map(m => `<option value="${m}" ${narrativeLogic.mode === m ? 'selected' : ''}>${m}</option>`).join('');
 
@@ -107,7 +119,11 @@ window.OmniWorkspacePreview = (() => {
                     </div>
                     <div class="relative group/field">
                         <label class="text-[10px] text-gray-500 font-bold uppercase mb-1 flex justify-between">核心法则与戒律 <button onclick="openSubChat('rules')" class="text-blue-400 hover:text-white px-2 py-0.5 bg-blue-900/30 rounded"><i data-lucide="cpu" class="w-3 h-3 inline"></i> 唤醒 AI 深度扩写</button></label>
-                        <textarea id="prev-rules" class="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-cyan-300 text-sm h-32 focus:border-cyan-500 transition" placeholder="规则拥有最高权限。这里写你的具体设定即可：朝代/年代、是否架空、律所/医院/官府/军队等特殊规则。历史、法律、医疗、警务等专家基础审查标准已在后台内置。">${bible.rules || ''}</textarea>
+                        <textarea id="prev-rules" class="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-cyan-300 text-sm h-32 focus:border-cyan-500 transition" placeholder="规则拥有最高权限。这里写你的具体设定即可：朝代/年代、是否架空、律所/医院/官府/军队等特殊规则。历史、法律、医疗、警务等专家基础审查标准已在后台内置。">${escapePreviewValue(splitRules.rules)}</textarea>
+                    </div>
+                    <div class="relative group/field">
+                        <label class="text-[10px] text-gray-500 font-bold uppercase mb-1 block">参考资料摘录</label>
+                        <textarea id="prev-source-materials" class="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-amber-200 text-sm h-28 focus:border-amber-500 transition" placeholder="把 PDF/网页/TXT/图片 OCR 后的关键资料粘贴成短摘录。建议每条注明来源、时代/领域、可用于哪些事件，以及哪些内容不能乱写。">${escapePreviewValue(splitRules.materials || bible.source_materials || '')}</textarea>
                     </div>
                     <div class="bg-gray-950 border border-yellow-900/40 rounded-xl p-3">
                         <div class="flex items-center justify-between mb-2">
