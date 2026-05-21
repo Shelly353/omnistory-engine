@@ -47,6 +47,36 @@ window.OmniWorkspacePreview = (() => {
         return { border: 'border-blue-800/60', badge: 'bg-blue-950 text-blue-300 border-blue-800', label: '已复用' };
     }
 
+    function renderCharacterCard(c = {}, bible = {}) {
+        const eventCount = getCharacterEventCount(c, bible);
+        const usage = getCharacterUsageStyle(eventCount);
+        return `
+            <div class="prev-char-item group relative bg-gray-900 rounded-lg border ${usage.border} hover:border-blue-500 transition-all duration-300">
+                <div class="flex space-x-2 p-2 relative z-10 bg-gray-900 rounded-lg">
+                    <input type="text" class="w-1/6 bg-gray-950 border border-gray-600 rounded-md p-2 text-white text-xs char-name" value="${escapePreviewValue(c.name || '')}" placeholder="姓名">
+                    <input type="text" class="w-1/6 bg-gray-950 border border-gray-600 rounded-md p-2 text-blue-300 text-xs char-role" value="${escapePreviewValue(c.role || '')}" placeholder="定位">
+                    <input type="text" class="w-1/6 bg-gray-950 border border-gray-600 rounded-md p-2 text-yellow-300 text-xs char-faction" value="${escapePreviewValue(c.faction || '')}" placeholder="阵营">
+                    <input type="text" class="flex-1 bg-gray-950 border border-gray-600 rounded-md p-2 text-gray-300 text-xs char-desc" value="${escapePreviewValue(c.description || '')}" placeholder="一句话简介">
+                    <span class="shrink-0 text-[10px] px-2 py-1 rounded border ${usage.badge}" title="当前人物出现在事件/时间轴中的次数">${usage.label} · ${eventCount}</span>
+                </div>
+                <div class="max-h-0 overflow-hidden group-hover:max-h-[800px] transition-all duration-500 ease-in-out opacity-0 group-hover:opacity-100 px-3 pb-3">
+                    <div class="grid grid-cols-3 gap-2 mt-2 pt-2 border-t border-gray-700">
+                        <div><label class="text-[9px] text-gray-500">年龄</label><input type="text" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-age" value="${escapePreviewValue(c.age || '')}"></div>
+                        <div><label class="text-[9px] text-gray-500">外貌特征</label><input type="text" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-app" value="${escapePreviewValue(c.appearance || '')}"></div>
+                        <div><label class="text-[9px] text-gray-500">职业</label><input type="text" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-prof" value="${escapePreviewValue(c.profession || '')}"></div>
+                        <div class="col-span-3"><label class="text-[9px] text-gray-500">性格 (MBTI)</label><input type="text" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-pers" value="${escapePreviewValue(c.personality || '')}"></div>
+                        <div class="col-span-3"><label class="text-[9px] text-gray-500">核心欲望 (Want) & 目标 (Goal)</label><div class="flex space-x-2"><input type="text" class="w-1/2 bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-desire" value="${escapePreviewValue(c.core_desire || '')}"><input type="text" class="w-1/2 bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-goal" value="${escapePreviewValue(c.goal || '')}"></div></div>
+                        <div class="col-span-3"><label class="text-[9px] text-gray-500">动机 (Motivation)</label><input type="text" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-motiv" value="${escapePreviewValue(c.motivation || '')}"></div>
+                        <div class="col-span-3"><label class="text-[9px] text-gray-500">缺陷 (Flaw) & 恐惧 (Fear)</label><div class="flex space-x-2"><input type="text" class="w-1/2 bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-flaw" value="${escapePreviewValue(c.flaw || '')}"><input type="text" class="w-1/2 bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-fear" value="${escapePreviewValue(c.fear || '')}"></div></div>
+                        <div class="col-span-3"><label class="text-[9px] text-gray-500">能力/技能</label><input type="text" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-skills" value="${escapePreviewValue(c.skills || '')}"></div>
+                        <div class="col-span-3"><label class="text-[9px] text-gray-500">重要经历</label><textarea class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white h-12 resize-none char-bg">${escapePreviewValue(c.background || '')}</textarea></div>
+                        <div class="col-span-3"><label class="text-[9px] text-gray-500 font-bold text-purple-400">角色成长弧光</label><textarea class="w-full bg-gray-950 border border-purple-900/50 rounded p-1.5 text-xs text-white h-12 resize-none char-arc">${escapePreviewValue(c.character_arc || '')}</textarea></div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
     function renderHumanPreview(container, bible) {
         if (!container) return;
 
@@ -92,37 +122,13 @@ window.OmniWorkspacePreview = (() => {
 
             <div class="sandbox-module hidden" data-sandbox-module="characters">
             <div class="bg-gray-800/50 p-5 rounded-xl border border-gray-700 mt-6">
-                <h4 class="text-blue-400 font-bold mb-3 flex items-center"><i data-lucide="users" class="w-4 h-4 mr-2"></i>2. 登场群星 (表头：姓名/定位/阵营/一句话简介)</h4>
+                <div class="flex items-center justify-between mb-3">
+                    <h4 class="text-blue-400 font-bold flex items-center"><i data-lucide="users" class="w-4 h-4 mr-2"></i>2. 登场群星 (表头：姓名/定位/阵营/一句话简介)</h4>
+                    <button type="button" onclick="addSandboxCharacter()" class="text-xs px-3 py-1.5 bg-blue-700 hover:bg-blue-600 text-white rounded-lg font-bold flex items-center"><i data-lucide="user-plus" class="w-3 h-3 mr-1"></i>新增人物</button>
+                </div>
                 <div class="text-[10px] text-gray-500 mb-2 italic">提示：鼠标悬停展开 12 维设定。角色参与事件少于 3 次会标色提醒，避免沦为一次性人物。</div>
                 <div class="space-y-2 mb-6" id="prev-chars-list">
-                    ${(bible.characters||[]).map(c => {
-                        const eventCount = getCharacterEventCount(c, bible);
-                        const usage = getCharacterUsageStyle(eventCount);
-                        return `
-                        <div class="prev-char-item group relative bg-gray-900 rounded-lg border ${usage.border} hover:border-blue-500 transition-all duration-300">
-                            <div class="flex space-x-2 p-2 relative z-10 bg-gray-900 rounded-lg">
-                                <input type="text" class="w-1/6 bg-gray-950 border border-gray-600 rounded-md p-2 text-white text-xs char-name" value="${c.name || ''}" placeholder="姓名">
-                                <input type="text" class="w-1/6 bg-gray-950 border border-gray-600 rounded-md p-2 text-blue-300 text-xs char-role" value="${c.role || ''}" placeholder="定位">
-                                <input type="text" class="w-1/6 bg-gray-950 border border-gray-600 rounded-md p-2 text-yellow-300 text-xs char-faction" value="${c.faction || ''}" placeholder="阵营">
-                                <input type="text" class="flex-1 bg-gray-950 border border-gray-600 rounded-md p-2 text-gray-300 text-xs char-desc" value="${c.description || ''}" placeholder="一句话简介">
-                                <span class="shrink-0 text-[10px] px-2 py-1 rounded border ${usage.badge}" title="当前人物出现在事件/时间轴中的次数">${usage.label} · ${eventCount}</span>
-                            </div>
-                            <div class="max-h-0 overflow-hidden group-hover:max-h-[800px] transition-all duration-500 ease-in-out opacity-0 group-hover:opacity-100 px-3 pb-3">
-                                <div class="grid grid-cols-3 gap-2 mt-2 pt-2 border-t border-gray-700">
-                                    <div><label class="text-[9px] text-gray-500">年龄</label><input type="text" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-age" value="${c.age || ''}"></div>
-                                    <div><label class="text-[9px] text-gray-500">外貌特征</label><input type="text" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-app" value="${c.appearance || ''}"></div>
-                                    <div><label class="text-[9px] text-gray-500">职业</label><input type="text" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-prof" value="${c.profession || ''}"></div>
-                                    <div class="col-span-3"><label class="text-[9px] text-gray-500">性格 (MBTI)</label><input type="text" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-pers" value="${c.personality || ''}"></div>
-                                    <div class="col-span-3"><label class="text-[9px] text-gray-500">核心欲望 (Want) & 目标 (Goal)</label><div class="flex space-x-2"><input type="text" class="w-1/2 bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-desire" value="${c.core_desire || ''}"><input type="text" class="w-1/2 bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-goal" value="${c.goal || ''}"></div></div>
-                                    <div class="col-span-3"><label class="text-[9px] text-gray-500">动机 (Motivation)</label><input type="text" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-motiv" value="${c.motivation || ''}"></div>
-                                    <div class="col-span-3"><label class="text-[9px] text-gray-500">缺陷 (Flaw) & 恐惧 (Fear)</label><div class="flex space-x-2"><input type="text" class="w-1/2 bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-flaw" value="${c.flaw || ''}"><input type="text" class="w-1/2 bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-fear" value="${c.fear || ''}"></div></div>
-                                    <div class="col-span-3"><label class="text-[9px] text-gray-500">能力/技能</label><input type="text" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-skills" value="${c.skills || ''}"></div>
-                                    <div class="col-span-3"><label class="text-[9px] text-gray-500">重要经历</label><textarea class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white h-12 resize-none char-bg">${c.background || ''}</textarea></div>
-                                    <div class="col-span-3"><label class="text-[9px] text-gray-500 font-bold text-purple-400">角色成长弧光</label><textarea class="w-full bg-gray-950 border border-purple-900/50 rounded p-1.5 text-xs text-white h-12 resize-none char-arc">${c.character_arc || ''}</textarea></div>
-                                </div>
-                            </div>
-                        </div>
-                    `}).join('')}
+                    ${(bible.characters||[]).map(c => renderCharacterCard(c, bible)).join('')}
                 </div>
 
                 <h4 class="text-emerald-400 font-bold mb-3 flex items-center"><i data-lucide="network" class="w-4 h-4 mr-2"></i>3. 人物情感羁绊 (表头：发起人 ➔ 接收人 | 羁绊类型)</h4>
@@ -223,6 +229,17 @@ window.OmniWorkspacePreview = (() => {
             btn.classList.toggle('text-gray-400', !active);
             btn.classList.toggle('border-gray-800', !active);
         });
+    };
+
+    window.addSandboxCharacter = () => {
+        const list = document.getElementById('prev-chars-list');
+        if (!list) return;
+        list.insertAdjacentHTML('beforeend', renderCharacterCard({
+            description: '先写一句话：这个人物为什么参与当前事件，以及后续还能在哪两个事件中复用。'
+        }, { chapters: [], timeline: [] }));
+        if (window.lucide) lucide.createIcons();
+        const latest = list.lastElementChild;
+        latest?.querySelector('.char-name')?.focus();
     };
 
     return {

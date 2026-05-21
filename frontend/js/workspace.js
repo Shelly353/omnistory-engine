@@ -120,6 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const localSourceHooks = document.getElementById('local-source-hooks');
     const localCharacters = document.getElementById('local-characters');
     const localEventScope = document.getElementById('local-event-scope');
+    const btnToggleEventScope = document.getElementById('btn-toggle-event-scope');
     const localDeviationPanel = document.getElementById('local-deviation-panel');
     const floatingToolbar = document.getElementById('floating-toolbar');
    const worldRulesContainer = document.getElementById('world-rules-container');
@@ -2047,6 +2048,12 @@ if (data.success) {
     }
     if (btnSaveChapter) btnSaveChapter.onclick = saveChapterContent;
     if (btnReviewCurrentDraft) btnReviewCurrentDraft.onclick = () => runUnifiedContentReview("manual");
+    if (btnToggleEventScope && localEventScope) {
+        btnToggleEventScope.onclick = () => {
+            const isHidden = localEventScope.classList.toggle('hidden');
+            btnToggleEventScope.textContent = isHidden ? '展开' : '折叠';
+        };
+    }
 
     if (chapterChatInput) {
         chapterChatInput.addEventListener('keydown', (e) => {
