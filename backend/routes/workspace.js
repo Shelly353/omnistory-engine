@@ -22,6 +22,7 @@ const CHAPTER_CHARACTER_SETUP_SQL = `create table if not exists public.chapter_c
   created_at timestamptz not null default now(),
   primary key (chapter_id, character_id)
 );`;
+const CHAPTER_CHARACTER_CLOUD_TYPE = '章节人物关联';
 
 function isMissingCloudStateTable(error) {
     return error && (error.code === '42P01' || String(error.message || '').includes(CLOUD_STATE_TABLE));
@@ -34,6 +35,30 @@ function isMissingChapterCharacterTable(error) {
 function textMentionsCharacter(text, characterName) {
     if (!text || !characterName) return false;
     return String(text).includes(String(characterName));
+}
+
+async function loadChapterCharacterCloudMap(projectId) {
+    const { data, error } = await supabase
+        .from(CLOUD_STATE_TABLE)
+        .select('payload')
+        .eq('project_id', projectId)
+        .eq('data_type', CHAPTER_CHARACTER_CLOUD_TYPE)
+        .maybeSingle();
+    if (error) {
+        if (isMissingCloudStateTable(error)) return {};
+        throw error;
+    }
+    return data?.payload || {};
+}
+
+async function saveChapterCharacterCloudMap(projectId, payload) {
+    const { error } = await supabase.from(CLOUD_STATE_TABLE).upsert({
+        project_id: projectId,
+        data_type: CHAPTER_CHARACTER_CLOUD_TYPE,
+        payload,
+        updated_at: new Date().toISOString()
+    }, { onConflict: 'project_id,data_type' });
+    if (error) throw error;
 }
 
 // 0. 跨设备工作区快照：保存
@@ -125,7 +150,12 @@ router.post('/context', async (req, res) => {
                 .select('character_id')
                 .in('chapter_id', scopedChapterIds);
             if (linkErr && !isMissingChapterCharacterTable(linkErr)) throw linkErr;
-            linkedCharacterIds = new Set((links || []).map(link => link.character_id));
+            if (isMissingChapterCharacterTable(linkErr)) {
+                const cloudMap = await loadChapterCharacterCloudMap(projectId);
+                scopedChapterIds.forEach(id => (cloudMap[id] || []).forEach(charId => linkedCharacterIds.add(charId)));
+            } else {
+                linkedCharacterIds = new Set((links || []).map(link => link.character_id));
+            }
         }
 
         const eventText = eventScope
@@ -147,7 +177,7 @@ router.post('/context', async (req, res) => {
 });
 
 router.post('/context/character', async (req, res) => {
-    const { chapterId, characterId } = req.body;
+    const { projectId, chapterId, characterId } = req.body;
     if (!chapterId || !characterId) return res.status(400).json({ success: false, error: '缺少 chapterId 或 characterId' });
 
     try {
@@ -158,7 +188,13 @@ router.post('/context/character', async (req, res) => {
 
         if (error) {
             if (isMissingChapterCharacterTable(error)) {
-                return res.status(501).json({ success: false, error: '章节人物关联表尚未创建', setupSql: CHAPTER_CHARACTER_SETUP_SQL });
+                if (!projectId) return res.status(400).json({ success: false, error: '缺少 projectId，无法使用云端兜底保存章节人物关联' });
+                const cloudMap = await loadChapterCharacterCloudMap(projectId);
+                const current = new Set(cloudMap[chapterId] || []);
+                current.add(characterId);
+                cloudMap[chapterId] = Array.from(current);
+                await saveChapterCharacterCloudMap(projectId, cloudMap);
+                return res.json({ success: true, fallback: 'cloud_state' });
             }
             throw error;
         }
@@ -169,6 +205,7 @@ router.post('/context/character', async (req, res) => {
 
 router.delete('/context/character/:chapterId/:characterId', async (req, res) => {
     const { chapterId, characterId } = req.params;
+    const { projectId } = req.query;
 
     try {
         const { error } = await supabase
@@ -179,7 +216,11 @@ router.delete('/context/character/:chapterId/:characterId', async (req, res) => 
 
         if (error) {
             if (isMissingChapterCharacterTable(error)) {
-                return res.status(501).json({ success: false, error: '章节人物关联表尚未创建', setupSql: CHAPTER_CHARACTER_SETUP_SQL });
+                if (!projectId) return res.status(400).json({ success: false, error: '缺少 projectId，无法使用云端兜底移除章节人物关联' });
+                const cloudMap = await loadChapterCharacterCloudMap(projectId);
+                cloudMap[chapterId] = (cloudMap[chapterId] || []).filter(id => id !== characterId);
+                await saveChapterCharacterCloudMap(projectId, cloudMap);
+                return res.json({ success: true, fallback: 'cloud_state' });
             }
             throw error;
         }
@@ -212,11 +253,14 @@ router.post('/chapter', async (req, res) => {
 
 // 5. 种植伏笔
 router.post('/hook', async (req, res) => {
-    const { projectId, description, target_chapter, annotation, source_chapter_id, source_chapter_number } = req.body;
+    const { projectId, id, description, target_chapter, annotation, source_chapter_id, source_chapter_number } = req.body;
     try {
-        const { error } = await supabase.from('foreshadowing_hooks').insert([{
-            project_id: projectId, description, target_chapter, annotation, source_chapter_id, source_chapter_number
-        }]);
+        const payload = { project_id: projectId, description, target_chapter, annotation };
+        if (source_chapter_id !== undefined) payload.source_chapter_id = source_chapter_id;
+        if (source_chapter_number !== undefined) payload.source_chapter_number = source_chapter_number;
+        const { error } = id
+            ? await supabase.from('foreshadowing_hooks').update(payload).eq('id', id)
+            : await supabase.from('foreshadowing_hooks').insert([payload]);
         if (error) throw error;
         res.json({ success: true });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
@@ -245,14 +289,15 @@ router.get('/characters/:projectId', async (req, res) => {
 
 // 7. 全局资产：保存角色
 router.post('/character', async (req, res) => {
-    const { projectId, id, name, role, faction, description } = req.body;
+    const { projectId, id, name, role, faction, description, age, appearance, profession, personality, core_desire, goal, motivation, flaw, fear, skills, background, character_arc } = req.body;
     try {
+        const payload = { name, role, faction, description, age, appearance, profession, personality, core_desire, goal, motivation, flaw, fear, skills, background, character_arc };
         let error;
         if (id) {
-            const { error: updateError } = await supabase.from('characters').update({ name, role, faction, description }).eq('id', id);
+            const { error: updateError } = await supabase.from('characters').update(payload).eq('id', id);
             error = updateError;
         } else {
-            const { error: insertError } = await supabase.from('characters').insert([{ project_id: projectId, name, role, faction, description }]);
+            const { error: insertError } = await supabase.from('characters').insert([{ project_id: projectId, ...payload }]);
             error = insertError;
         }
         if (error) throw error;
@@ -271,9 +316,12 @@ router.get('/timeline/:projectId', async (req, res) => {
 
 // 8. 绝对时间轴：保存
 router.post('/timeline', async (req, res) => {
-    const { projectId, time_label, chapter_number, description } = req.body;
+    const { projectId, id, time_label, chapter_number, description } = req.body;
     try {
-        const { error } = await supabase.from('timeline_events').insert([{ project_id: projectId, time_label, chapter_number: parseFloat(chapter_number), description }]);
+        const payload = { project_id: projectId, time_label, chapter_number: parseFloat(chapter_number), description };
+        const { error } = id
+            ? await supabase.from('timeline_events').update(payload).eq('id', id)
+            : await supabase.from('timeline_events').insert([payload]);
         if (error) throw error;
         res.json({ success: true });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }

@@ -92,4 +92,16 @@ router.get('/:projectId', async (req, res) => {
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
+router.put('/:projectId', async (req, res) => {
+    const { genre, worldview, rules } = req.body;
+    try {
+        const { error } = await supabase
+            .from('projects')
+            .update({ genre, worldview, rules })
+            .eq('id', req.params.projectId);
+        if (error) throw error;
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
 module.exports = router;

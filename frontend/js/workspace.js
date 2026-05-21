@@ -305,6 +305,38 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>`;
     }
 
+    function getEventOptions(selectedValue = "") {
+        return `<option value="">选择事件...</option>` + workspaceChapters.map(ch => {
+            const value = String(ch.chapter_number);
+            const selected = String(selectedValue) === value ? 'selected' : '';
+            const titleText = `${ch.title || ''}\n${ch.content || '暂无简介'}`.replace(/"/g, '&quot;');
+            return `<option value="${value}" title="${titleText}" ${selected}>事件 ${ch.chapter_number}: ${ch.title}</option>`;
+        }).join('');
+    }
+
+    function refreshEventSelects() {
+        const timelineSelect = document.getElementById('tl-chapter');
+        const hookTargetSelect = document.getElementById('hook-target-chapter');
+        if (timelineSelect) timelineSelect.innerHTML = getEventOptions(timelineSelect.value || currentLocalContext.chapterNumber);
+        if (hookTargetSelect) hookTargetSelect.innerHTML = getEventOptions(hookTargetSelect.value);
+    }
+
+    function parseCharacterDetailText(text) {
+        const fields = {
+            "姓名": "name", "定位": "role", "阵营": "faction", "年龄": "age", "外貌": "appearance",
+            "职业": "profession", "性格": "personality", "核心欲望": "core_desire", "目标": "goal",
+            "动机": "motivation", "缺陷": "flaw", "恐惧": "fear", "能力/技能": "skills",
+            "背景": "background", "成长弧光": "character_arc", "简介": "description"
+        };
+        const payload = {};
+        (text || '').split('\n').forEach(line => {
+            const match = line.match(/^【(.+?)】(.*)$/);
+            if (!match || !fields[match[1]]) return;
+            payload[fields[match[1]]] = match[2].trim() === '-' ? '' : match[2].trim();
+        });
+        return payload;
+    }
+
     function ensureAssetOverviewPanel() {
         if (!assetModal || document.getElementById('asset-global-overview')) return;
         const rightPane = assetModal.querySelector('.w-2\\/3');
@@ -313,7 +345,10 @@ document.addEventListener('DOMContentLoaded', () => {
             <div id="asset-global-overview" class="mb-4 grid grid-cols-2 gap-3 text-xs">
                 <div class="bg-gray-950 border border-cyan-900/40 rounded-xl p-3 max-h-40 overflow-y-auto">
                     <h4 class="text-cyan-400 font-bold mb-2 flex items-center"><i data-lucide="scroll" class="w-3 h-3 mr-1"></i>世界观与规则</h4>
-                    <div id="asset-worldview-rules" class="text-gray-300 whitespace-pre-wrap leading-relaxed"></div>
+                    <input id="asset-genre" class="w-full bg-gray-900 border border-gray-800 rounded p-2 text-gray-200 mb-2" placeholder="类型">
+                    <textarea id="asset-worldview" class="w-full bg-gray-900 border border-gray-800 rounded p-2 text-gray-200 h-20 resize-none mb-2" placeholder="世界观"></textarea>
+                    <textarea id="asset-rules" class="w-full bg-gray-900 border border-gray-800 rounded p-2 text-gray-200 h-20 resize-none mb-2" placeholder="规则限制"></textarea>
+                    <button id="btn-save-project-asset" class="w-full py-2 bg-cyan-700 hover:bg-cyan-600 text-white rounded font-bold">保存世界观/规则</button>
                 </div>
                 <div class="bg-gray-950 border border-amber-900/40 rounded-xl p-3 max-h-40 overflow-y-auto">
                     <h4 class="text-amber-400 font-bold mb-2 flex items-center"><i data-lucide="anchor" class="w-3 h-3 mr-1"></i>伏笔设定</h4>
@@ -328,16 +363,68 @@ document.addEventListener('DOMContentLoaded', () => {
         const saveButton = document.getElementById('btn-save-asset');
         if (saveButton && !document.getElementById('asset-character-detail')) {
             saveButton.insertAdjacentHTML('beforebegin', `
-                <div id="asset-character-detail" class="bg-gray-950 border border-blue-900/30 rounded-xl p-3 text-xs text-gray-300 whitespace-pre-wrap leading-relaxed mb-4 max-h-52 overflow-y-auto">
-                    选择左侧角色后，这里会显示完整人物卡。
-                </div>
+                <textarea id="asset-character-detail" class="bg-gray-950 border border-blue-900/30 rounded-xl p-3 text-xs text-gray-300 whitespace-pre-wrap leading-relaxed mb-4 h-52 resize-none" placeholder="选择左侧角色后，这里会显示完整人物卡，可直接编辑后保存。"></textarea>
             `);
+        }
+        const saveProjectBtn = document.getElementById('btn-save-project-asset');
+        if (saveProjectBtn) {
+            saveProjectBtn.onclick = async () => {
+                const payload = {
+                    genre: document.getElementById('asset-genre').value.trim(),
+                    worldview: document.getElementById('asset-worldview').value.trim(),
+                    rules: document.getElementById('asset-rules').value.trim()
+                };
+                const res = await fetch(`/api/projects/${PROJECT_ID}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    await loadProjectSettings();
+                    alert("世界观与规则已保存");
+                } else alert("保存失败：" + (data.error || "未知错误"));
+            };
         }
     }
 
+    window.saveAssetHook = async (id) => {
+        const description = document.getElementById(`asset-hook-desc-${id}`)?.value.trim();
+        const target_chapter = document.getElementById(`asset-hook-target-${id}`)?.value;
+        const annotation = document.getElementById(`asset-hook-note-${id}`)?.value.trim();
+        if (!description || !target_chapter) return alert("伏笔内容和回收事件不能为空");
+        const res = await fetch('/api/workspace/hook', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projectId: PROJECT_ID, id, description, target_chapter, annotation })
+        });
+        const data = await res.json();
+        if (data.success) {
+            await loadGlobalAssetOverview();
+            if (currentLocalContext.chapterId) loadChapterContext(currentLocalContext.chapterId, currentLocalContext.chapterNumber, currentLocalContext.title);
+        } else alert("保存伏笔失败：" + (data.error || "未知错误"));
+    };
+
+    window.saveAssetTimeline = async (id) => {
+        const time_label = document.getElementById(`asset-tl-time-${id}`)?.value.trim();
+        const chapter_number = document.getElementById(`asset-tl-chapter-${id}`)?.value;
+        const description = document.getElementById(`asset-tl-desc-${id}`)?.value.trim();
+        if (!time_label || !chapter_number || !description) return alert("时间、事件、内容不能为空");
+        const res = await fetch('/api/workspace/timeline', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projectId: PROJECT_ID, id, time_label, chapter_number, description })
+        });
+        const data = await res.json();
+        if (data.success) {
+            await loadGlobalAssetOverview();
+            loadTimelineSidebar();
+            if (timelineModal && !timelineModal.classList.contains('hidden')) renderTimelineModal();
+        } else alert("保存时间轴失败：" + (data.error || "未知错误"));
+    };
+
     async function loadGlobalAssetOverview() {
         ensureAssetOverviewPanel();
-        const worldBox = document.getElementById('asset-worldview-rules');
         const hooksBox = document.getElementById('asset-hooks-overview');
         const timelineBox = document.getElementById('asset-timeline-overview');
 
@@ -353,20 +440,30 @@ document.addEventListener('DOMContentLoaded', () => {
                 timelineRes.ok ? timelineRes.json() : Promise.resolve({ events: [] })
             ]);
 
-            if (worldBox) {
-                const project = projectData.project || {};
-                worldBox.textContent = [`【世界观】\n${project.worldview || '暂无'}`, `【规则限制】\n${project.rules || '暂无'}`].join('\n\n');
-            }
+            const project = projectData.project || {};
+            if (document.getElementById('asset-genre')) document.getElementById('asset-genre').value = project.genre || '';
+            if (document.getElementById('asset-worldview')) document.getElementById('asset-worldview').value = project.worldview || '';
+            if (document.getElementById('asset-rules')) document.getElementById('asset-rules').value = project.rules || '';
             if (hooksBox) {
                 const hooks = hooksData.hooks || [];
                 hooksBox.innerHTML = hooks.length > 0
-                    ? hooks.map(h => `<div class="border border-gray-800 rounded p-2"><span class="text-amber-300 font-bold">事件 ${h.source_chapter_number || '-'} -> ${h.target_chapter || '-'}</span><br>${h.description || ''}</div>`).join('')
+                    ? hooks.map(h => `<div class="border border-gray-800 rounded p-2 space-y-1.5">
+                        <textarea id="asset-hook-desc-${h.id}" class="w-full bg-gray-900 border border-gray-800 rounded p-1.5 text-gray-200 h-14 resize-none">${h.description || ''}</textarea>
+                        <select id="asset-hook-target-${h.id}" class="w-full bg-gray-900 border border-gray-800 rounded p-1.5 text-gray-200">${getEventOptions(h.target_chapter)}</select>
+                        <textarea id="asset-hook-note-${h.id}" class="w-full bg-gray-900 border border-gray-800 rounded p-1.5 text-gray-300 h-12 resize-none" placeholder="注释">${h.annotation || ''}</textarea>
+                        <button onclick="saveAssetHook('${h.id}')" class="w-full py-1.5 bg-amber-700 hover:bg-amber-600 text-white rounded font-bold">保存伏笔</button>
+                    </div>`).join('')
                     : `<div class="text-gray-500 italic">暂无伏笔设定</div>`;
             }
             if (timelineBox) {
                 const events = timelineData.events || [];
                 timelineBox.innerHTML = events.length > 0
-                    ? events.map(ev => `<div class="border border-gray-800 rounded p-2"><span class="text-indigo-300 font-bold">${ev.time_label || '未标记时间'} / 事件 ${ev.chapter_number}</span><br>${ev.description || ''}</div>`).join('')
+                    ? events.map(ev => `<div class="border border-gray-800 rounded p-2 space-y-1.5">
+                        <input id="asset-tl-time-${ev.id}" class="w-full bg-gray-900 border border-gray-800 rounded p-1.5 text-gray-200" value="${ev.time_label || ''}" placeholder="时间标度">
+                        <select id="asset-tl-chapter-${ev.id}" class="w-full bg-gray-900 border border-gray-800 rounded p-1.5 text-gray-200">${getEventOptions(ev.chapter_number)}</select>
+                        <textarea id="asset-tl-desc-${ev.id}" class="w-full bg-gray-900 border border-gray-800 rounded p-1.5 text-gray-200 h-14 resize-none">${ev.description || ''}</textarea>
+                        <button onclick="saveAssetTimeline('${ev.id}')" class="w-full py-1.5 bg-indigo-700 hover:bg-indigo-600 text-white rounded font-bold">保存时间轴</button>
+                    </div>`).join('')
                     : `<div class="text-gray-500 italic">暂无时间轴事件</div>`;
             }
             if (window.lucide) lucide.createIcons();
@@ -823,6 +920,7 @@ if (data.success) {
                     if (chapterTree) chapterTree.appendChild(li);
                 });
                 if (window.lucide) lucide.createIcons();
+                refreshEventSelects();
                 if (chapterTree && chapterTree.firstElementChild) chapterTree.firstElementChild.querySelector('div').click();
                 loadTimelineSidebar();
             } else {
@@ -857,7 +955,7 @@ if (data.success) {
     window.removeLocalChar = async (charId) => {
         if (!confirm("确定让该角色离开此事件吗？")) return;
         try {
-            const res = await fetch(`/api/workspace/context/character/${currentLocalContext.chapterId}/${charId}`, { method: 'DELETE' });
+            const res = await fetch(`/api/workspace/context/character/${currentLocalContext.chapterId}/${charId}?projectId=${PROJECT_ID}`, { method: 'DELETE' });
             const data = await res.json();
             if (!data.success) {
                 if (data.setupSql) console.warn("章节人物关联表待创建 SQL:", data.setupSql);
@@ -870,7 +968,7 @@ if (data.success) {
     async function linkCharacterToCurrentChapter(characterId) {
         const res = await fetch(`/api/workspace/context/character`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chapterId: currentLocalContext.chapterId, characterId })
+            body: JSON.stringify({ projectId: PROJECT_ID, chapterId: currentLocalContext.chapterId, characterId })
         });
         const data = await res.json();
         if (!data.success) {
@@ -1204,7 +1302,7 @@ if (data.success) {
             document.getElementById('asset-char-desc').value = char.description || "";
             const detail = document.getElementById('asset-character-detail');
             if (detail) {
-                detail.textContent = [
+                detail.value = [
                     `【姓名】${char.name || '-'}`,
                     `【定位】${char.role || '-'}`,
                     `【阵营】${char.faction || '-'}`,
@@ -1268,10 +1366,11 @@ if (data.success) {
         if (descInput) descInput.value = prefill;
         if (targetInput) targetInput.value = "";
         if (annotationInput) annotationInput.value = "";
+        refreshEventSelects();
         if (hookModal) hookModal.classList.remove('hidden');
     }
 
-    if (btnOpenTimeline) btnOpenTimeline.addEventListener('click', () => { renderTimelineModal(); if(timelineModal) timelineModal.classList.remove('hidden'); });
+    if (btnOpenTimeline) btnOpenTimeline.addEventListener('click', () => { refreshEventSelects(); renderTimelineModal(); if(timelineModal) timelineModal.classList.remove('hidden'); });
     if (btnCloseTimeline) btnCloseTimeline.addEventListener('click', () => { if(timelineModal) timelineModal.classList.add('hidden');});
     if (btnManualHook) btnManualHook.addEventListener('click', () => {
         currentSelectedString = "";
@@ -1653,20 +1752,14 @@ if (data.success) {
         });
     }
 
-    if (btnNewCharacter) {
-        btnNewCharacter.addEventListener('click', () => {
-            document.getElementById('asset-char-id').value = "";
-            document.getElementById('asset-char-name').value = "";
-            document.getElementById('asset-char-role').value = "";
-            document.getElementById('asset-char-faction').value = "";
-            document.getElementById('asset-char-desc').value = "";
-        });
-    }
-
     if (btnSaveAsset) {
         btnSaveAsset.addEventListener('click', async () => {
+            const charId = document.getElementById('asset-char-id').value;
+            if (!charId) return alert("请先从左侧选择要更新的角色。新角色请从主面板“拉入已建角色”里创建。");
+            const detailPayload = parseCharacterDetailText(document.getElementById('asset-character-detail')?.value || "");
             const payload = {
-                projectId: PROJECT_ID, id: document.getElementById('asset-char-id').value || null,
+                ...detailPayload,
+                projectId: PROJECT_ID, id: charId,
                 name: document.getElementById('asset-char-name').value.trim(),
                 role: document.getElementById('asset-char-role').value,
                 faction: document.getElementById('asset-char-faction').value,
@@ -1674,7 +1767,12 @@ if (data.success) {
             };
             if(!payload.name) return alert("姓名不能为空");
             const res = await fetch('/api/workspace/character', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-            if ((await res.json()).success) { loadGlobalAssets(); alert("基因保存成功！"); }
+            const data = await res.json();
+            if (data.success) {
+                await loadGlobalAssets();
+                if (currentLocalContext.chapterId) loadChapterContext(currentLocalContext.chapterId, currentLocalContext.chapterNumber, currentLocalContext.title);
+                alert("全局人物卡已更新，后续调用将使用新数据。");
+            } else alert("保存失败：" + (data.error || "未知错误"));
         });
     }
 
