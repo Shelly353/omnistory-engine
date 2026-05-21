@@ -128,12 +128,15 @@ window.OmniWorkspacePreview = (() => {
                     <div class="bg-gray-950 border border-amber-900/40 rounded-xl p-3">
                         <div class="flex items-center justify-between mb-2">
                             <span class="text-amber-300 text-xs font-bold flex items-center"><i data-lucide="folder-open" class="w-3 h-3 mr-1"></i>本地资料库</span>
-                            <label class="text-[10px] px-2 py-1 bg-amber-900/30 text-amber-200 border border-amber-800 rounded hover:bg-amber-700 hover:text-white cursor-pointer">
-                                选择文件
-                                <input id="local-source-files" type="file" multiple class="hidden" onchange="ingestLocalSourceFiles(this.files); this.value='';">
-                            </label>
+                            <div class="flex gap-2">
+                                <button type="button" onclick="openLocalSourceQa()" class="text-[10px] px-2 py-1 bg-cyan-900/30 text-cyan-200 border border-cyan-800 rounded hover:bg-cyan-700 hover:text-white">问资料</button>
+                                <label class="text-[10px] px-2 py-1 bg-amber-900/30 text-amber-200 border border-amber-800 rounded hover:bg-amber-700 hover:text-white cursor-pointer">
+                                    选择文件
+                                    <input id="local-source-files" type="file" multiple class="hidden" onchange="ingestLocalSourceFiles(this.files); this.value='';">
+                                </label>
+                            </div>
                         </div>
-                        <div class="text-[10px] text-gray-500 mb-2 leading-relaxed">资料只保存在本机浏览器，不上传云端。当前直接支持 TXT/MD/HTML/CSV/JSON；PDF/图片会先记录文件名，后续可接本地解析/OCR。</div>
+                        <div class="text-[10px] text-gray-500 mb-2 leading-relaxed">资料只保存在本机浏览器，不上传云端。点“问资料”可让 AI 只根据本地命中片段回答。当前直接支持 TXT/MD/HTML/CSV/JSON；PDF/图片后续接本地解析/OCR。</div>
                         <div id="local-source-list" class="space-y-1.5 text-xs text-amber-100/80"></div>
                     </div>
                     <div class="bg-gray-950 border border-yellow-900/40 rounded-xl p-3">

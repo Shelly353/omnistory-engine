@@ -284,10 +284,10 @@ document.addEventListener('DOMContentLoaded', () => {
             .slice(-80);
     }
 
-    function getRelevantLocalSourceSnippets(queryText = "", maxSnippets = 6) {
-        if (!localSourceDocs.length) return '';
+    function searchLocalSourceSnippets(queryText = "", maxSnippets = 6) {
+        if (!localSourceDocs.length) return [];
         const terms = extractLocalSourceTerms(queryText);
-        if (!terms.length) return '';
+        if (!terms.length) return [];
         const scored = [];
         localSourceDocs.forEach(doc => {
             (doc.chunks || []).forEach((chunk, index) => {
@@ -300,9 +300,17 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         return scored
             .sort((a, b) => b.score - a.score)
-            .slice(0, maxSnippets)
+            .slice(0, maxSnippets);
+    }
+
+    function formatLocalSourceSnippets(items = []) {
+        return items
             .map(item => `【${item.doc.name} · 片段${item.index + 1}】\n${limitText(item.chunk, 900)}`)
             .join('\n\n');
+    }
+
+    function getRelevantLocalSourceSnippets(queryText = "", maxSnippets = 6) {
+        return formatLocalSourceSnippets(searchLocalSourceSnippets(queryText, maxSnippets));
     }
 
     async function loadLocalSourceDocs() {
@@ -367,6 +375,92 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `).join('') : `<div class="text-gray-500 italic">尚未选择本地资料文件。</div>`;
         if (window.lucide) lucide.createIcons();
+    }
+
+    function ensureLocalSourceQaModal() {
+        let modal = document.getElementById('local-source-qa-modal');
+        if (modal) return modal;
+        document.body.insertAdjacentHTML('beforeend', `
+            <div id="local-source-qa-modal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-[88] hidden flex items-center justify-center p-6">
+                <div class="bg-gray-900 border border-amber-500/50 rounded-2xl p-6 w-full max-w-4xl h-[84vh] shadow-2xl flex flex-col">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-bold text-white flex items-center"><i data-lucide="search-check" class="w-5 h-5 mr-2 text-amber-300"></i>本地资料问答</h3>
+                        <button id="btn-close-local-source-qa" class="text-gray-500 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4 flex-1 min-h-0">
+                        <div class="flex flex-col min-h-0">
+                            <textarea id="local-source-question" class="bg-gray-950 border border-gray-700 rounded-xl p-3 text-sm text-white h-24 resize-none" placeholder="问资料：例如“明代县令上级有哪些官职？县令能否直接见皇帝？”"></textarea>
+                            <button id="btn-ask-local-source" class="mt-2 py-2 bg-amber-700 hover:bg-amber-600 text-white rounded-xl font-bold">只根据本地资料回答</button>
+                            <div class="mt-4 text-xs text-gray-500">命中片段</div>
+                            <div id="local-source-hit-list" class="mt-2 flex-1 overflow-y-auto bg-gray-950 border border-gray-800 rounded-xl p-3 text-xs text-amber-100/80 whitespace-pre-wrap"></div>
+                        </div>
+                        <div class="flex flex-col min-h-0">
+                            <div class="text-xs text-gray-500 mb-2">资料回答</div>
+                            <textarea id="local-source-answer" class="flex-1 bg-gray-950 border border-gray-800 rounded-xl p-3 text-sm text-gray-100 resize-none" placeholder="回答会出现在这里。如果资料中没有，AI 必须说未找到。"></textarea>
+                            <button id="btn-apply-local-source-answer" class="mt-2 py-2 bg-cyan-700 hover:bg-cyan-600 text-white rounded-xl font-bold">加入规则/专家</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `);
+        modal = document.getElementById('local-source-qa-modal');
+        document.getElementById('btn-close-local-source-qa').onclick = () => modal.classList.add('hidden');
+        document.getElementById('btn-ask-local-source').onclick = askLocalSourceQuestion;
+        document.getElementById('btn-apply-local-source-answer').onclick = applyLocalSourceAnswerToRules;
+        if (window.lucide) lucide.createIcons();
+        return modal;
+    }
+
+    window.openLocalSourceQa = () => {
+        const modal = ensureLocalSourceQaModal();
+        const hitList = document.getElementById('local-source-hit-list');
+        if (hitList) hitList.textContent = localSourceDocs.length
+            ? `已索引 ${localSourceDocs.length} 个本地资料文件。`
+            : '还没有本地资料，请先选择文件。';
+        modal.classList.remove('hidden');
+    };
+
+    async function askLocalSourceQuestion() {
+        const questionInput = document.getElementById('local-source-question');
+        const answerBox = document.getElementById('local-source-answer');
+        const hitList = document.getElementById('local-source-hit-list');
+        const question = questionInput?.value.trim();
+        if (!question) return alert('请先输入资料问题。');
+        const hits = searchLocalSourceSnippets(question, 8);
+        const snippets = formatLocalSourceSnippets(hits);
+        if (hitList) hitList.textContent = snippets || '本地资料中未命中相关片段。';
+        if (!snippets) {
+            if (answerBox) answerBox.value = '资料中未找到相关内容。你可以换关键词，或加入更多本地资料。';
+            return;
+        }
+        if (answerBox) answerBox.value = '正在根据本地资料回答...';
+        const prompt = `你是本地资料问答助手。只能根据【本地资料命中片段】回答，不得使用外部知识补全。
+如果片段不足以回答，必须说“资料中未找到/资料不足以确认”，并说明还需要什么关键词或资料。
+回答要标注来自哪个文件/片段，并给出可直接用于创作或规则设定的结论。
+
+【问题】\n${question}
+
+【本地资料命中片段】\n${snippets}`;
+        try {
+            const res = await fetch('/api/chat/deduce', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(buildChatPayload([{ role: 'user', content: prompt }], 1))
+            });
+            const data = await res.json();
+            if (answerBox) answerBox.value = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `资料问答失败：${data.error || '未知错误'}`;
+        } catch (e) {
+            if (answerBox) answerBox.value = '资料问答请求失败，请稍后重试。';
+        }
+    }
+
+    function applyLocalSourceAnswerToRules() {
+        const answer = document.getElementById('local-source-answer')?.value.trim();
+        if (!answer) return alert('没有可加入的资料回答。');
+        const rules = document.getElementById('prev-rules') || document.getElementById('asset-rules');
+        if (!rules) return alert('请先打开规则/专家面板。');
+        rules.value = [rules.value.trim(), `【本地资料问答结论】\n${answer}`].filter(Boolean).join('\n\n');
+        alert('已加入规则/专家。记得保存或正式铸造入库。');
     }
 
     function collectBibleFromPreview() {
