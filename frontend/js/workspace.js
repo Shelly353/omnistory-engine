@@ -265,6 +265,56 @@ document.addEventListener('DOMContentLoaded', () => {
         return value.replace(/\s+/g, ' ').trim();
     }
 
+    function loadExternalScript(src, globalName) {
+        if (globalName && window[globalName]) return Promise.resolve(window[globalName]);
+        return new Promise((resolve, reject) => {
+            const existing = Array.from(document.scripts).find(script => script.src === src);
+            if (existing) {
+                existing.addEventListener('load', () => resolve(globalName ? window[globalName] : true), { once: true });
+                existing.addEventListener('error', reject, { once: true });
+                return;
+            }
+            const script = document.createElement('script');
+            script.src = src;
+            script.onload = () => resolve(globalName ? window[globalName] : true);
+            script.onerror = () => reject(new Error(`无法加载解析库：${src}`));
+            document.head.appendChild(script);
+        });
+    }
+
+    async function extractPdfText(file) {
+        const pdfjsLib = await loadExternalScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', 'pdfjsLib');
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        const data = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data }).promise;
+        const pageTexts = [];
+        for (let pageNo = 1; pageNo <= pdf.numPages; pageNo++) {
+            const page = await pdf.getPage(pageNo);
+            const content = await page.getTextContent();
+            const text = content.items.map(item => item.str || '').join(' ');
+            if (text.trim()) pageTexts.push(`【第 ${pageNo} 页】\n${text}`);
+        }
+        return pageTexts.join('\n\n');
+    }
+
+    async function extractImageText(file) {
+        const Tesseract = await loadExternalScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js', 'Tesseract');
+        const result = await Tesseract.recognize(file, 'chi_sim+eng', {
+            logger: (info) => {
+                const list = document.getElementById('local-source-list');
+                if (list && info.status) list.dataset.status = `${file.name}: ${info.status} ${Math.round((info.progress || 0) * 100)}%`;
+            }
+        });
+        return result?.data?.text || '';
+    }
+
+    async function extractLocalSourceText(file) {
+        if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf') return extractPdfText(file);
+        if (/^image\//.test(file.type) || /\.(png|jpe?g|webp|bmp|gif|tiff?)$/i.test(file.name)) return extractImageText(file);
+        const raw = await file.text();
+        return normalizeLocalSourceText(file.name, raw);
+    }
+
     function chunkLocalSourceText(text, size = 900, overlap = 120) {
         const chunks = [];
         for (let i = 0; i < text.length; i += (size - overlap)) {
@@ -333,28 +383,45 @@ document.addEventListener('DOMContentLoaded', () => {
         const fileList = Array.from(files || []);
         if (!fileList.length) return;
         const unsupported = [];
+        const failed = [];
+        const list = document.getElementById('local-source-list');
+        if (list) list.innerHTML = `<div class="text-amber-300 animate-pulse">正在本地解析 ${fileList.length} 个文件，PDF/图片可能需要稍等...</div>`;
         for (const file of fileList) {
             const isReadableText = /\.(txt|md|markdown|html?|csv|json|xml|log)$/i.test(file.name) || /^text\//.test(file.type);
-            if (!isReadableText) {
+            const isPdf = /\.pdf$/i.test(file.name) || file.type === 'application/pdf';
+            const isImage = /^image\//.test(file.type) || /\.(png|jpe?g|webp|bmp|gif|tiff?)$/i.test(file.name);
+            const isSupported = isReadableText || isPdf || isImage;
+            if (!isSupported) {
                 unsupported.push(file.name);
                 continue;
             }
-            const raw = await file.text();
-            const text = normalizeLocalSourceText(file.name, raw);
-            if (!text) continue;
-            const doc = {
-                id: `${PROJECT_ID}:${Date.now()}:${Math.random().toString(36).slice(2)}`,
-                projectId: PROJECT_ID,
-                name: file.name,
-                type: file.type || 'text/plain',
-                size: file.size,
-                createdAt: new Date().toISOString(),
-                chunks: chunkLocalSourceText(text)
-            };
-            await runLocalSourceStore('readwrite', store => store.put(doc));
+            try {
+                if (list) list.innerHTML = `<div class="text-amber-300 animate-pulse">正在解析：${escapeHtml(file.name)}</div>`;
+                const text = normalizeLocalSourceText(file.name, await extractLocalSourceText(file));
+                if (!text) {
+                    failed.push(`${file.name}（未识别到文字）`);
+                    continue;
+                }
+                const doc = {
+                    id: `${PROJECT_ID}:${Date.now()}:${Math.random().toString(36).slice(2)}`,
+                    projectId: PROJECT_ID,
+                    name: file.name,
+                    type: file.type || 'application/octet-stream',
+                    size: file.size,
+                    createdAt: new Date().toISOString(),
+                    chunks: chunkLocalSourceText(text)
+                };
+                await runLocalSourceStore('readwrite', store => store.put(doc));
+            } catch (e) {
+                console.error('本地资料解析失败:', file.name, e);
+                failed.push(file.name);
+            }
         }
         await loadLocalSourceDocs();
-        if (unsupported.length) alert(`这些文件当前版本暂不能直接解析，未写入索引：\n${unsupported.join('\n')}\n\nPDF/图片下一步需要接本地 PDF 解析/OCR。`);
+        const notes = [];
+        if (unsupported.length) notes.push(`不支持的文件：\n${unsupported.join('\n')}`);
+        if (failed.length) notes.push(`解析失败或未识别文字：\n${failed.join('\n')}`);
+        if (notes.length) alert(notes.join('\n\n'));
     };
 
     window.deleteLocalSourceDoc = async (id) => {

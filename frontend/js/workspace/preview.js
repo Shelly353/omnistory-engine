@@ -136,7 +136,7 @@ window.OmniWorkspacePreview = (() => {
                                 </label>
                             </div>
                         </div>
-                        <div class="text-[10px] text-gray-500 mb-2 leading-relaxed">资料只保存在本机浏览器，不上传云端。点“问资料”可让 AI 只根据本地命中片段回答。当前直接支持 TXT/MD/HTML/CSV/JSON；PDF/图片后续接本地解析/OCR。</div>
+                        <div class="text-[10px] text-gray-500 mb-2 leading-relaxed">资料只保存在本机浏览器，不上传云端。点“问资料”可让 AI 只根据本地命中片段回答。支持 TXT/MD/HTML/CSV/JSON、PDF，以及图片 OCR。</div>
                         <div id="local-source-list" class="space-y-1.5 text-xs text-amber-100/80"></div>
                     </div>
                     <div class="bg-gray-950 border border-yellow-900/40 rounded-xl p-3">
