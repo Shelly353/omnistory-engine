@@ -40,6 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let workspaceChapters = [];
     let saveTimeout;
     let currentSelectedString = "";
+    let insertEventContext = { prev: null, next: null, suggestedNumber: null, chat: [] };
 
     const RECENT_CHAT_LIMIT = 10;
     const MEMORY_SUMMARY_LIMIT = 6000;
@@ -55,6 +56,16 @@ document.addEventListener('DOMContentLoaded', () => {
             memoryLimit: MEMORY_SUMMARY_LIMIT,
             messageLimit: MESSAGE_CONTENT_LIMIT
         });
+    }
+
+    function escapeHtml(text = "") {
+        return String(text).replace(/[&<>"']/g, (char) => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[char]));
     }
 
     function buildGenesisChatPayload() {
@@ -155,6 +166,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnAddChapter = document.getElementById('btn-add-chapter');
     const btnCancelChapter = document.getElementById('btn-cancel-chapter');
     const btnConfirmChapter = document.getElementById('btn-confirm-chapter');
+    const btnInsertEventChat = document.getElementById('btn-insert-event-chat');
     
     const btnTriggerHook = document.getElementById('btn-trigger-hook');
     const btnSelectionHook = document.getElementById('btn-selection-hook');
@@ -347,33 +359,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function ensureAssetOverviewPanel() {
         if (!assetModal || document.getElementById('asset-global-overview')) return;
-        const rightPane = assetModal.querySelector('.w-2\\/3');
+        const rightPane = assetModal.querySelector('.asset-overview-pane');
         if (!rightPane) return;
         rightPane.insertAdjacentHTML('afterbegin', `
-            <div id="asset-global-overview" class="mb-4 grid grid-cols-2 gap-3 text-xs">
-                <div class="bg-gray-950 border border-cyan-900/40 rounded-xl p-3 max-h-40 overflow-y-auto">
+            <div id="asset-global-overview" class="grid grid-cols-2 gap-3 text-xs">
+                <div class="bg-gray-950 border border-cyan-900/40 rounded-xl p-3 max-h-72 overflow-y-auto">
                     <h4 class="text-cyan-400 font-bold mb-2 flex items-center"><i data-lucide="scroll" class="w-3 h-3 mr-1"></i>世界观与规则</h4>
                     <input id="asset-genre" class="w-full bg-gray-900 border border-gray-800 rounded p-2 text-gray-200 mb-2" placeholder="类型">
                     <textarea id="asset-worldview" class="w-full bg-gray-900 border border-gray-800 rounded p-2 text-gray-200 h-20 resize-none mb-2" placeholder="世界观"></textarea>
                     <textarea id="asset-rules" class="w-full bg-gray-900 border border-gray-800 rounded p-2 text-gray-200 h-20 resize-none mb-2" placeholder="规则限制"></textarea>
-                    <button id="btn-save-project-asset" class="w-full py-2 bg-cyan-700 hover:bg-cyan-600 text-white rounded font-bold">保存世界观/规则</button>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button id="btn-save-project-asset" class="py-2 bg-cyan-700 hover:bg-cyan-600 text-white rounded font-bold">保存世界观/规则</button>
+                        <button id="btn-discuss-rules" class="py-2 bg-purple-700 hover:bg-purple-600 text-white rounded font-bold">AI 谈论规则</button>
+                        <button id="btn-auto-rule-check" class="py-2 bg-yellow-700 hover:bg-yellow-600 text-white rounded font-bold">自动检测冲突</button>
+                        <button id="btn-manual-rule-check" class="py-2 bg-gray-700 hover:bg-gray-600 text-white rounded font-bold">手动检测</button>
+                    </div>
+                    <div id="asset-rule-check-result" class="mt-3 text-yellow-200 whitespace-pre-wrap leading-relaxed"></div>
                 </div>
-                <div class="bg-gray-950 border border-amber-900/40 rounded-xl p-3 max-h-40 overflow-y-auto">
+                <div class="bg-gray-950 border border-amber-900/40 rounded-xl p-3 max-h-72 overflow-y-auto">
                     <h4 class="text-amber-400 font-bold mb-2 flex items-center"><i data-lucide="anchor" class="w-3 h-3 mr-1"></i>伏笔设定</h4>
                     <div id="asset-hooks-overview" class="text-gray-300 space-y-1.5"></div>
                 </div>
-                <div class="bg-gray-950 border border-indigo-900/40 rounded-xl p-3 max-h-40 overflow-y-auto col-span-2">
+                <div class="bg-gray-950 border border-indigo-900/40 rounded-xl p-3 max-h-64 overflow-y-auto col-span-2">
                     <h4 class="text-indigo-400 font-bold mb-2 flex items-center"><i data-lucide="clock" class="w-3 h-3 mr-1"></i>时间轴</h4>
                     <div id="asset-timeline-overview" class="text-gray-300 grid grid-cols-2 gap-2"></div>
                 </div>
             </div>
         `);
-        const saveButton = document.getElementById('btn-save-asset');
-        if (saveButton && !document.getElementById('asset-character-detail')) {
-            saveButton.insertAdjacentHTML('beforebegin', `
-                <textarea id="asset-character-detail" class="bg-gray-950 border border-blue-900/30 rounded-xl p-3 text-xs text-gray-300 whitespace-pre-wrap leading-relaxed mb-4 h-80 resize-none" placeholder="选择左侧角色后，这里会显示完整人物卡，可直接编辑后保存。"></textarea>
-            `);
-        }
         const saveProjectBtn = document.getElementById('btn-save-project-asset');
         if (saveProjectBtn) {
             saveProjectBtn.onclick = async () => {
@@ -390,10 +402,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await res.json();
                 if (data.success) {
                     await loadProjectSettings();
+                    await runRuleConflictCheck("刚刚保存的世界观/规则");
                     alert("世界观与规则已保存");
                 } else alert("保存失败：" + (data.error || "未知错误"));
             };
         }
+        const discussRulesBtn = document.getElementById('btn-discuss-rules');
+        if (discussRulesBtn) discussRulesBtn.onclick = openRulesDiscussion;
+        const autoRuleCheckBtn = document.getElementById('btn-auto-rule-check');
+        if (autoRuleCheckBtn) autoRuleCheckBtn.onclick = () => runRuleConflictCheck();
+        const manualRuleCheckBtn = document.getElementById('btn-manual-rule-check');
+        if (manualRuleCheckBtn) manualRuleCheckBtn.onclick = () => runRuleConflictCheck(prompt("要重点检测什么规则或事件？") || "");
     }
 
     window.saveAssetHook = async (id) => {
@@ -430,6 +449,127 @@ document.addEventListener('DOMContentLoaded', () => {
             if (timelineModal && !timelineModal.classList.contains('hidden')) renderTimelineModal();
         } else alert("保存时间轴失败：" + (data.error || "未知错误"));
     };
+
+    function getRulesTextForPrompt() {
+        const worldview = document.getElementById('asset-worldview')?.value.trim() || '';
+        const rules = document.getElementById('asset-rules')?.value.trim() || '';
+        return [`【世界观】\n${worldview || '暂无'}`, `【规则限制】\n${rules || '暂无'}`].join('\n\n');
+    }
+
+    function ensureRulesDiscussionModal() {
+        let modal = document.getElementById('rules-discussion-modal');
+        if (modal) return modal;
+        document.body.insertAdjacentHTML('beforeend', `
+            <div id="rules-discussion-modal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-[85] hidden flex items-center justify-center p-6">
+                <div class="bg-gray-900 border border-cyan-500/50 rounded-2xl p-6 w-full max-w-3xl h-[82vh] shadow-2xl flex flex-col">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-bold text-white flex items-center"><i data-lucide="scroll" class="w-5 h-5 mr-2 text-cyan-400"></i>规则与世界观讨论</h3>
+                        <button id="btn-close-rules-discussion" class="text-gray-500 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+                    </div>
+                    <div id="rules-discussion-history" class="flex-1 overflow-y-auto bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-3 text-xs"></div>
+                    <div class="flex gap-2 mt-4">
+                        <textarea id="rules-discussion-input" class="flex-1 bg-gray-950 border border-gray-700 rounded-xl p-3 text-sm text-white h-20 resize-none" placeholder="讨论架空世界、经济、政治、文化、种族、技能、限制与代价..."></textarea>
+                        <button id="btn-send-rules-discussion" class="px-4 bg-cyan-700 hover:bg-cyan-600 text-white rounded-xl font-bold">发送</button>
+                    </div>
+                    <button id="btn-apply-rules-discussion" class="mt-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl font-bold">将最新 AI 回复应用为新规则</button>
+                </div>
+            </div>
+        `);
+        modal = document.getElementById('rules-discussion-modal');
+        document.getElementById('btn-close-rules-discussion').onclick = () => modal.classList.add('hidden');
+        document.getElementById('btn-send-rules-discussion').onclick = sendRulesDiscussion;
+        document.getElementById('btn-apply-rules-discussion').onclick = async () => {
+            const messages = Array.from(document.querySelectorAll('#rules-discussion-history [data-role="assistant"]'));
+            const latest = messages[messages.length - 1]?.innerText.trim();
+            if (!latest) return alert("还没有 AI 回复可应用");
+            document.getElementById('asset-rules').value = latest;
+            await runRuleConflictCheck("刚刚应用的新规则");
+            modal.classList.add('hidden');
+        };
+        if (window.lucide) lucide.createIcons();
+        return modal;
+    }
+
+    let rulesDiscussion = [];
+    function appendRulesDiscussion(role, text) {
+        const box = document.getElementById('rules-discussion-history');
+        if (!box) return;
+        box.innerHTML += `<div data-role="${role}" class="${role === 'user' ? 'ml-12 bg-cyan-900/40' : 'mr-12 bg-gray-800'} p-3 rounded-xl whitespace-pre-wrap leading-relaxed">${escapeHtml(text)}</div>`;
+        box.scrollTop = box.scrollHeight;
+    }
+
+    async function openRulesDiscussion() {
+        const modal = ensureRulesDiscussionModal();
+        rulesDiscussion = [{
+            role: 'assistant',
+            content: `我们可以专门打磨这套世界规则。重点会检查：经济、政治、文化、种族、技能/力量体系的优势与代价，避免无敌设定，并确保所有能力都有制约。`
+        }];
+        const box = document.getElementById('rules-discussion-history');
+        if (box) box.innerHTML = '';
+        appendRulesDiscussion('assistant', rulesDiscussion[0].content);
+        document.getElementById('rules-discussion-input').value = '';
+        modal.classList.remove('hidden');
+    }
+
+    async function sendRulesDiscussion() {
+        const input = document.getElementById('rules-discussion-input');
+        const text = input.value.trim();
+        if (!text) return;
+        input.value = '';
+        rulesDiscussion.push({ role: 'user', content: text });
+        appendRulesDiscussion('user', text);
+        const prompt = `请基于当前规则继续讨论，并特别明确优势、劣势、成本、限制、反制方式，避免无敌设定。\n${getRulesTextForPrompt()}`;
+        const convo = [...rulesDiscussion, { role: 'user', content: prompt }];
+        const res = await fetch('/api/chat/deduce', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildChatPayload(convo, 8))
+        });
+        const data = await res.json();
+        const reply = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `讨论失败：${data.error || '未知错误'}`;
+        rulesDiscussion.push({ role: 'assistant', content: reply });
+        appendRulesDiscussion('assistant', reply);
+    }
+
+    async function runRuleConflictCheck(extraFocus = "") {
+        const resultBox = document.getElementById('asset-rule-check-result');
+        if (resultBox) resultBox.textContent = "检测中...";
+        const eventText = workspaceChapters.map(ch => `事件 ${ch.chapter_number}《${ch.title}》\n${ch.content || ''}`).join('\n\n');
+        const convo = [{
+            role: 'user',
+            content: `请检测以下事件是否与世界观/规则冲突。重点检查架空世界的经济、政治、文化、种族、技能体系是否出现无代价、无制约、无反制的设定。请输出：冲突点、涉及事件、为什么冲突、修正建议。\n${extraFocus ? `【额外检测重点】${extraFocus}\n` : ''}\n${getRulesTextForPrompt()}\n\n【事件列表】\n${eventText}`
+        }];
+        const res = await fetch('/api/chat/deduce', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildChatPayload(convo, 1))
+        });
+        const data = await res.json();
+        if (resultBox) resultBox.textContent = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `检测失败：${data.error || '未知错误'}`;
+    }
+
+    function ensureCharacterAssetModal() {
+        let modal = document.getElementById('asset-character-modal');
+        if (modal) return modal;
+        document.body.insertAdjacentHTML('beforeend', `
+            <div id="asset-character-modal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-[86] hidden flex items-center justify-center p-6">
+                <div class="bg-gray-900 border border-blue-500/50 rounded-2xl p-6 w-full max-w-2xl h-[80vh] shadow-2xl flex flex-col">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 id="asset-character-modal-title" class="text-lg font-bold text-white">人物卡</h3>
+                        <button id="btn-close-asset-character" class="text-gray-500 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+                    </div>
+                    <input type="hidden" id="asset-char-id">
+                    <textarea id="asset-character-detail" class="flex-1 bg-gray-950 border border-blue-900/30 rounded-xl p-4 text-xs text-gray-300 whitespace-pre-wrap leading-relaxed resize-none"></textarea>
+                    <button id="btn-save-asset" class="mt-4 py-3 bg-blue-600 text-white rounded-xl font-bold">保存人物卡</button>
+                </div>
+            </div>
+        `);
+        modal = document.getElementById('asset-character-modal');
+        document.getElementById('btn-close-asset-character').onclick = () => modal.classList.add('hidden');
+        document.getElementById('btn-save-asset').onclick = saveSelectedAssetCharacter;
+        if (window.lucide) lucide.createIcons();
+        return modal;
+    }
 
     async function loadGlobalAssetOverview() {
         ensureAssetOverviewPanel();
@@ -599,7 +739,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if(subChatTitle) subChatTitle.innerHTML = `<i data-lucide="cpu" class="text-blue-400 mr-2"></i> ${type === 'worldview' ? '世界观' : '法则与戒律'} 局部深度推演`;
         
         let initialData = type === 'worldview' ? (document.getElementById('prev-worldview') ? document.getElementById('prev-worldview').value : "") : (document.getElementById('prev-rules') ? document.getElementById('prev-rules').value : "");
-        const initPrompt = `我们现在单独探讨小说的【${type === 'worldview' ? '世界观背景' : '核心法则与戒律'}】。目前已有的设定是：“${initialData}”。请你作为专家，帮我完善这部分细节，丰富它的层次，每次提1-2个拓展建议。`;
+        const initPrompt = `我们现在单独探讨小说的【${type === 'worldview' ? '世界观背景' : '核心法则与戒律'}】。目前已有的设定是：“${initialData}”。请你作为架空世界设定专家帮我完善这部分细节，每次提1-2个可选择方向，并必须明确：
+1. 经济、政治、文化、种族、技能/力量体系如何运转；
+2. 每个优势对应的劣势、成本、限制、反制方式；
+3. 禁止无敌、万能、无代价设定；
+4. 讨论结束后整理成可直接入库的新设定，并指出现有事件可能产生的规则冲突。`;
         
         subConversation.push({ role: 'user', content: initPrompt });
         appendSubMsg('user', "已唤醒局部脑区...");
@@ -910,20 +1054,26 @@ if (data.success) {
             if (data.success && data.chapters.length > 0) {
                 workspaceChapters = data.chapters.slice().sort((a,b) => a.chapter_number - b.chapter_number);
                 if (chapterTree) chapterTree.innerHTML = '';
-                workspaceChapters.forEach(chap => {
+                workspaceChapters.forEach((chap, index) => {
                     const li = document.createElement('li');
                     const icon = chap.plot_type === 'sub' ? 'git-branch' : 'git-commit';
-                    li.className = `px-2 py-2 text-sm text-gray-400 hover:bg-gray-800 hover:text-white rounded-lg transition flex items-center justify-between group`;
+                    li.className = `text-sm text-gray-400`;
+                    const prevChap = workspaceChapters[index - 1] || null;
+                    const nextChap = workspaceChapters[index + 1] || null;
 
                     li.innerHTML = `
-                        <div class="flex-1 flex items-center truncate cursor-pointer" onclick="document.querySelectorAll('#chapter-tree li').forEach(el => el.classList.remove('bg-gray-800', 'text-white', 'border-l-2', 'border-purple-500')); this.parentElement.classList.add('bg-gray-800', 'text-white', 'border-l-2', 'border-purple-500'); loadChapterContext('${chap.id}', ${chap.chapter_number}, '${chap.title.replace(/'/g, "\\'")}');">
-                            <i data-lucide="${icon}" class="w-4 h-4 mr-2 ${chap.plot_type === 'sub' ? 'text-blue-400' : 'text-purple-400'} opacity-70"></i>
-                            <span class="truncate">事件 ${chap.chapter_number}: ${chap.title}</span>
+                        <button onclick="openInsertEventModal(${prevChap ? prevChap.chapter_number : 'null'}, ${chap.chapter_number})" class="w-full text-[10px] text-gray-600 hover:text-purple-300 hover:bg-purple-950/30 rounded py-0.5 flex items-center justify-center" title="在此事件前插入"><i data-lucide="plus" class="w-3 h-3"></i></button>
+                        <div class="px-2 py-2 hover:bg-gray-800 hover:text-white rounded-lg transition flex items-center justify-between group">
+                            <div class="flex-1 flex items-center truncate cursor-pointer" onclick="document.querySelectorAll('#chapter-tree li > div').forEach(el => el.classList.remove('bg-gray-800', 'text-white', 'border-l-2', 'border-purple-500')); this.parentElement.classList.add('bg-gray-800', 'text-white', 'border-l-2', 'border-purple-500'); loadChapterContext('${chap.id}', ${chap.chapter_number}, '${chap.title.replace(/'/g, "\\'")}');">
+                                <i data-lucide="${icon}" class="w-4 h-4 mr-2 ${chap.plot_type === 'sub' ? 'text-blue-400' : 'text-purple-400'} opacity-70"></i>
+                                <span class="truncate">事件 ${chap.chapter_number}: ${chap.title}</span>
+                            </div>
+                            <div class="flex space-x-1 opacity-0 group-hover:opacity-100 transition px-1">
+                                <button onclick="renameEventNode('${chap.id}', '${chap.title.replace(/'/g, "\\'")}')" class="text-gray-500 hover:text-blue-400" title="重命名"><i data-lucide="edit-2" class="w-3.5 h-3.5"></i></button>
+                                <button onclick="deleteEventNode('${chap.id}')" class="text-gray-500 hover:text-red-500" title="抹除此事件"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+                            </div>
                         </div>
-                        <div class="flex space-x-1 opacity-0 group-hover:opacity-100 transition px-1">
-                            <button onclick="renameEventNode('${chap.id}', '${chap.title.replace(/'/g, "\\'")}')" class="text-gray-500 hover:text-blue-400" title="重命名"><i data-lucide="edit-2" class="w-3.5 h-3.5"></i></button>
-                            <button onclick="deleteEventNode('${chap.id}')" class="text-gray-500 hover:text-red-500" title="抹除此事件"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
-                        </div>
+                        ${index === workspaceChapters.length - 1 ? `<button onclick="openInsertEventModal(${chap.chapter_number}, null)" class="w-full text-[10px] text-gray-600 hover:text-purple-300 hover:bg-purple-950/30 rounded py-0.5 flex items-center justify-center" title="在此事件后插入"><i data-lucide="plus" class="w-3 h-3"></i></button>` : ''}
                     `;
                     if (chapterTree) chapterTree.appendChild(li);
                 });
@@ -959,6 +1109,104 @@ if (data.success) {
             loadWorkspaceTree();
         } catch (e) { alert('删除失败'); }
     };
+
+    function findChapterByNumber(num) {
+        if (num === null || num === undefined) return null;
+        return workspaceChapters.find(ch => Number(ch.chapter_number) === Number(num)) || null;
+    }
+
+    function describeInsertChapter(chapter) {
+        return chapter ? `事件 ${chapter.chapter_number}《${chapter.title}》\n${chapter.content || '暂无梗概'}` : '无';
+    }
+
+    window.openInsertEventModal = (prevNum, nextNum) => {
+        const prev = findChapterByNumber(prevNum);
+        const next = findChapterByNumber(nextNum);
+        let suggestedNumber = 1;
+        if (prev && next) suggestedNumber = Number(((Number(prev.chapter_number) + Number(next.chapter_number)) / 2).toFixed(2));
+        else if (prev) suggestedNumber = Number(prev.chapter_number) + 1;
+        else if (next) suggestedNumber = Math.max(0.1, Number(next.chapter_number) - 0.1);
+
+        insertEventContext = { prev, next, suggestedNumber, chat: [] };
+        document.getElementById('new-chapter-num').value = suggestedNumber;
+        document.getElementById('new-chapter-title').value = "";
+        document.getElementById('new-chapter-type').value = "main";
+        document.getElementById('new-chapter-draft').value = "";
+        document.getElementById('insert-prev-context').innerText = describeInsertChapter(prev);
+        document.getElementById('insert-next-context').innerText = describeInsertChapter(next);
+        const history = document.getElementById('insert-event-chat-history');
+        if (history) history.innerHTML = `<div class="bg-gray-800 p-2 rounded">告诉我这个新事件大概想承担什么作用，我会帮你检查它如何承接前后事件。</div>`;
+        if (addChapterModal) addChapterModal.classList.remove('hidden');
+    };
+
+    function appendInsertEventMsg(role, text) {
+        const history = document.getElementById('insert-event-chat-history');
+        if (!history) return;
+        const row = document.createElement('div');
+        row.className = `${role === 'user' ? 'ml-8 bg-purple-900/50 text-purple-50' : 'mr-8 bg-gray-800 text-gray-200'} p-2 rounded leading-relaxed whitespace-pre-wrap`;
+        row.textContent = text;
+        history.appendChild(row);
+        history.scrollTop = history.scrollHeight;
+    }
+
+    function applyInsertConsensus(reply) {
+        const draft = document.getElementById('new-chapter-draft');
+        const title = document.getElementById('new-chapter-title');
+        if (!draft || draft.value.trim()) return;
+        const consensus = reply.match(/【可写入事件草稿】([\s\S]*)/);
+        const titleMatch = reply.match(/事件标题[：:]\s*(.+)/);
+        if (title && !title.value.trim() && titleMatch) title.value = titleMatch[1].trim().slice(0, 80);
+        draft.value = (consensus ? consensus[1] : reply).trim().slice(0, 1400);
+    }
+
+    async function sendInsertEventChat() {
+        const input = document.getElementById('insert-event-chat-input');
+        const text = input?.value.trim();
+        if (!text) return;
+        input.value = '';
+        insertEventContext.chat.push({ role: 'user', content: text });
+        appendInsertEventMsg('user', text);
+
+        const prevText = describeInsertChapter(insertEventContext.prev);
+        const nextText = describeInsertChapter(insertEventContext.next);
+        const currentDraft = document.getElementById('new-chapter-draft')?.value.trim() || '暂无';
+        const hiddenGuide = `你是叙事事件桥接编辑。请帮助作者设计一个插入在前后事件之间的新事件。
+【前置事件】\n${limitText(prevText, 1400)}
+【后置事件】\n${limitText(nextText, 1400)}
+【当前草稿】\n${limitText(currentDraft, 900)}
+
+要求：
+1. 只讨论这个新事件如何承接前置事件、推动到后置事件。
+2. 明确人物行动的动机、阻力、代价、不可逆后果。
+3. 检查是否违背世界观与核心戒律，若冲突请给出修正方向。
+4. 不要替作者强行定稿；每次回复最后给 2-4 个可选择方向。
+5. 如果信息足够，请用“【可写入事件草稿】”给出一段可直接放进事件草稿框的共识摘要。`;
+
+        const loadingId = `insert-event-loading-${Date.now()}`;
+        const history = document.getElementById('insert-event-chat-history');
+        if (history) {
+            history.insertAdjacentHTML('beforeend', `<div id="${loadingId}" class="mr-8 bg-gray-800 p-2 rounded text-gray-400 animate-pulse">正在推演事件关联...</div>`);
+            history.scrollTop = history.scrollHeight;
+        }
+
+        try {
+            const convo = [...insertEventContext.chat, { role: 'user', content: hiddenGuide }];
+            const res = await fetch('/api/chat/deduce', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(buildChatPayload(convo, 8))
+            });
+            const data = await res.json();
+            document.getElementById(loadingId)?.remove();
+            const reply = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `事件推演失败：${data.error || '未知错误'}`;
+            insertEventContext.chat.push({ role: 'assistant', content: reply });
+            appendInsertEventMsg('assistant', reply);
+            if (data.success) applyInsertConsensus(reply);
+        } catch (e) {
+            document.getElementById(loadingId)?.remove();
+            appendInsertEventMsg('assistant', "事件推演请求失败，请稍后再试。");
+        }
+    }
 
     window.removeLocalChar = async (charId) => {
         if (!confirm("确定让该角色离开此事件吗？")) return;
@@ -1087,7 +1335,7 @@ if (data.success) {
         const treeItems = document.querySelectorAll('#chapter-tree li');
         // 💥 变更为：匹配“事件 X”
         const targetLi = Array.from(treeItems).find(el => el.innerText.includes(`事件 ${chapNum}`));
-        if (targetLi) { targetLi.click(); } else { alert(`大纲中未找到事件 ${chapNum}`); }
+        if (targetLi) { targetLi.querySelector('div')?.click(); } else { alert(`大纲中未找到事件 ${chapNum}`); }
     };
 
     function appendChapMsg(role, text) {
@@ -1335,7 +1583,10 @@ if (data.success) {
     window.editCharacter = (id) => {
         const char = window.globalCharacters.find(c => c.id === id);
         if (char) {
+            const modal = ensureCharacterAssetModal();
             document.getElementById('asset-char-id').value = char.id;
+            const title = document.getElementById('asset-character-modal-title');
+            if (title) title.textContent = `人物卡：${char.name}`;
             const detail = document.getElementById('asset-character-detail');
             if (detail) {
                 detail.value = [
@@ -1357,8 +1608,25 @@ if (data.success) {
                     `【简介】${char.description || '-'}`
                 ].join('\n');
             }
+            modal.classList.remove('hidden');
         }
     };
+
+    async function saveSelectedAssetCharacter() {
+        const charId = document.getElementById('asset-char-id')?.value;
+        if (!charId) return alert("请先选择要更新的角色。");
+        const detailPayload = parseCharacterDetailText(document.getElementById('asset-character-detail')?.value || "");
+        const payload = { ...detailPayload, projectId: PROJECT_ID, id: charId };
+        if(!payload.name) return alert("姓名不能为空");
+        const res = await fetch('/api/workspace/character', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const data = await res.json();
+        if (data.success) {
+            await loadGlobalAssets();
+            if (currentLocalContext.chapterId) loadChapterContext(currentLocalContext.chapterId, currentLocalContext.chapterNumber, currentLocalContext.title);
+            alert("全局人物卡已更新，后续调用将使用新数据。");
+            document.getElementById('asset-character-modal')?.classList.add('hidden');
+        } else alert("保存失败：" + (data.error || "未知错误"));
+    }
 
     window.deleteTimelineEvent = async (id) => {
         if (!confirm("确定要抹除此事件吗？")) return;
@@ -1419,8 +1687,22 @@ if (data.success) {
     if (btnOpenAssetModal) btnOpenAssetModal.addEventListener('click', () => { loadGlobalAssets(); loadGlobalAssetOverview(); if(assetModal) assetModal.classList.remove('hidden'); });
     if (btnCloseAssetModal) btnCloseAssetModal.addEventListener('click', () => { if(assetModal) assetModal.classList.add('hidden');});
 
-    if (btnAddChapter) btnAddChapter.addEventListener('click', () => { if(addChapterModal) addChapterModal.classList.remove('hidden'); });
+    if (btnAddChapter) btnAddChapter.addEventListener('click', () => {
+        const last = workspaceChapters[workspaceChapters.length - 1] || null;
+        window.openInsertEventModal(last ? last.chapter_number : null, null);
+    });
     if (btnCancelChapter) btnCancelChapter.addEventListener('click', () => { if(addChapterModal) addChapterModal.classList.add('hidden'); });
+
+    if (btnInsertEventChat) btnInsertEventChat.addEventListener('click', sendInsertEventChat);
+    const insertEventChatInput = document.getElementById('insert-event-chat-input');
+    if (insertEventChatInput) {
+        insertEventChatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendInsertEventChat();
+            }
+        });
+    }
 
     
     if (btnCancelHook) btnCancelHook.addEventListener('click', () => { if(hookModal) hookModal.classList.add('hidden'); });
@@ -1761,6 +2043,10 @@ if (data.success) {
             const title = document.getElementById('new-chapter-title').value.trim();
             const type = document.getElementById('new-chapter-type').value;
             const userDraft = document.getElementById('new-chapter-draft').value.trim();
+            const insertChatSummary = insertEventContext.chat
+                .slice(-6)
+                .map(msg => `${msg.role === 'user' ? '作者' : 'AI'}：${msg.content}`)
+                .join('\n');
 
             if (!num || !title) return alert("请填齐参数！");
             btnConfirmChapter.disabled = true;
@@ -1782,7 +2068,12 @@ if (data.success) {
                 let aiSynopsis = "";
                 const bridgeRes = await fetch('/api/ai/bridge-chapters', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prevChapter: prevChap, nextChapter: nextChap, newChapterTitle: title, userDraft: userDraft })
+                    body: JSON.stringify({
+                        prevChapter: prevChap,
+                        nextChapter: nextChap,
+                        newChapterTitle: title,
+                        userDraft: [userDraft, insertChatSummary ? `【事件插入讨论记录】\n${insertChatSummary}` : ""].filter(Boolean).join('\n\n')
+                    })
                 });
                 const bridgeData = await bridgeRes.json();
                 if (bridgeData.success) aiSynopsis = bridgeData.synopsis;
