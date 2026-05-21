@@ -220,6 +220,19 @@ document.addEventListener('DOMContentLoaded', () => {
         renderLocalSourcePanel();
     }
 
+    function closeGenesisSandbox() {
+        if (sandbox) sandbox.classList.add('hidden');
+        if (mainWorkspace) mainWorkspace.classList.remove('opacity-30', 'blur-sm');
+    }
+
+    window.handleWorkspaceBack = () => {
+        if (sandbox && !sandbox.classList.contains('hidden')) {
+            closeGenesisSandbox();
+            return;
+        }
+        window.location.href = 'dashboard.html';
+    };
+
     function stripReferenceMaterials(rules = "") {
         return String(rules || '').replace(/\n*【参考资料摘录】[\s\S]*$/g, '').trim();
     }
@@ -2762,7 +2775,7 @@ if (data.success) {
     }
 
     if (btnForceGenesis) btnForceGenesis.onclick = () => { if(sandbox) sandbox.classList.toggle('hidden'); if(mainWorkspace) mainWorkspace.classList.toggle('opacity-30'); };
-    if (btnCloseSandbox) btnCloseSandbox.onclick = () => { if (sandbox) sandbox.classList.add('hidden'); if (mainWorkspace) mainWorkspace.classList.remove('opacity-30', 'blur-sm'); };
+    if (btnCloseSandbox) btnCloseSandbox.onclick = closeGenesisSandbox;
 
     // 💥 终极修复：章节 SOP 推演发送按钮逻辑 (附带自动伏笔回收与防OOC指令)
     if (btnSendChapterChat) {

@@ -8,6 +8,7 @@ const { aiRateLimit, requireAiAccessToken, warnIfAiTokenMissing } = require('./s
 const app = express();
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
+const frontendDir = path.join(__dirname, '../frontend');
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
     .split(',')
     .map(origin => origin.trim())
@@ -24,16 +25,16 @@ app.use(cors({
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ limit: '2mb', extended: true }));
 
+app.get('/', (req, res) => {
+    res.sendFile(path.join(frontendDir, 'dashboard.html'));
+});
+
 // 2. 静态文件托管 (让浏览器能访问 frontend 里的 HTML 和 JS)
-app.use(express.static(path.join(__dirname, '../frontend')));
+app.use(express.static(frontendDir));
 
 // 3. 挂载 API 路由 (我们先挂载一个测试接口)
 app.get('/api/health', (req, res) => {
     res.json({ status: 'Engine V2 is Online', version: '2.0.0' });
-});
-
-app.get('/', (req, res) => {
-    res.status(200).send('OmniStory Engine V2 is Online');
 });
 
 // 👇 确保这两行存在且没有被 // 注释掉！
@@ -62,7 +63,7 @@ const server = app.listen(Number(PORT), HOST, () => {
     warnIfAiTokenMissing();
     console.log(`\n=========================================`);
     console.log(`🚀 OmniStory Engine V2 is ALIVE!`);
-    console.log(`🌌 宇宙大厅入口: http://${HOST}:${PORT}/dashboard.html`);
+    console.log(`🌌 宇宙大厅入口: http://${HOST}:${PORT}/`);
     console.log(`🔌 Listening address: ${JSON.stringify(address)}`);
     console.log(`=========================================\n`);
 });
