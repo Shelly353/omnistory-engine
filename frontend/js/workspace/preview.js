@@ -107,7 +107,7 @@ window.OmniWorkspacePreview = (() => {
                     </div>
                     <div class="relative group/field">
                         <label class="text-[10px] text-gray-500 font-bold uppercase mb-1 flex justify-between">核心法则与戒律 <button onclick="openSubChat('rules')" class="text-blue-400 hover:text-white px-2 py-0.5 bg-blue-900/30 rounded"><i data-lucide="cpu" class="w-3 h-3 inline"></i> 唤醒 AI 深度扩写</button></label>
-                        <textarea id="prev-rules" class="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-cyan-300 text-sm h-32 focus:border-cyan-500 transition" placeholder="规则拥有最高权限。可写入律师/医生/警察等专家资料：工作流程、术语、行业禁忌、常见误区、真实感细节、优势/劣势/代价/反制。">${bible.rules || ''}</textarea>
+                        <textarea id="prev-rules" class="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-cyan-300 text-sm h-32 focus:border-cyan-500 transition" placeholder="规则拥有最高权限。这里写你的具体设定即可：朝代/年代、是否架空、律所/医院/官府/军队等特殊规则。历史、法律、医疗、警务等专家基础审查标准已在后台内置。">${bible.rules || ''}</textarea>
                     </div>
                     <div class="bg-gray-950 border border-yellow-900/40 rounded-xl p-3">
                         <div class="flex items-center justify-between mb-2">
