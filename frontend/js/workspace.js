@@ -311,6 +311,64 @@ document.addEventListener('DOMContentLoaded', () => {
         ].join('\n\n');
     }
 
+    function getActiveSandboxModuleLabel() {
+        const moduleName = localStorage.getItem('omnistory_sandbox_module') || 'events';
+        return ({ events: '事件讨论', characters: '人物设定', rules: '规则/专家' })[moduleName] || '事件讨论';
+    }
+
+    function getExpertKeywordHint(text = "") {
+        const expertMap = [
+            { keys: ['律师', '法庭', '诉讼', '起诉', '辩护', '证据', '检察', '法院', '法官', '合同'], label: '法律/律师专家' },
+            { keys: ['医生', '医院', '手术', '诊断', '病历', '急救', '药物', '心理治疗'], label: '医疗/心理专家' },
+            { keys: ['警察', '刑侦', '侦查', '审讯', '取证', '监控', '逮捕', '案发'], label: '刑侦/警务专家' },
+            { keys: ['金融', '股票', '银行', '基金', '债务', '投资', '审计'], label: '金融/商业专家' },
+            { keys: ['政治', '选举', '议会', '官僚', '政变', '外交'], label: '政治制度专家' },
+            { keys: ['种族', '宗教', '文化', '部落', '阶层', '礼制'], label: '社会文化专家' },
+            { keys: ['魔法', '技能', '战力', '异能', '修炼', '能力'], label: '力量体系专家' }
+        ];
+        const matched = expertMap.filter(item => item.keys.some(key => text.includes(key))).map(item => item.label);
+        if (matched.length === 0) return '';
+        return `\n\n【专家系统自动介入】检测到关键词，启用：${matched.join('、')}。请先检查规则/专家资料中是否已有相关约束；资料不足时向作者提出需要补充的专业问题，禁止装懂或编造确定专业流程。`;
+    }
+
+    window.runSandboxRuleAudit = async (bible = null) => {
+        const targetBible = bible || getCurrentBibleSnapshot();
+        const alarmBox = document.getElementById('sandbox-rule-alarm');
+        if (!targetBible || !alarmBox) return;
+        const rules = [targetBible.worldview, targetBible.rules].filter(Boolean).join('\n\n');
+        const events = [
+            ...(targetBible.timeline || []).map(t => `时间轴事件 ${t.chapter_number || '-'}：${t.description || ''}`),
+            ...(targetBible.chapters || []).map(ch => `章节/事件 ${ch.chapter_number || '-'}《${ch.title || ''}》：${ch.content || ''}`)
+        ].join('\n');
+        if (!rules.trim() || !events.trim()) {
+            alarmBox.textContent = '规则或事件不足，暂无法进行最高权限审查。';
+            return;
+        }
+        alarmBox.textContent = '规则最高权限审查中...';
+        try {
+            const prompt = `你是规则最高权限审查器。规则/世界观/专家资料优先级最高，任何不符合设定的事件、情节、人物行为都必须报警并给整改意见。
+【规则/世界观/专家资料】\n${limitText(rules, 3500)}
+【人物卡】\n${limitText(JSON.stringify(targetBible.characters || []), 2500)}
+【事件/章节】\n${limitText(events, 4500)}
+
+请输出：
+【红色警报】严重违反规则/专业常识/人物逻辑的问题；
+【黄色警报】可能降智、巧合、一次性人物、规则约束不足的问题；
+【整改意见】最小修改方案；
+【专家资料缺口】需要补充哪些职业/行业/世界规则资料。
+如果没有明显问题，请明确说明。`;
+            const res = await fetch('/api/chat/deduce', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(buildChatPayload([{ role: 'user', content: prompt }], 1))
+            });
+            const data = await res.json();
+            alarmBox.textContent = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `审查失败：${data.error || '未知错误'}`;
+        } catch (e) {
+            alarmBox.textContent = '规则审查请求失败，请稍后重试。';
+        }
+    };
+
     function renderDeviationItems(items, emptyText = "当前未发现明显设定偏离风险。") {
         if (!localDeviationPanel) return;
         localDeviationPanel.innerHTML = items.length > 0
@@ -763,6 +821,7 @@ ${getUnifiedQualityGuardrails()}
                         const parsedBible = JSON.parse(jsonMatch[1]);
                         saveLatestBible(parsedBible);
                         renderHumanPreview(parsedBible); 
+                        window.runSandboxRuleAudit(parsedBible);
                         aiReplyText = aiReplyText.replace(jsonMatch[0], '').trim();
                     } catch(e) { console.error("JSON实时解析失败:", e); }
                 }
@@ -784,7 +843,9 @@ ${getUnifiedQualityGuardrails()}
             const text = chatInput.value.trim();
             if (!text) return;
             chatInput.value = '';
-            const userMsgWithContext = text + "\n\n(系统附加：右侧数据面板已由用户实时更新，请在下一次生成 JSON 时尊重并保留这些设定。)";
+            const userMsgWithContext = text
+                + `\n\n(系统附加：当前沙盒模块是【${getActiveSandboxModuleLabel()}】。事件、人物、规则三个模块互相影响；规则/世界观/专家资料拥有最高权限。右侧数据面板已由用户实时更新，请在下一次生成 JSON 时尊重并保留这些设定。若当前输入新增人物，请将其绑定到相关事件，并提醒参与少于三个事件的人物需要后续复用或合并。)`
+                + getExpertKeywordHint(text);
             const newIndex = genesisConversation.length;
             genesisConversation.push({ role: 'user', content: userMsgWithContext });
             appendMessage('user', text, newIndex);
@@ -963,7 +1024,13 @@ ${getUnifiedQualityGuardrails()}
                     currentBible ? { role: 'system', content: `【当前面板数据】\n${JSON.stringify(currentBible)}` } : null,
                     payload.memorySummary ? { role: 'system', content: `【较早对话摘要】\n${payload.memorySummary}` } : null,
                     ...payload.conversation,
-                    { role: 'user', content: '请根据当前面板数据与最近对话，提取并合并最新共识，输出完整世界圣经 JSON。用户后续通过对话否定或修改过的低质量人物/事件必须被替换，不要保留旧版本。' }
+                    { role: 'user', content: `请根据当前面板数据与最近对话，提取并合并最新共识，输出完整世界圣经 JSON。
+要求：
+1. 用户后续通过对话否定或修改过的低质量人物/事件必须被替换，不要保留旧版本。
+2. 沙盒有事件、人物、规则/专家三个模块，它们互相影响，不能各自孤立更新。
+3. 规则/世界观/专家资料权限最高；不符合规则、专业流程或人物逻辑的事件必须在 rules 中记录警报或整改约束。
+4. 人物必须尽量绑定到 timeline/chapters 的具体事件；参与事件少于三个的人物要在 description 或 character_arc 中提示后续复用价值，避免一次性人物。
+5. 如果对话出现律师、医生、警察、金融、政治、文化、技能等专业关键词，请把对应专家资料合并进 rules，而不是单独创建新系统。` }
                 ].filter(Boolean);
 
                 const res = await fetch('/api/crystallize/preview', {
@@ -976,6 +1043,7 @@ ${getUnifiedQualityGuardrails()}
                 if (!data.success) throw new Error(data.error || '提取失败');
                 saveLatestBible(data.bible);
                 renderHumanPreview(data.bible);
+                window.runSandboxRuleAudit(data.bible);
                 syncGenesisDraftToCloud();
                 alert('✅ 已根据当前对话刷新右侧面板。');
             } catch (e) {

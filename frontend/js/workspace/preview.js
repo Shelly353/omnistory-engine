@@ -30,6 +30,23 @@ window.OmniWorkspacePreview = (() => {
         })[char]);
     }
 
+    function getCharacterEventCount(character, bible) {
+        const name = String(character?.name || '').trim();
+        if (!name) return 0;
+        const eventTexts = [
+            ...(bible?.chapters || []).map(ch => `${ch.title || ''}\n${ch.content || ''}`),
+            ...(bible?.timeline || []).map(t => `${t.time_label || ''}\n${t.description || ''}`)
+        ];
+        return eventTexts.filter(text => String(text || '').includes(name)).length;
+    }
+
+    function getCharacterUsageStyle(count) {
+        if (count <= 0) return { border: 'border-red-700/70', badge: 'bg-red-950 text-red-300 border-red-800', label: '未绑定事件' };
+        if (count === 1) return { border: 'border-orange-600/70', badge: 'bg-orange-950 text-orange-300 border-orange-800', label: '一次性风险' };
+        if (count === 2) return { border: 'border-yellow-600/70', badge: 'bg-yellow-950 text-yellow-300 border-yellow-800', label: '需再复用' };
+        return { border: 'border-blue-800/60', badge: 'bg-blue-950 text-blue-300 border-blue-800', label: '已复用' };
+    }
+
     function renderHumanPreview(container, bible) {
         if (!container) return;
 
@@ -40,8 +57,15 @@ window.OmniWorkspacePreview = (() => {
         const narrativeModeHTML = narrativeModes.map(m => `<option value="${m}" ${narrativeLogic.mode === m ? 'selected' : ''}>${m}</option>`).join('');
 
         let html = `
-            <div class="bg-gray-800/50 p-5 rounded-xl border border-gray-700">
-                <h4 class="text-purple-400 font-bold mb-3 flex items-center"><i data-lucide="book-open" class="w-4 h-4 mr-2"></i>1. 基础内核</h4>
+            <div class="sticky top-0 z-20 bg-gray-950/95 backdrop-blur border border-gray-800 rounded-xl p-2 mb-4 grid grid-cols-3 gap-2">
+                <button type="button" data-sandbox-module-button="events" onclick="switchSandboxModule('events')" class="sandbox-module-btn py-2 rounded-lg text-xs font-bold border border-purple-900/50 text-purple-300 bg-purple-950/30">事件讨论</button>
+                <button type="button" data-sandbox-module-button="characters" onclick="switchSandboxModule('characters')" class="sandbox-module-btn py-2 rounded-lg text-xs font-bold border border-gray-800 text-gray-400 bg-gray-900">人物设定</button>
+                <button type="button" data-sandbox-module-button="rules" onclick="switchSandboxModule('rules')" class="sandbox-module-btn py-2 rounded-lg text-xs font-bold border border-gray-800 text-gray-400 bg-gray-900">规则/专家</button>
+            </div>
+
+            <div class="sandbox-module" data-sandbox-module="rules">
+            <div class="bg-gray-800/50 p-5 rounded-xl border border-cyan-800/70">
+                <h4 class="text-cyan-400 font-bold mb-3 flex items-center"><i data-lucide="shield-alert" class="w-4 h-4 mr-2"></i>规则最高权限与专家系统</h4>
                 <div class="space-y-4">
                     <div>
                         <label class="text-[10px] text-gray-500 font-bold uppercase mb-1 block">故事类型 (救猫咪)</label>
@@ -53,22 +77,35 @@ window.OmniWorkspacePreview = (() => {
                     </div>
                     <div class="relative group/field">
                         <label class="text-[10px] text-gray-500 font-bold uppercase mb-1 flex justify-between">核心法则与戒律 <button onclick="openSubChat('rules')" class="text-blue-400 hover:text-white px-2 py-0.5 bg-blue-900/30 rounded"><i data-lucide="cpu" class="w-3 h-3 inline"></i> 唤醒 AI 深度扩写</button></label>
-                        <textarea id="prev-rules" class="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-cyan-300 text-sm h-20 focus:border-cyan-500 transition">${bible.rules || ''}</textarea>
+                        <textarea id="prev-rules" class="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-cyan-300 text-sm h-32 focus:border-cyan-500 transition" placeholder="规则拥有最高权限。可写入律师/医生/警察等专家资料：工作流程、术语、行业禁忌、常见误区、真实感细节、优势/劣势/代价/反制。">${bible.rules || ''}</textarea>
+                    </div>
+                    <div class="bg-gray-950 border border-yellow-900/40 rounded-xl p-3">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-yellow-400 text-xs font-bold flex items-center"><i data-lucide="siren" class="w-3 h-3 mr-1"></i>规则最高权限审查</span>
+                            <button type="button" onclick="runSandboxRuleAudit()" class="text-[10px] px-2 py-1 bg-yellow-900/30 text-yellow-300 border border-yellow-800 rounded hover:bg-yellow-700 hover:text-white">手动检测</button>
+                        </div>
+                        <div id="sandbox-rule-alarm" class="text-xs text-yellow-200/80 whitespace-pre-wrap leading-relaxed">规则审查会在刷新面板或手动检测时运行。</div>
                     </div>
                 </div>
             </div>
+            </div>
 
+            <div class="sandbox-module hidden" data-sandbox-module="characters">
             <div class="bg-gray-800/50 p-5 rounded-xl border border-gray-700 mt-6">
                 <h4 class="text-blue-400 font-bold mb-3 flex items-center"><i data-lucide="users" class="w-4 h-4 mr-2"></i>2. 登场群星 (表头：姓名/定位/阵营/一句话简介)</h4>
-                <div class="text-[10px] text-gray-500 mb-2 italic">提示：鼠标悬停在角色卡上方，即可自动向下展开 12 维全息设定表。</div>
+                <div class="text-[10px] text-gray-500 mb-2 italic">提示：鼠标悬停展开 12 维设定。角色参与事件少于 3 次会标色提醒，避免沦为一次性人物。</div>
                 <div class="space-y-2 mb-6" id="prev-chars-list">
-                    ${(bible.characters||[]).map(c => `
-                        <div class="prev-char-item group relative bg-gray-900 rounded-lg border border-gray-700 hover:border-blue-500 transition-all duration-300">
+                    ${(bible.characters||[]).map(c => {
+                        const eventCount = getCharacterEventCount(c, bible);
+                        const usage = getCharacterUsageStyle(eventCount);
+                        return `
+                        <div class="prev-char-item group relative bg-gray-900 rounded-lg border ${usage.border} hover:border-blue-500 transition-all duration-300">
                             <div class="flex space-x-2 p-2 relative z-10 bg-gray-900 rounded-lg">
                                 <input type="text" class="w-1/6 bg-gray-950 border border-gray-600 rounded-md p-2 text-white text-xs char-name" value="${c.name || ''}" placeholder="姓名">
                                 <input type="text" class="w-1/6 bg-gray-950 border border-gray-600 rounded-md p-2 text-blue-300 text-xs char-role" value="${c.role || ''}" placeholder="定位">
                                 <input type="text" class="w-1/6 bg-gray-950 border border-gray-600 rounded-md p-2 text-yellow-300 text-xs char-faction" value="${c.faction || ''}" placeholder="阵营">
                                 <input type="text" class="flex-1 bg-gray-950 border border-gray-600 rounded-md p-2 text-gray-300 text-xs char-desc" value="${c.description || ''}" placeholder="一句话简介">
+                                <span class="shrink-0 text-[10px] px-2 py-1 rounded border ${usage.badge}" title="当前人物出现在事件/时间轴中的次数">${usage.label} · ${eventCount}</span>
                             </div>
                             <div class="max-h-0 overflow-hidden group-hover:max-h-[800px] transition-all duration-500 ease-in-out opacity-0 group-hover:opacity-100 px-3 pb-3">
                                 <div class="grid grid-cols-3 gap-2 mt-2 pt-2 border-t border-gray-700">
@@ -85,7 +122,7 @@ window.OmniWorkspacePreview = (() => {
                                 </div>
                             </div>
                         </div>
-                    `).join('')}
+                    `}).join('')}
                 </div>
 
                 <h4 class="text-emerald-400 font-bold mb-3 flex items-center"><i data-lucide="network" class="w-4 h-4 mr-2"></i>3. 人物情感羁绊 (表头：发起人 ➔ 接收人 | 羁绊类型)</h4>
@@ -100,7 +137,9 @@ window.OmniWorkspacePreview = (() => {
                     `).join('')}
                 </div>
             </div>
+            </div>
 
+            <div class="sandbox-module hidden" data-sandbox-module="events">
             <div class="bg-gray-800/50 p-5 rounded-xl border border-gray-700 mt-6">
                 <h4 class="text-indigo-400 font-bold mb-3 flex items-center"><i data-lucide="clock" class="w-4 h-4 mr-2"></i>4. 细密时间轴事件 (表头：时间标度 | 所属章节 | 事件描述)</h4>
                 <div class="space-y-2" id="prev-tl-list">
@@ -162,10 +201,29 @@ window.OmniWorkspacePreview = (() => {
                     `).join('')}
                 </div>
             </div>
+            </div>
         `;
         container.innerHTML = html;
+        const activeModule = localStorage.getItem('omnistory_sandbox_module') || 'events';
+        window.switchSandboxModule(activeModule);
         if(window.lucide) lucide.createIcons();
     }
+
+    window.switchSandboxModule = (moduleName) => {
+        localStorage.setItem('omnistory_sandbox_module', moduleName);
+        document.querySelectorAll('[data-sandbox-module]').forEach(el => {
+            el.classList.toggle('hidden', el.dataset.sandboxModule !== moduleName);
+        });
+        document.querySelectorAll('[data-sandbox-module-button]').forEach(btn => {
+            const active = btn.dataset.sandboxModuleButton === moduleName;
+            btn.classList.toggle('bg-purple-950/30', active);
+            btn.classList.toggle('text-purple-300', active);
+            btn.classList.toggle('border-purple-900/50', active);
+            btn.classList.toggle('bg-gray-900', !active);
+            btn.classList.toggle('text-gray-400', !active);
+            btn.classList.toggle('border-gray-800', !active);
+        });
+    };
 
     return {
         renderHumanPreview
