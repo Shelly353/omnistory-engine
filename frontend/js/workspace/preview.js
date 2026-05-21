@@ -125,6 +125,17 @@ window.OmniWorkspacePreview = (() => {
                         <label class="text-[10px] text-gray-500 font-bold uppercase mb-1 block">参考资料摘录</label>
                         <textarea id="prev-source-materials" class="w-full bg-gray-900 border border-gray-600 rounded-lg p-2.5 text-amber-200 text-sm h-28 focus:border-amber-500 transition" placeholder="把 PDF/网页/TXT/图片 OCR 后的关键资料粘贴成短摘录。建议每条注明来源、时代/领域、可用于哪些事件，以及哪些内容不能乱写。">${escapePreviewValue(splitRules.materials || bible.source_materials || '')}</textarea>
                     </div>
+                    <div class="bg-gray-950 border border-amber-900/40 rounded-xl p-3">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-amber-300 text-xs font-bold flex items-center"><i data-lucide="folder-open" class="w-3 h-3 mr-1"></i>本地资料库</span>
+                            <label class="text-[10px] px-2 py-1 bg-amber-900/30 text-amber-200 border border-amber-800 rounded hover:bg-amber-700 hover:text-white cursor-pointer">
+                                选择文件
+                                <input id="local-source-files" type="file" multiple class="hidden" onchange="ingestLocalSourceFiles(this.files); this.value='';">
+                            </label>
+                        </div>
+                        <div class="text-[10px] text-gray-500 mb-2 leading-relaxed">资料只保存在本机浏览器，不上传云端。当前直接支持 TXT/MD/HTML/CSV/JSON；PDF/图片会先记录文件名，后续可接本地解析/OCR。</div>
+                        <div id="local-source-list" class="space-y-1.5 text-xs text-amber-100/80"></div>
+                    </div>
                     <div class="bg-gray-950 border border-yellow-900/40 rounded-xl p-3">
                         <div class="flex items-center justify-between mb-2">
                             <span class="text-yellow-400 text-xs font-bold flex items-center"><i data-lucide="siren" class="w-3 h-3 mr-1"></i>规则最高权限审查</span>

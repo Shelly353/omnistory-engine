@@ -41,6 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let saveTimeout;
     let currentSelectedString = "";
     let insertEventContext = { prev: null, next: null, suggestedNumber: null, chat: [] };
+    let localSourceDocs = [];
 
     const RECENT_CHAT_LIMIT = 10;
     const MEMORY_SUMMARY_LIMIT = 6000;
@@ -58,6 +59,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function buildChatPayloadWithLocalSources(conversation, recentLimit = RECENT_CHAT_LIMIT, queryText = "") {
+        return {
+            ...buildChatPayload(conversation, recentLimit),
+            localReferenceSnippets: getRelevantLocalSourceSnippets(queryText)
+        };
+    }
+
     function escapeHtml(text = "") {
         return String(text).replace(/[&<>"']/g, (char) => ({
             '&': '&amp;',
@@ -69,9 +77,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function buildGenesisChatPayload() {
+        const currentBible = getCurrentBibleSnapshot();
+        const queryText = [
+            getActiveSandboxModuleLabel(),
+            currentBible?.worldview || '',
+            currentBible?.rules || '',
+            (currentBible?.chapters || []).map(ch => `${ch.title || ''} ${ch.content || ''}`).join('\n'),
+            genesisConversation.slice(-3).map(msg => msg.content).join('\n')
+        ].join('\n');
         return {
             ...buildChatPayload(genesisConversation),
-            currentBible: compactBibleForPrompt(getCurrentBibleSnapshot()),
+            currentBible: compactBibleForPrompt(currentBible),
+            localReferenceSnippets: getRelevantLocalSourceSnippets(queryText),
             requirePanelJson: true
         };
     }
@@ -200,6 +217,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
     function renderHumanPreview(bible) {
         window.OmniWorkspacePreview.renderHumanPreview(humanPreviewContainer, bible);
+        renderLocalSourcePanel();
     }
 
     function stripReferenceMaterials(rules = "") {
@@ -210,6 +228,145 @@ document.addEventListener('DOMContentLoaded', () => {
         const cleanRules = stripReferenceMaterials(rules);
         const cleanMaterials = String(materials || '').trim();
         return [cleanRules, cleanMaterials ? `【参考资料摘录】\n${cleanMaterials}` : ''].filter(Boolean).join('\n\n');
+    }
+
+    function openLocalSourceDb() {
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open('omnistory-local-sources', 1);
+            req.onupgradeneeded = () => {
+                const db = req.result;
+                if (!db.objectStoreNames.contains('docs')) {
+                    const store = db.createObjectStore('docs', { keyPath: 'id' });
+                    store.createIndex('projectId', 'projectId', { unique: false });
+                }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+    }
+
+    function runLocalSourceStore(mode, action) {
+        return openLocalSourceDb().then(db => new Promise((resolve, reject) => {
+            const tx = db.transaction('docs', mode);
+            const store = tx.objectStore('docs');
+            const result = action(store);
+            tx.oncomplete = () => resolve(result);
+            tx.onerror = () => reject(tx.error);
+        }));
+    }
+
+    function normalizeLocalSourceText(fileName, text) {
+        let value = String(text || '');
+        if (/\.(html?|xhtml)$/i.test(fileName)) {
+            value = value.replace(/<script[\s\S]*?<\/script>/gi, ' ')
+                .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+                .replace(/<[^>]+>/g, ' ');
+        }
+        return value.replace(/\s+/g, ' ').trim();
+    }
+
+    function chunkLocalSourceText(text, size = 900, overlap = 120) {
+        const chunks = [];
+        for (let i = 0; i < text.length; i += (size - overlap)) {
+            const chunk = text.slice(i, i + size).trim();
+            if (chunk.length > 80) chunks.push(chunk);
+            if (chunks.length >= 500) break;
+        }
+        return chunks;
+    }
+
+    function extractLocalSourceTerms(text = "") {
+        const value = String(text || '');
+        const latin = value.match(/[A-Za-z0-9_]{3,}/g) || [];
+        const chinese = value.match(/[\u4e00-\u9fa5]{2,8}/g) || [];
+        return Array.from(new Set([...latin, ...chinese]))
+            .filter(term => !['系统附加', '当前事件', '世界观', '规则专家', '用户'].includes(term))
+            .slice(-80);
+    }
+
+    function getRelevantLocalSourceSnippets(queryText = "", maxSnippets = 6) {
+        if (!localSourceDocs.length) return '';
+        const terms = extractLocalSourceTerms(queryText);
+        if (!terms.length) return '';
+        const scored = [];
+        localSourceDocs.forEach(doc => {
+            (doc.chunks || []).forEach((chunk, index) => {
+                let score = 0;
+                terms.forEach(term => {
+                    if (chunk.includes(term)) score += Math.min(6, term.length);
+                });
+                if (score > 0) scored.push({ score, doc, chunk, index });
+            });
+        });
+        return scored
+            .sort((a, b) => b.score - a.score)
+            .slice(0, maxSnippets)
+            .map(item => `【${item.doc.name} · 片段${item.index + 1}】\n${limitText(item.chunk, 900)}`)
+            .join('\n\n');
+    }
+
+    async function loadLocalSourceDocs() {
+        try {
+            const db = await openLocalSourceDb();
+            const tx = db.transaction('docs', 'readonly');
+            const index = tx.objectStore('docs').index('projectId');
+            const req = index.getAll(PROJECT_ID);
+            localSourceDocs = await new Promise((resolve, reject) => {
+                req.onsuccess = () => resolve(req.result || []);
+                req.onerror = () => reject(req.error);
+            });
+            renderLocalSourcePanel();
+        } catch (e) {
+            console.warn('读取本地资料库失败:', e);
+        }
+    }
+
+    window.ingestLocalSourceFiles = async (files) => {
+        const fileList = Array.from(files || []);
+        if (!fileList.length) return;
+        const unsupported = [];
+        for (const file of fileList) {
+            const isReadableText = /\.(txt|md|markdown|html?|csv|json|xml|log)$/i.test(file.name) || /^text\//.test(file.type);
+            if (!isReadableText) {
+                unsupported.push(file.name);
+                continue;
+            }
+            const raw = await file.text();
+            const text = normalizeLocalSourceText(file.name, raw);
+            if (!text) continue;
+            const doc = {
+                id: `${PROJECT_ID}:${Date.now()}:${Math.random().toString(36).slice(2)}`,
+                projectId: PROJECT_ID,
+                name: file.name,
+                type: file.type || 'text/plain',
+                size: file.size,
+                createdAt: new Date().toISOString(),
+                chunks: chunkLocalSourceText(text)
+            };
+            await runLocalSourceStore('readwrite', store => store.put(doc));
+        }
+        await loadLocalSourceDocs();
+        if (unsupported.length) alert(`这些文件当前版本暂不能直接解析，未写入索引：\n${unsupported.join('\n')}\n\nPDF/图片下一步需要接本地 PDF 解析/OCR。`);
+    };
+
+    window.deleteLocalSourceDoc = async (id) => {
+        await runLocalSourceStore('readwrite', store => store.delete(id));
+        await loadLocalSourceDocs();
+    };
+
+    function renderLocalSourcePanel() {
+        const list = document.getElementById('local-source-list');
+        if (!list) return;
+        list.innerHTML = localSourceDocs.length ? localSourceDocs.map(doc => `
+            <div class="flex items-center justify-between bg-gray-900 border border-gray-800 rounded p-2">
+                <div class="truncate">
+                    <div class="text-amber-200 truncate">${escapeHtml(doc.name)}</div>
+                    <div class="text-[10px] text-gray-500">${doc.chunks?.length || 0} 个本地片段 · 不上传云端</div>
+                </div>
+                <button type="button" onclick="deleteLocalSourceDoc('${doc.id}')" class="text-gray-500 hover:text-red-300 ml-2"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
+            </div>
+        `).join('') : `<div class="text-gray-500 italic">尚未选择本地资料文件。</div>`;
+        if (window.lucide) lucide.createIcons();
     }
 
     function collectBibleFromPreview() {
@@ -345,8 +502,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getUnifiedQualityGuardrails() {
+        const localSnippets = getRelevantLocalSourceSnippets([
+            currentLocalContext.title || '',
+            currentLocalContext.synopsis || '',
+            editorTextarea?.value || '',
+            getWorldRulesText()
+        ].join('\n'), 5);
         return [
             `【统一规则/专家资料】\n${getWorldRulesText()}`,
+            localSnippets ? `【本地资料库相关片段】\n${localSnippets}` : '',
             getBuiltInExpertBaseline(),
             `【当前事件可调用人物卡】\n${getCharacterDetailsForSop()}`,
             `【监督标准】
@@ -355,7 +519,7 @@ document.addEventListener('DOMContentLoaded', () => {
 3. 人物一致性：行为必须来自欲望、目标、动机、缺陷、恐惧或成长弧线，禁止为了剧情强行降智。
 4. 世界规则：力量、资源、制度、技能必须有代价、限制和反制，不允许无敌解法。
 5. 伏笔闭环：本章需要回应的伏笔必须处理；新伏笔要有后续回收方向。`
-        ].join('\n\n');
+        ].filter(Boolean).join('\n\n');
     }
 
     function getActiveSandboxModuleLabel() {
@@ -409,7 +573,7 @@ ${getBuiltInExpertBaseline()}
             const res = await fetch('/api/chat/deduce', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(buildChatPayload([{ role: 'user', content: prompt }], 1))
+                body: JSON.stringify(buildChatPayloadWithLocalSources([{ role: 'user', content: prompt }], 1, prompt))
             });
             const data = await res.json();
             alarmBox.textContent = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `审查失败：${data.error || '未知错误'}`;
@@ -456,7 +620,7 @@ ${getUnifiedQualityGuardrails()}
             const res = await fetch('/api/chat/deduce', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(buildChatPayload([{ role: 'user', content: prompt }], 1))
+                body: JSON.stringify(buildChatPayloadWithLocalSources([{ role: 'user', content: prompt }], 1, prompt))
             });
             const data = await res.json();
             renderDeviationItems([data.success ? (stripFencedBlocks(data.reply) || data.reply) : `监督检测失败：${data.error || '未知错误'}`]);
@@ -695,7 +859,7 @@ ${getRulesTextForPrompt()}`;
         const res = await fetch('/api/chat/deduce', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(buildChatPayload(convo, 8))
+            body: JSON.stringify(buildChatPayloadWithLocalSources(convo, 8, prompt))
         });
         const data = await res.json();
         const reply = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `讨论失败：${data.error || '未知错误'}`;
@@ -719,7 +883,7 @@ ${getRulesTextForPrompt()}`;
         const res = await fetch('/api/chat/deduce', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(buildChatPayload(convo, 1))
+            body: JSON.stringify(buildChatPayloadWithLocalSources(convo, 1, convo[0].content))
         });
         const data = await res.json();
         if (resultBox) resultBox.textContent = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `检测失败：${data.error || '未知错误'}`;
@@ -949,7 +1113,8 @@ ${getRulesTextForPrompt()}`;
         subChatHistory.scrollTop = subChatHistory.scrollHeight;
         try {
             const res = await fetch('/api/chat/deduce', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(buildChatPayload(subConversation, 8))
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(buildChatPayloadWithLocalSources(subConversation, 8, subConversation.map(msg => msg.content).join('\n')))
             });
             const data = await res.json();
             document.getElementById(loadingId)?.remove();
@@ -983,7 +1148,8 @@ ${getRulesTextForPrompt()}`;
             subConversation.push({ role: 'user', content: extractMsg });
             try {
                 const res = await fetch('/api/chat/deduce', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(buildChatPayload(subConversation, 8))
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(buildChatPayloadWithLocalSources(subConversation, 8, subConversation.map(msg => msg.content).join('\n')))
                 });
                 const data = await res.json();
                 if(data.success) {
@@ -1382,7 +1548,7 @@ if (data.success) {
             const res = await fetch('/api/chat/deduce', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(buildChatPayload(convo, 8))
+                body: JSON.stringify(buildChatPayloadWithLocalSources(convo, 8, hiddenGuide))
             });
             const data = await res.json();
             document.getElementById(loadingId)?.remove();
@@ -1462,7 +1628,7 @@ if (data.success) {
                 const res = await fetch('/api/chat/deduce', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(buildChatPayload(convo, 1))
+                    body: JSON.stringify(buildChatPayloadWithLocalSources(convo, 1, brief))
                 });
                 const data = await res.json();
                 if (!data.success) return alert("人物卡生成失败：" + (data.error || "未知错误"));
@@ -2067,7 +2233,7 @@ if (btnTriggerHook) {
             try {
                 const res = await fetch('/api/chat/deduce', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(buildChatPayload(extractConvo, 12))
+                    body: JSON.stringify(buildChatPayloadWithLocalSources(extractConvo, 12, strictPrompt))
                 });
                 const data = await res.json();
 if (data.success) {
@@ -2404,6 +2570,7 @@ if (data.success) {
         loadWorkspaceTree(); 
         loadGlobalAssets();
         loadProjectSettings(); 
+        loadLocalSourceDocs();
         
         // 2. 解除模糊遮罩，让手机端也能看到界面
         if (mainWorkspace) mainWorkspace.classList.remove('opacity-30', 'blur-sm');
@@ -2492,7 +2659,7 @@ if (data.success) {
                 // 4. 发送给主脑
                 const res = await fetch('/api/chat/deduce', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(buildChatPayload(payloadConvo, 12))
+                    body: JSON.stringify(buildChatPayloadWithLocalSources(payloadConvo, 12, lastUserMsg?.content || ''))
                 });
                 const data = await res.json();
                 const loader = document.getElementById(loadingId);
