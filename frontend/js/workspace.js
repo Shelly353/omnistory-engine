@@ -28,6 +28,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const GENESIS_CHAT_KEY = `genesis_chat_${PROJECT_ID}`;
     const LATEST_BIBLE_KEY = `latest_bible_${PROJECT_ID}`;
     const GENESIS_CLOUD_TYPE = "上帝沙盒 · 创世圣经";
+    const LONGFORM_STATE_KEY = `longform_editor_state_${PROJECT_ID}`;
+    const LONGFORM_CLOUD_TYPE = "长篇连载编辑系统";
 
     if (!PROJECT_ID) { alert("非法侵入！即将返回大厅。"); window.location.href = 'dashboard.html'; return; }
 
@@ -42,6 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentSelectedString = "";
     let insertEventContext = { prev: null, next: null, suggestedNumber: null, chat: [] };
     let localSourceDocs = [];
+    let longformState = loadLongformState();
 
     const RECENT_CHAT_LIMIT = 10;
     const MEMORY_SUMMARY_LIMIT = 6000;
@@ -191,6 +194,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnSelectionHook = document.getElementById('btn-selection-hook');
     const btnCancelHook = document.getElementById('btn-cancel-hook');
     const btnConfirmHook = document.getElementById('btn-confirm-hook');
+    const btnLongformGate = document.getElementById('btn-longform-gate');
+    const btnLongformHook = document.getElementById('btn-longform-hook');
+    const btnLongformState = document.getElementById('btn-longform-state');
+    const btnLongformMemory = document.getElementById('btn-longform-memory');
 
     // ==========================================
     // 💥 核心数据保存函数
@@ -686,6 +693,7 @@ document.addEventListener('DOMContentLoaded', () => {
             `【统一规则/专家资料】\n${getWorldRulesText()}`,
             localSnippets ? `【本地资料库相关片段】\n${localSnippets}` : '',
             getBuiltInExpertBaseline(),
+            `【长篇连载编辑状态】\n${getLongformEditorialContext()}`,
             `【当前事件可调用人物卡】\n${getCharacterDetailsForSop()}`,
             `【监督标准】
 1. 专业真实感：涉及职业、行业、学科时，必须符合已入库的流程、术语、权限边界、常见误区；资料不足时避免装懂。
@@ -761,6 +769,77 @@ ${getBuiltInExpertBaseline()}
         localDeviationPanel.innerHTML = items.length > 0
             ? items.map(w => `<div class="bg-yellow-950/20 border border-yellow-900/30 rounded p-2 whitespace-pre-wrap">${escapeHtml(w)}</div>`).join('')
             : `<div class="bg-emerald-950/20 border border-emerald-900/30 rounded p-2 text-emerald-300">${emptyText}</div>`;
+    }
+
+    function loadLongformState() {
+        try {
+            return JSON.parse(localStorage.getItem(LONGFORM_STATE_KEY)) || {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function saveLongformState() {
+        localStorage.setItem(LONGFORM_STATE_KEY, JSON.stringify(longformState));
+        if (window.syncToCloud) {
+            window.syncToCloud(LONGFORM_CLOUD_TYPE, longformState, { silent: true });
+        }
+    }
+
+    function getLongformChapterKey(chapterNumber = currentLocalContext.chapterNumber) {
+        return `event_${chapterNumber || 'unknown'}`;
+    }
+
+    function getLongformEditorialContext() {
+        const key = getLongformChapterKey();
+        return [
+            longformState.stageMemory ? `【阶段记忆压缩】\n${longformState.stageMemory}` : '',
+            longformState.characterStates ? `【人物当前状态】\n${longformState.characterStates}` : '',
+            longformState.eventGates?.[key] ? `【本事件质量闸门】\n${longformState.eventGates[key]}` : '',
+            longformState.attractionPlans?.[key] ? `【本章吸引力设计】\n${longformState.attractionPlans[key]}` : ''
+        ].filter(Boolean).join('\n\n') || '暂无长篇编辑状态。';
+    }
+
+    function buildLongformBasePrompt() {
+        const eventContext = getAdjacentEventContext(currentLocalContext.chapterNumber);
+        return `【当前事件】\n${eventContext.startInfo}\n【下一事件锚点】\n${eventContext.endInfo}\n【当前大纲】\n${currentLocalContext.synopsis || editorSopConflict?.innerText || '暂无'}\n【正文草稿】\n${limitText(editorTextarea?.value || '', 2600)}\n【人物卡】\n${getCharacterDetailsForSop()}\n【统一规则/专家资料】\n${getWorldRulesText()}\n【已有长篇编辑状态】\n${getLongformEditorialContext()}`;
+    }
+
+    async function runLongformEditorTask(taskType, extra = "") {
+        if (!currentLocalContext.chapterId && taskType !== 'memory') return alert("请先选择一个事件。");
+        const taskPrompts = {
+            gate: `你是长篇连载的【事件质量闸门】。请在事件进入正文前审查：因果必要性、人物是否必须这样做、是否有更聪明选择、反派是否降智、是否靠巧合、读者是否会觉得假、删掉事件主线是否断裂。输出：通过/不通过、风险点、最小整改方案、必须补充的问题。`,
+            hook: `你是长篇连载的【章节吸引力设计器】。请为当前事件设计章节级吸引力：读者钩子、冲突升级、信息差、情绪波峰、关系变化、结尾悬念、爽点/痛点/疑问点，以及避免平淡流水账的写法。`,
+            state: `你是长篇连载的【人物状态追踪器】。请根据当前事件/正文更新人物当前状态：当前目标、误解、情绪状态、关系变化、获得/失去资源、身体/心理代价、秘密、下一次行动倾向。只更新当前事件影响到的人物。`,
+            memory: `你是长篇连载的【阶段记忆压缩器】。请压缩目前全部事件为长篇续写记忆：阶段总结、不可逆变化、已兑现伏笔、未兑现伏笔、人物状态变化、世界规则新增、下一阶段风险。要求短而硬，供后续 20 万字持续调用。`
+        };
+        const prompt = `${taskPrompts[taskType]}\n\n${buildLongformBasePrompt()}\n${extra}`;
+        renderDeviationItems([`长篇编辑系统运行中：${taskType}...`]);
+        try {
+            const res = await fetch('/api/chat/deduce', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(buildChatPayloadWithLocalSources([{ role: 'user', content: prompt }], 1, prompt))
+            });
+            const data = await res.json();
+            const reply = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `长篇系统失败：${data.error || '未知错误'}`;
+            const key = getLongformChapterKey();
+            if (taskType === 'gate') {
+                longformState.eventGates = { ...(longformState.eventGates || {}), [key]: reply };
+            } else if (taskType === 'hook') {
+                longformState.attractionPlans = { ...(longformState.attractionPlans || {}), [key]: reply };
+            } else if (taskType === 'state') {
+                longformState.characterStates = reply;
+            } else if (taskType === 'memory') {
+                longformState.stageMemory = reply;
+            }
+            saveLongformState();
+            renderDeviationItems([reply]);
+            return reply;
+        } catch (e) {
+            renderDeviationItems(["长篇编辑系统请求失败，请稍后重试。"]);
+            return "";
+        }
     }
 
     async function runUnifiedContentReview(source = "manual") {
@@ -1378,6 +1457,20 @@ ${getRulesTextForPrompt()}`;
         } catch (e) {
             console.warn('云端沙盒草稿恢复失败:', e);
             return false;
+        }
+    }
+
+    async function loadLongformStateFromCloud() {
+        try {
+            const res = await fetch(`/api/workspace/cloud-sync/${PROJECT_ID}?type=${encodeURIComponent(LONGFORM_CLOUD_TYPE)}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.success && data.payload) {
+                longformState = data.payload;
+                localStorage.setItem(LONGFORM_STATE_KEY, JSON.stringify(longformState));
+            }
+        } catch (e) {
+            console.warn('长篇编辑状态恢复失败:', e);
         }
     }
 
@@ -2385,11 +2478,16 @@ if (btnTriggerHook) {
 
             // 💥 核心修复：强硬指令，绝不允许自我放飞
             const eventContext = getAdjacentEventContext(currentLocalContext.chapterNumber);
+            const gateReport = await runLongformEditorTask('gate', '\n\n这是敲定大纲前的自动闸门，请严格判断是否允许进入正文。');
+            const attractionPlan = await runLongformEditorTask('hook', '\n\n这是敲定大纲前的自动章节吸引力设计，请给出必须写进大纲的钩子和节奏要求。');
             const strictPrompt = `讨论结束。请严格基于我们刚才在对话中敲定的内容，提取一份最终的【分章写作大纲】。
 【当前事件】：${eventContext.startInfo}
 【下一事件过渡锚点】：${eventContext.endInfo}
 【统一规则/专家资料】：${getWorldRulesText()}
 【可调用人物卡】：${getCharacterDetailsForSop()}
+【事件质量闸门】：${gateReport || '暂无'}
+【章节吸引力设计】：${attractionPlan || '暂无'}
+【长篇编辑状态】：${getLongformEditorialContext()}
 
 要求：
 1. 绝不允许自我放飞，严禁编造我们没讨论过的重大情节。
@@ -2397,7 +2495,8 @@ if (btnTriggerHook) {
 3. 每章必须包含：标题、起因、经过、结果、参与人物、人物行为来源、可种植伏笔/需回收伏笔、世界观/核心戒律/专业资料校验、与下一章衔接。
 4. 所有人物行为必须能从性格、欲望、目标、动机、缺陷、恐惧或成长弧线中找到来源。
 5. 如果涉及职业、行业或学科，必须依据已入库的专业顾问资料检查流程、术语、权限边界和常见误区；资料不足时不要编造确定细节。
-6. 本事件结尾必须能自然过渡到下一事件，但不得展开下一事件正文内容。
+6. 必须吸收事件质量闸门和章节吸引力设计的整改要求。
+7. 本事件结尾必须能自然过渡到下一事件，但不得展开下一事件正文内容。
 请直接输出这份最终大纲，不要掺杂任何废话，它将作为正文执笔的严格依据。`;
 
             // 深拷贝一份不污染原对话的提纯队列
@@ -2422,6 +2521,9 @@ if (data.success) {
                     
                     if (editorSopConflict) editorSopConflict.innerText = finalSynopsis;
                     currentLocalContext.synopsis = finalSynopsis;
+                    if ((parseFloat(currentLocalContext.chapterNumber) || 0) % 3 === 0) {
+                        runLongformEditorTask('memory', '\n\n这是每 3 个事件一次的自动阶段压缩。');
+                    }
                     alert("✅ 事件大纲已完美敲定并入库！即将为您切换至正文执笔区。");
                     if (tabEditor) tabEditor.click();
                 }
@@ -2442,6 +2544,10 @@ if (data.success) {
     }
     if (btnSaveChapter) btnSaveChapter.onclick = saveChapterContent;
     if (btnReviewCurrentDraft) btnReviewCurrentDraft.onclick = () => runUnifiedContentReview("manual");
+    if (btnLongformGate) btnLongformGate.onclick = () => runLongformEditorTask('gate');
+    if (btnLongformHook) btnLongformHook.onclick = () => runLongformEditorTask('hook');
+    if (btnLongformState) btnLongformState.onclick = () => runLongformEditorTask('state');
+    if (btnLongformMemory) btnLongformMemory.onclick = () => runLongformEditorTask('memory');
     if (btnToggleEventScope && localEventScope) {
         btnToggleEventScope.onclick = () => {
             const isHidden = localEventScope.classList.toggle('hidden');
@@ -2529,6 +2635,7 @@ if (data.success) {
                     editorTextarea.value += (currentText ? "\n\n" : "") + data.text;
                     editorTextarea.scrollTop = editorTextarea.scrollHeight;
                     saveChapterContent(); 
+                    runLongformEditorTask('state', '\n\n这是正文生成后的自动人物状态更新。');
                     runUnifiedContentReview("after-ai-write");
                 } else {
                     alert("AI 执笔失败: " + data.error);
@@ -2745,6 +2852,7 @@ if (data.success) {
         loadGlobalAssets();
         loadProjectSettings(); 
         loadLocalSourceDocs();
+        loadLongformStateFromCloud();
         
         // 2. 解除模糊遮罩，让手机端也能看到界面
         if (mainWorkspace) mainWorkspace.classList.remove('opacity-30', 'blur-sm');
@@ -2827,7 +2935,7 @@ if (data.success) {
                 let lastUserMsg = payloadConvo[payloadConvo.length - 1];
                 if (lastUserMsg && lastUserMsg.role === 'user') {
                     // 如果有必须要回收的伏笔 (hookAlert)，它会变成红字警告随同发送！
-                    lastUserMsg.content += `\n\n${hiddenWorkflow}` + (currentLocalContext.hookAlert || "") + `\n\n[统一监督指令]：请严格遵循规则/专家资料与人物档案推演，严禁专业乱写、逻辑跳步、人物降智或OOC。\n【统一规则/专家资料】：\n${worldRules}\n【人物卡】：\n${characterDetails}`;
+                    lastUserMsg.content += `\n\n${hiddenWorkflow}` + (currentLocalContext.hookAlert || "") + `\n\n[统一监督指令]：请严格遵循规则/专家资料、人物档案和长篇编辑状态推演，严禁专业乱写、逻辑跳步、人物降智或OOC。\n【统一规则/专家资料】：\n${worldRules}\n【人物卡】：\n${characterDetails}\n【长篇编辑状态】：\n${getLongformEditorialContext()}`;
                 }
 
                 // 4. 发送给主脑
