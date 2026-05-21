@@ -105,7 +105,10 @@
                     <div id="local-event-scope" class="text-xs text-cyan-200/70 space-y-2 leading-relaxed"></div>
                 </div>
                 <div class="bg-gray-950 border border-yellow-900/30 rounded-xl p-3 shadow-md">
-                    <h4 class="text-[10px] font-bold text-yellow-400 uppercase tracking-wider mb-2 flex items-center"><i data-lucide="shield-alert" class="w-3 h-3 mr-1"></i>内容/设定偏离警告</h4>
+                    <div class="flex items-center justify-between mb-2">
+                        <h4 class="text-[10px] font-bold text-yellow-400 uppercase tracking-wider flex items-center"><i data-lucide="shield-alert" class="w-3 h-3 mr-1"></i>内容/设定偏离警告</h4>
+                        <button id="btn-review-current-draft" class="text-[10px] px-2 py-1 bg-yellow-900/30 text-yellow-300 border border-yellow-800/50 rounded hover:bg-yellow-700 hover:text-white transition">检测正文</button>
+                    </div>
                     <div id="local-deviation-panel" class="text-xs text-yellow-200/80 space-y-2 leading-relaxed"></div>
                     <div id="world-rules-container" class="hidden"></div>
                 </div>

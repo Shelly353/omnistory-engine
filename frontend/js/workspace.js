@@ -147,6 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnExtractSynopsis = document.getElementById('btn-extract-synopsis');
     const btnSaveChapter = document.getElementById('btn-save-chapter');
     const btnAiWrite = document.getElementById('btn-ai-write');
+    const btnReviewCurrentDraft = document.getElementById('btn-review-current-draft');
     
     const btnOpenTimeline = document.getElementById('btn-open-timeline');
     const btnCloseTimeline = document.getElementById('btn-close-timeline');
@@ -297,6 +298,66 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('\n');
     }
 
+    function getUnifiedQualityGuardrails() {
+        return [
+            `【统一规则/专家资料】\n${getWorldRulesText()}`,
+            `【当前事件可调用人物卡】\n${getCharacterDetailsForSop()}`,
+            `【监督标准】
+1. 专业真实感：涉及职业、行业、学科时，必须符合已入库的流程、术语、权限边界、常见误区；资料不足时避免装懂。
+2. 叙事逻辑：因果链成立，信息来源清楚，关键转折不得靠无铺垫巧合。
+3. 人物一致性：行为必须来自欲望、目标、动机、缺陷、恐惧或成长弧线，禁止为了剧情强行降智。
+4. 世界规则：力量、资源、制度、技能必须有代价、限制和反制，不允许无敌解法。
+5. 伏笔闭环：本章需要回应的伏笔必须处理；新伏笔要有后续回收方向。`
+        ].join('\n\n');
+    }
+
+    function renderDeviationItems(items, emptyText = "当前未发现明显设定偏离风险。") {
+        if (!localDeviationPanel) return;
+        localDeviationPanel.innerHTML = items.length > 0
+            ? items.map(w => `<div class="bg-yellow-950/20 border border-yellow-900/30 rounded p-2 whitespace-pre-wrap">${escapeHtml(w)}</div>`).join('')
+            : `<div class="bg-emerald-950/20 border border-emerald-900/30 rounded p-2 text-emerald-300">${emptyText}</div>`;
+    }
+
+    async function runUnifiedContentReview(source = "manual") {
+        if (!editorTextarea || !currentLocalContext.chapterId) return;
+        const text = editorTextarea.value.trim();
+        if (text.length < 80) {
+            renderDeviationItems(["正文太短，暂不进行完整监督检测。"]);
+            return;
+        }
+        renderDeviationItems(["统一监督系统检测中：专业真实感、叙事逻辑、人设一致性、世界规则、伏笔闭环..."]);
+        const eventContext = getAdjacentEventContext(currentLocalContext.chapterNumber);
+        const prompt = `请作为统一正文监督系统，审查下面正文。专家系统已经合并进规则系统，监督系统已经合并进偏离审查系统。
+【当前事件】\n${eventContext.startInfo}
+【下一事件锚点】\n${eventContext.endInfo}
+
+${getUnifiedQualityGuardrails()}
+
+【待审正文】\n${limitText(text, 5000)}
+
+请按以下格式输出：
+【风险等级】低/中/高
+【专业真实感问题】
+【叙事逻辑问题】
+【人物降智/OOC问题】
+【世界规则/设定冲突】
+【伏笔闭环问题】
+【最小修改建议】
+如果没有问题，也要明确说明“未发现明显问题”。来源：${source}`;
+
+        try {
+            const res = await fetch('/api/chat/deduce', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(buildChatPayload([{ role: 'user', content: prompt }], 1))
+            });
+            const data = await res.json();
+            renderDeviationItems([data.success ? (stripFencedBlocks(data.reply) || data.reply) : `监督检测失败：${data.error || '未知错误'}`]);
+        } catch (e) {
+            renderDeviationItems(["监督检测请求失败，请稍后重试。"]);
+        }
+    }
+
     function renderHookItem(hook, mode) {
         const borderClass = mode === 'target' ? 'border-red-500 bg-red-950/30' : 'border-amber-800/50 bg-amber-950/10';
         const textClass = mode === 'target' ? 'text-red-300' : 'text-amber-300';
@@ -367,7 +428,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <h4 class="text-cyan-400 font-bold mb-2 flex items-center"><i data-lucide="scroll" class="w-3 h-3 mr-1"></i>世界观与规则</h4>
                     <input id="asset-genre" class="w-full bg-gray-900 border border-gray-800 rounded p-2 text-gray-200 mb-2" placeholder="类型">
                     <textarea id="asset-worldview" class="w-full bg-gray-900 border border-gray-800 rounded p-2 text-gray-200 h-20 resize-none mb-2" placeholder="世界观"></textarea>
-                    <textarea id="asset-rules" class="w-full bg-gray-900 border border-gray-800 rounded p-2 text-gray-200 h-20 resize-none mb-2" placeholder="规则限制"></textarea>
+                    <textarea id="asset-rules" class="w-full bg-gray-900 border border-gray-800 rounded p-2 text-gray-200 h-28 resize-none mb-2" placeholder="规则限制与专业顾问资料。例如：律师工作流程、专业术语、行业禁忌、常见误区、真实感细节、优势/劣势/代价/反制方式。"></textarea>
                     <div class="grid grid-cols-2 gap-2">
                         <button id="btn-save-project-asset" class="py-2 bg-cyan-700 hover:bg-cyan-600 text-white rounded font-bold">保存世界观/规则</button>
                         <button id="btn-discuss-rules" class="py-2 bg-purple-700 hover:bg-purple-600 text-white rounded font-bold">AI 谈论规则</button>
@@ -453,7 +514,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function getRulesTextForPrompt() {
         const worldview = document.getElementById('asset-worldview')?.value.trim() || '';
         const rules = document.getElementById('asset-rules')?.value.trim() || '';
-        return [`【世界观】\n${worldview || '暂无'}`, `【规则限制】\n${rules || '暂无'}`].join('\n\n');
+        return [`【世界观】\n${worldview || '暂无'}`, `【规则限制与专业顾问资料】\n${rules || '暂无'}`].join('\n\n');
     }
 
     function ensureRulesDiscussionModal() {
@@ -502,7 +563,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const modal = ensureRulesDiscussionModal();
         rulesDiscussion = [{
             role: 'assistant',
-            content: `我们可以专门打磨这套世界规则。重点会检查：经济、政治、文化、种族、技能/力量体系的优势与代价，避免无敌设定，并确保所有能力都有制约。`
+            content: `我们可以专门打磨这套世界规则和专业顾问资料。比如律师、医生、警察等职业故事，都把工作流程、专业术语、常见误区、真实感细节、行业禁忌写进这里。重点会检查：经济、政治、文化、种族、技能/力量体系的优势与代价，避免无敌设定，并确保所有能力都有制约。`
         }];
         const box = document.getElementById('rules-discussion-history');
         if (box) box.innerHTML = '';
@@ -518,7 +579,7 @@ document.addEventListener('DOMContentLoaded', () => {
         input.value = '';
         rulesDiscussion.push({ role: 'user', content: text });
         appendRulesDiscussion('user', text);
-        const prompt = `请基于当前规则继续讨论，并特别明确优势、劣势、成本、限制、反制方式，避免无敌设定。\n${getRulesTextForPrompt()}`;
+        const prompt = `请基于当前规则继续讨论，并把“专家系统”并入规则体系：如果涉及职业/行业/学科，请补充工作流程、专业术语、常见误区、真实感细节、不能乱写的边界。所有设定都要明确优势、劣势、成本、限制、反制方式，避免无敌设定。\n${getRulesTextForPrompt()}`;
         const convo = [...rulesDiscussion, { role: 'user', content: prompt }];
         const res = await fetch('/api/chat/deduce', {
             method: 'POST',
@@ -537,7 +598,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const eventText = workspaceChapters.map(ch => `事件 ${ch.chapter_number}《${ch.title}》\n${ch.content || ''}`).join('\n\n');
         const convo = [{
             role: 'user',
-            content: `请检测以下事件是否与世界观/规则冲突。重点检查架空世界的经济、政治、文化、种族、技能体系是否出现无代价、无制约、无反制的设定。请输出：冲突点、涉及事件、为什么冲突、修正建议。\n${extraFocus ? `【额外检测重点】${extraFocus}\n` : ''}\n${getRulesTextForPrompt()}\n\n【事件列表】\n${eventText}`
+            content: `请检测以下事件是否与世界观/规则/专业顾问资料冲突。重点检查：
+1. 架空世界的经济、政治、文化、种族、技能体系是否出现无代价、无制约、无反制的设定；
+2. 如果涉及职业/行业/学科，流程、术语、权限边界、常见误区是否接近事实；
+3. 人物行为是否为了剧情降智或违背已知动机。
+请输出：冲突点、涉及事件、为什么冲突、修正建议。\n${extraFocus ? `【额外检测重点】${extraFocus}\n` : ''}\n${getRulesTextForPrompt()}\n\n【事件列表】\n${eventText}`
         }];
         const res = await fetch('/api/chat/deduce', {
             method: 'POST',
@@ -1389,12 +1454,10 @@ if (data.success) {
                 }
                 if (localDeviationPanel) {
                     const warnings = [];
-                    if (!worldRules || worldRules === '无特殊限制') warnings.push('世界观/规则限制尚未入库，AI 校验会变弱。');
+                    if (!worldRules || worldRules === '无特殊限制') warnings.push('世界观/规则/专业顾问资料尚未入库，AI 校验会变弱。');
                     if (!data.characters || data.characters.length === 0) warnings.push('本章尚未绑定可调用角色，人物行为容易发散。');
                     if (targetHooks.length > 0) warnings.push(`本章有 ${targetHooks.length} 个伏笔必须回收，SOP 和正文需逐一回应。`);
-                    localDeviationPanel.innerHTML = warnings.length > 0
-                        ? warnings.map(w => `<div class="bg-yellow-950/20 border border-yellow-900/30 rounded p-2">${w}</div>`).join('')
-                        : `<div class="bg-emerald-950/20 border border-emerald-900/30 rounded p-2 text-emerald-300">当前未发现明显设定偏离风险。</div>`;
+                    renderDeviationItems(warnings);
                 }
                 const aiGreeting = window.OmniPrompts?.chapterSopIntro
                     ? window.OmniPrompts.chapterSopIntro(chapterNumber, title, eventContext.endInfo, charNames)
@@ -1862,15 +1925,16 @@ if (btnTriggerHook) {
             const strictPrompt = `讨论结束。请严格基于我们刚才在对话中敲定的内容，提取一份最终的【分章写作大纲】。
 【当前事件】：${eventContext.startInfo}
 【下一事件过渡锚点】：${eventContext.endInfo}
-【世界观与核心戒律】：${getWorldRulesText()}
+【统一规则/专家资料】：${getWorldRulesText()}
 【可调用人物卡】：${getCharacterDetailsForSop()}
 
 要求：
 1. 绝不允许自我放飞，严禁编造我们没讨论过的重大情节。
 2. 必须按已确认的章数输出；如果章数未确认，请按最合理章数输出并说明依据。
-3. 每章必须包含：标题、起因、经过、结果、参与人物、人物行为来源、可种植伏笔/需回收伏笔、世界观/核心戒律校验、与下一章衔接。
+3. 每章必须包含：标题、起因、经过、结果、参与人物、人物行为来源、可种植伏笔/需回收伏笔、世界观/核心戒律/专业资料校验、与下一章衔接。
 4. 所有人物行为必须能从性格、欲望、目标、动机、缺陷、恐惧或成长弧线中找到来源。
-5. 本事件结尾必须能自然过渡到下一事件，但不得展开下一事件正文内容。
+5. 如果涉及职业、行业或学科，必须依据已入库的专业顾问资料检查流程、术语、权限边界和常见误区；资料不足时不要编造确定细节。
+6. 本事件结尾必须能自然过渡到下一事件，但不得展开下一事件正文内容。
 请直接输出这份最终大纲，不要掺杂任何废话，它将作为正文执笔的严格依据。`;
 
             // 深拷贝一份不污染原对话的提纯队列
@@ -1914,6 +1978,7 @@ if (data.success) {
         });
     }
     if (btnSaveChapter) btnSaveChapter.onclick = saveChapterContent;
+    if (btnReviewCurrentDraft) btnReviewCurrentDraft.onclick = () => runUnifiedContentReview("manual");
 
     if (chapterChatInput) {
         chapterChatInput.addEventListener('keydown', (e) => {
@@ -1973,14 +2038,15 @@ if (data.success) {
             if (window.lucide) lucide.createIcons();
 
             // 5. 💥 终极 Payload 融合：将文笔风格无缝缝合进最顶级的强约束提示词中！
-            const strictSynopsisText = `【文学主脑至高契约：请彻底废弃历史缓存旧大纲，必须严格基于以下摘要进行正文扩写，维持情节深度连贯，严禁人设漂移OOC！】\n\n${stylePrompt}\n\n【本章剧情起承转合】：\n${latestSynopsis}\n\n【必须锁定的世界绝对戒律】：\n${worldRules}\n\n【必须100%严密契合的登场角色人设】：\n${characterDetails}`;
+            const strictSynopsisText = `【文学主脑至高契约：请彻底废弃历史缓存旧大纲，必须严格基于以下摘要进行正文扩写，维持情节深度连贯，严禁人设漂移OOC！】\n\n${stylePrompt}\n\n【本章剧情起承转合】：\n${latestSynopsis}\n\n【统一规则/专家资料】：\n${worldRules}\n\n【必须100%严密契合的登场角色人设】：\n${characterDetails}\n\n【正文质量监督标准】：\n${getUnifiedQualityGuardrails()}`;
 
             const ultraPayload = {
                 ...currentLocalContext,
                 synopsis: strictSynopsisText,
                 content: strictSynopsisText,
                 synopsis_text: strictSynopsisText,
-                currentText: currentText
+                currentText: currentText,
+                qualityGuardrails: getUnifiedQualityGuardrails()
             };
 
             try {
@@ -1994,6 +2060,7 @@ if (data.success) {
                     editorTextarea.value += (currentText ? "\n\n" : "") + data.text;
                     editorTextarea.scrollTop = editorTextarea.scrollHeight;
                     saveChapterContent(); 
+                    runUnifiedContentReview("after-ai-write");
                 } else {
                     alert("AI 执笔失败: " + data.error);
                 }
@@ -2279,7 +2346,7 @@ if (data.success) {
 1. 第一步必须先复述你理解的当前事件，并指出当前事件内部缺失的切入点、冲突、人物选择或不可逆后果。
 2. 陪作者讨论当前事件内部的行动、阻力、人物选择、代价、转折和信息释放；不要展开讨论下一事件的具体内容。
 3. 每次提出事件细节，都要说明：行动人物、行为来源、冲突对象、不可逆后果、如何让当前事件结尾自然过渡到下一事件。
-4. 用世界观和核心戒律校验事件是否合理；不合理时必须指出并给出修正方向。
+4. 用统一规则/专家资料校验事件是否合理；如果涉及职业、行业或学科，要检查工作流程、术语、权限边界、常见误区和真实感细节，不合理时必须指出并给出修正方向。
 5. 主动提出【可种植伏笔】和【需要回收伏笔】：说明种下位置、回收位置、误导/信息差作用、回收方式，以及如果不回收会造成的逻辑断裂。
 6. 当作者说“推演差不多了”或“开始总结”时，先确认这段内容分成几章，再生成每章标题与详细摘要；每章必须列出可种植伏笔/需回收伏笔。
 7. 下一事件只作为结尾衔接目标，不能把 SOP 讨论变成两个事件的联合推演。
@@ -2290,7 +2357,7 @@ if (data.success) {
                 let lastUserMsg = payloadConvo[payloadConvo.length - 1];
                 if (lastUserMsg && lastUserMsg.role === 'user') {
                     // 如果有必须要回收的伏笔 (hookAlert)，它会变成红字警告随同发送！
-                    lastUserMsg.content += `\n\n${hiddenWorkflow}` + (currentLocalContext.hookAlert || "") + `\n\n[绝对戒律防OOC指令]：请严格遵循设定推演，严禁偏离人物档案。\n【世界观与核心戒律】：\n${worldRules}\n【人物卡】：\n${characterDetails}`;
+                    lastUserMsg.content += `\n\n${hiddenWorkflow}` + (currentLocalContext.hookAlert || "") + `\n\n[统一监督指令]：请严格遵循规则/专家资料与人物档案推演，严禁专业乱写、逻辑跳步、人物降智或OOC。\n【统一规则/专家资料】：\n${worldRules}\n【人物卡】：\n${characterDetails}`;
                 }
 
                 // 4. 发送给主脑

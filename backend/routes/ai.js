@@ -4,7 +4,7 @@ const router = express.Router();
 const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY;
 
 router.post('/generate-chapter', async (req, res) => {
-    const { title, synopsis, characters, hooks, currentText } = req.body;
+    const { title, synopsis, characters, hooks, currentText, qualityGuardrails } = req.body;
 
     try {
         // 1. 结构化上下文压缩 (Context Compression)
@@ -22,8 +22,10 @@ router.post('/generate-chapter', async (req, res) => {
 1. 绝对不要偏离《本章任务梗概》的核心逻辑。
 2. 只能使用《活跃角色情报》中提供的人物，绝不能虚构重要的新角色，且必须严格符合他们的性格与阵营设定。
 3. 如果有《待引爆伏笔》，请务必将其自然地融入到本章剧情中，完成闭环。
-4. 语言风格要符合赛博朋克/硬核悬疑的调性，文字要有画面感和张力。
-5. 直接输出正文内容，绝不要输出任何解释性废话（如“好的，我这就开始写”）。`;
+4. 《统一规则/专家资料》是世界规则与专家系统的合并结果。涉及职业、行业或学科时，必须遵守其中的流程、术语、权限边界、常见误区和真实感细节；资料不足时不要装懂，不要编造确定专业结论。
+5. 写作时内置监督系统：检查因果链、信息来源、人物动机、专业真实感、伏笔闭环，避免不合逻辑、强行巧合、人物降智。
+6. 语言风格要符合当前作品调性，文字要有画面感和张力。
+7. 直接输出正文内容，绝不要输出任何解释性废话（如“好的，我这就开始写”）。`;
 
         // 3. 组装发给 AI 的弹药
         const userContent = `
@@ -35,6 +37,9 @@ ${charContext}
 
 【局部时空雷达】(伏笔):
 ${hookContext}
+
+【统一规则/专家资料与正文监督标准】:
+${qualityGuardrails || '暂无额外规则；请优先保持因果清楚、人物动机可信、专业细节谨慎。'}
 
 ${currentText ? `【前文已写内容，请顺着情节继续往下写】:\n${currentText}` : `【请从本章开头开始进行高质量的开篇创作】`}
 `;
