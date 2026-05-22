@@ -34,6 +34,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!PROJECT_ID) { alert("非法侵入！即将返回大厅。"); window.location.href = 'dashboard.html'; return; }
 
     let genesisConversation = [];
+    let genesisPanelSyncBlocked = false;
+    let genesisRequestInFlight = false;
     let currentChapterChatHistory = [];
     let subConversation = [];
     let currentSubChatTarget = ""; 
@@ -263,6 +265,93 @@ document.addEventListener('DOMContentLoaded', () => {
         if (options.audit) window.runSandboxRuleAudit(mergedBible);
         if (options.cloud !== false) syncGenesisDraftToCloud();
         return true;
+    }
+
+    function setGenesisChatLocked(locked, label = '') {
+        genesisRequestInFlight = locked;
+        if (chatInput) chatInput.disabled = locked || genesisPanelSyncBlocked;
+        if (btnSend) {
+            btnSend.disabled = locked || genesisPanelSyncBlocked;
+            btnSend.dataset.originalText = btnSend.dataset.originalText || btnSend.innerHTML;
+            if (locked && label) btnSend.innerHTML = label;
+            if (!locked && !genesisPanelSyncBlocked) btnSend.innerHTML = btnSend.dataset.originalText;
+        }
+        if (window.lucide) lucide.createIcons();
+    }
+
+    function setGenesisSyncBlocked(blocked, message = '') {
+        genesisPanelSyncBlocked = blocked;
+        if (chatInput) chatInput.disabled = blocked || genesisRequestInFlight;
+        if (btnSend) {
+            btnSend.disabled = blocked || genesisRequestInFlight;
+            btnSend.dataset.originalText = btnSend.dataset.originalText || btnSend.innerHTML;
+            btnSend.innerHTML = blocked
+                ? `<i data-lucide="shield-alert" class="w-4 h-4 mr-1.5"></i>等待面板同步`
+                : btnSend.dataset.originalText;
+        }
+        if (blocked && message) alert(message);
+        if (window.lucide) lucide.createIcons();
+    }
+
+    async function buildExtractionConversationFromChat(conversation, instruction) {
+        const payload = buildChatPayload(conversation, 16);
+        const databaseBible = await fetchBibleSnapshotFromDatabase();
+        const currentBibleRaw = getCurrentBibleSnapshot();
+        const stableBible = databaseBible
+            ? mergeBibleWithStableLists(databaseBible, currentBibleRaw || {})
+            : currentBibleRaw;
+        if (stableBible) saveLatestBible(stableBible);
+        const currentBible = compactBibleForPrompt(stableBible);
+        return [
+            currentBible ? { role: 'system', content: `【当前面板数据】\n${JSON.stringify(currentBible)}` } : null,
+            payload.memorySummary ? { role: 'system', content: `【较早对话摘要】\n${payload.memorySummary}` } : null,
+            ...payload.conversation,
+            { role: 'user', content: instruction }
+        ].filter(Boolean);
+    }
+
+    async function extractAndSaveBibleFromConversation(conversation, instruction) {
+        const extractionConversation = await buildExtractionConversationFromChat(conversation, instruction);
+        const res = await fetch('/api/crystallize/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ conversation: extractionConversation })
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || '提取失败');
+        const mergedBible = saveLatestBible(data.bible) || data.bible;
+        renderHumanPreview(mergedBible);
+        window.runSandboxRuleAudit(mergedBible);
+        await syncGenesisDraftToCloud();
+        setGenesisSyncBlocked(false);
+        return mergedBible;
+    }
+
+    async function ensurePanelSyncedFromReply(aiReplyText, conversationForExtraction) {
+        const parsedBible = extractBibleJsonFromText(aiReplyText);
+        if (parsedBible) {
+            applyRealtimeBibleUpdate(parsedBible, { audit: true, cloud: false });
+            await syncGenesisDraftToCloud();
+            setGenesisSyncBlocked(false);
+            return { synced: true, replyText: formatSandboxVisibleReply(stripBibleJsonBlocks(aiReplyText)), source: 'json' };
+        }
+
+        await extractAndSaveBibleFromConversation(conversationForExtraction, `上一轮 AI 回复没有提供合法 JSON。请根据当前面板数据、最近对话和上一轮 AI 回复，提取并合并最新共识，输出完整世界圣经 JSON。
+要求：
+1. 必须记录用户在对话中否定、修正或新增的人物/事件/规则。
+2. characters 详细字段、relations 人物羁绊、timeline 细密时间轴是稳定资产；除非用户明确说删除，否则必须保留。
+3. 只输出 JSON，不要输出正文。`);
+        return { synced: true, replyText: formatSandboxVisibleReply(aiReplyText), source: 'auto-extract' };
+    }
+
+    function formatSandboxVisibleReply(text = '') {
+        const cleaned = stripBibleJsonBlocks(text)
+            .split('\n')
+            .map(line => line.trim())
+            .filter(Boolean)
+            .slice(0, 8)
+            .join('\n');
+        return limitText(cleaned, 700);
     }
 
     // ==========================================
@@ -1746,6 +1835,7 @@ ${getRulesTextForPrompt()}`;
 
     async function fetchChatResponse() {
         if(!chatHistory) return;
+        setGenesisChatLocked(true, `<i data-lucide="loader" class="w-4 h-4 mr-1.5 animate-spin"></i>同步中`);
         const loadingId = 'loading-' + Date.now();
         chatHistory.innerHTML += `<div id="${loadingId}" class="flex justify-start"><div class="bg-gray-800 p-4 rounded-2xl text-purple-400 text-sm animate-pulse flex items-center"><i data-lucide="loader" class="w-4 h-4 mr-2 animate-spin"></i>主脑推演中...</div></div>`;
         chatHistory.scrollTop = chatHistory.scrollHeight;
@@ -1760,20 +1850,22 @@ ${getRulesTextForPrompt()}`;
             
             if (data.success) {
                 let aiReplyText = data.reply;
-                const parsedBible = extractBibleJsonFromText(aiReplyText);
-                if (parsedBible) {
-                    applyRealtimeBibleUpdate(parsedBible, { audit: true });
-                    aiReplyText = stripBibleJsonBlocks(aiReplyText);
-                } else {
-                    console.warn("本轮回复未解析到可用的实时面板 JSON。");
-                }
+                const conversationForExtraction = [...genesisConversation, { role: 'assistant', content: aiReplyText }];
+                const syncResult = await ensurePanelSyncedFromReply(aiReplyText, conversationForExtraction);
+                aiReplyText = syncResult.replyText;
                 const newIndex = genesisConversation.length;
                 genesisConversation.push({ role: 'assistant', content: aiReplyText || '已更新设定数据。' });
                 if(aiReplyText.length > 0) appendMessage('assistant', aiReplyText, newIndex);
                 localStorage.setItem(GENESIS_CHAT_KEY, JSON.stringify(genesisConversation));
-                syncGenesisDraftToCloud();
+                await syncGenesisDraftToCloud();
             }
-        } catch (error) { document.getElementById(loadingId)?.remove(); }
+        } catch (error) {
+            console.error('沙盒推演或面板同步失败:', error);
+            setGenesisSyncBlocked(true, `本轮回复未能确认写入实时面板：${error.message || '未知错误'}\n请先点击“从对话刷新面板”恢复同步，再继续下一轮。`);
+        } finally {
+            document.getElementById(loadingId)?.remove();
+            setGenesisChatLocked(false);
+        }
     }
 
     if (chatInput) {
@@ -1782,11 +1874,13 @@ ${getRulesTextForPrompt()}`;
 
     if (btnSend) {
         btnSend.onclick = () => {
+            if (genesisRequestInFlight) return;
+            if (genesisPanelSyncBlocked) return alert('上一轮设定还没有确认写入实时面板。请先点击“从对话刷新面板”，确认保存后再继续。');
             const text = chatInput.value.trim();
             if (!text) return;
             chatInput.value = '';
             const userMsgWithContext = text
-                + `\n\n(系统附加：当前沙盒模块是【${getActiveSandboxModuleLabel()}】。事件、人物、规则三个模块互相影响；规则/世界观/专家资料拥有最高权限。右侧数据面板已由用户实时更新，优先级高于旧聊天记录和你之前提出的方案。若旧设定与面板冲突，必须废弃旧设定，以面板为准继续推演。若当前输入新增人物，请将其绑定到相关事件，并提醒参与少于三个事件的人物需要后续复用或合并。)`
+                + `\n\n(系统附加：当前沙盒模块是【${getActiveSandboxModuleLabel()}】。事件、人物、规则三个模块互相影响；规则/世界观/专家资料拥有最高权限。右侧数据面板已由用户实时更新，优先级高于旧聊天记录和你之前提出的方案。若旧设定与面板冲突，必须废弃旧设定，以面板为准继续推演。若当前输入新增人物，请将其绑定到相关事件，并提醒参与少于三个事件的人物需要后续复用或合并。沙盒回复只输出事件因果、人物选择、规则约束和待确认项，不写正文式情节段落。)`
                 + getExpertKeywordHint(text);
             const newIndex = genesisConversation.length;
             genesisConversation.push({ role: 'user', content: userMsgWithContext });
@@ -1976,19 +2070,7 @@ ${getRulesTextForPrompt()}`;
             if (window.lucide) lucide.createIcons();
 
             try {
-                const payload = buildChatPayload(genesisConversation, 16);
-                const databaseBible = await fetchBibleSnapshotFromDatabase();
-                const currentBibleRaw = getCurrentBibleSnapshot();
-                const stableBible = databaseBible
-                    ? mergeBibleWithStableLists(databaseBible, currentBibleRaw || {})
-                    : currentBibleRaw;
-                if (stableBible) saveLatestBible(stableBible);
-                const currentBible = compactBibleForPrompt(stableBible);
-                const extractionConversation = [
-                    currentBible ? { role: 'system', content: `【当前面板数据】\n${JSON.stringify(currentBible)}` } : null,
-                    payload.memorySummary ? { role: 'system', content: `【较早对话摘要】\n${payload.memorySummary}` } : null,
-                    ...payload.conversation,
-                    { role: 'user', content: `请根据当前面板数据与最近对话，提取并合并最新共识，输出完整世界圣经 JSON。
+                await extractAndSaveBibleFromConversation(genesisConversation, `请根据当前面板数据与最近对话，提取并合并最新共识，输出完整世界圣经 JSON。
 要求：
 1. 用户后续通过对话否定或修改过的低质量人物/事件必须被替换，不要保留旧版本。
 2. 沙盒有事件、人物、规则/专家三个模块，它们互相影响，不能各自孤立更新。
@@ -1996,21 +2078,7 @@ ${getRulesTextForPrompt()}`;
 4. 人物必须尽量绑定到 timeline/chapters 的具体事件；参与事件少于三个的人物要在 description 或 character_arc 中提示后续复用价值，避免一次性人物。
 5. 如果对话出现律师、医生、警察、金融、政治、文化、历史、古代、朝代、科举、官职、礼法、战争、技能等专业关键词，请把对应专家资料合并进 rules，而不是单独创建新系统。
 6. 历史专家为内置后台能力：遇到历史剧/古代背景时，必须检查朝代、官职、称谓、礼仪、服饰器物、交通通讯、军队调动、审案/科举/婚嫁/朝会流程，以及现代价值观误套问题。
-7. 当前面板数据中的 characters 详细字段、relations 人物羁绊、timeline 细密时间轴是稳定资产；除非最近对话明确要求删除某一项，否则必须完整保留，不允许用摘要版、空数组或字段缺失版覆盖。` }
-                ].filter(Boolean);
-
-                const res = await fetch('/api/crystallize/preview', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ conversation: extractionConversation })
-                });
-                const data = await res.json();
-
-                if (!data.success) throw new Error(data.error || '提取失败');
-                const mergedBible = saveLatestBible(data.bible) || data.bible;
-                renderHumanPreview(mergedBible);
-                window.runSandboxRuleAudit(mergedBible);
-                syncGenesisDraftToCloud();
+7. 当前面板数据中的 characters 详细字段、relations 人物羁绊、timeline 细密时间轴是稳定资产；除非最近对话明确要求删除某一项，否则必须完整保留，不允许用摘要版、空数组或字段缺失版覆盖。`);
                 alert('✅ 已根据当前对话刷新右侧面板。');
             } catch (e) {
                 console.error('手动刷新面板失败:', e);
