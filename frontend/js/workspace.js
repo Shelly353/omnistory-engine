@@ -202,6 +202,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnVersionCompare = document.getElementById('btn-version-compare');
     const btnBookAudit = document.getElementById('btn-book-audit');
     const btnGoldenThree = document.getElementById('btn-golden-three');
+    const btnCharacterVoice = document.getElementById('btn-character-voice');
+    const btnDialoguePolish = document.getElementById('btn-dialogue-polish');
+    const btnSetpieceDirector = document.getElementById('btn-setpiece-director');
+    const btnRelationshipLine = document.getElementById('btn-relationship-line');
+    const btnThemeMotif = document.getElementById('btn-theme-motif');
     const btnWordBudget = document.getElementById('btn-word-budget');
     const btnBeatSheet = document.getElementById('btn-beat-sheet');
     const btnContinuityLedger = document.getElementById('btn-continuity-ledger');
@@ -749,7 +754,10 @@ document.addEventListener('DOMContentLoaded', () => {
 5. 世界规则：力量、资源、制度、技能必须有代价、限制和反制，不允许无敌解法。
 6. 伏笔闭环：本章需要回应的伏笔必须处理；新伏笔要有后续回收方向。
 7. 资料来源：涉及历史、法律、医疗、行业流程或现实事实时，应优先引用本地资料库片段；资料不足要标注不确定，不能伪造来源。
-8. 定稿标准：章节必须通过验收闸门，且不能破坏分卷结构、节奏曲线、连续性账本和人物/反派弧光表。`
+8. 角色声音：主要角色的对白必须有不同词汇、节奏、潜台词和回避方式，不能所有人像同一个 AI。
+9. 场面导演：动作、谈判、审讯、法庭、战争、仪式等高张力场景必须有空间调度、目标阻力、身体/心理代价和视觉记忆点。
+10. 情感/主题：关系变化要由事件触发，主题母题要形成呼应但不能说教。
+11. 定稿标准：章节必须通过验收闸门，且不能破坏分卷结构、节奏曲线、连续性账本和人物/反派弧光表。`
         ].filter(Boolean).join('\n\n');
     }
 
@@ -848,6 +856,9 @@ ${getBuiltInExpertBaseline()}
             longformState.rhythmCurve ? `【章节节奏曲线】\n${longformState.rhythmCurve}` : '',
             longformState.storyBlueprint ? `【好莱坞大片蓝图】\n${longformState.storyBlueprint}` : '',
             longformState.goldenThree ? `【开篇黄金三章策略】\n${longformState.goldenThree}` : '',
+            longformState.characterVoice ? `【角色声音系统】\n${longformState.characterVoice}` : '',
+            longformState.relationshipLine ? `【情感/关系线系统】\n${longformState.relationshipLine}` : '',
+            longformState.themeMotif ? `【主题与母题追踪】\n${longformState.themeMotif}` : '',
             longformState.arcTracker ? `【全局人物/反派弧光表】\n${longformState.arcTracker}` : '',
             longformState.productionBoard ? `【章节生产看板】\n${longformState.productionBoard}` : '',
             longformState.stageMemory ? `【阶段记忆压缩】\n${longformState.stageMemory}` : '',
@@ -856,6 +867,8 @@ ${getBuiltInExpertBaseline()}
             longformState.bookAudit ? `【成书级一致性总审】\n${longformState.bookAudit}` : '',
             longformState.oppositionPlans?.[key] ? `【本事件反派/阻力升级】\n${longformState.oppositionPlans[key]}` : '',
             longformState.sceneCards?.[key] ? `【本章场景卡】\n${longformState.sceneCards[key]}` : '',
+            longformState.dialoguePolish?.[key] ? `【本章对白专项打磨】\n${longformState.dialoguePolish[key]}` : '',
+            longformState.setpieceDirector?.[key] ? `【本章动作/场面导演】\n${longformState.setpieceDirector[key]}` : '',
             longformState.sourceCitations?.[key] ? `【本章资料来源标注】\n${longformState.sourceCitations[key]}` : '',
             longformState.eventGates?.[key] ? `【本事件质量闸门】\n${longformState.eventGates[key]}` : '',
             longformState.attractionPlans?.[key] ? `【本章吸引力设计】\n${longformState.attractionPlans[key]}` : '',
@@ -871,7 +884,7 @@ ${getBuiltInExpertBaseline()}
     }
 
     async function runLongformEditorTask(taskType, extra = "") {
-        const globalTasks = ['memory', 'blueprint', 'budget', 'beats', 'board', 'arcs', 'volume', 'rhythm', 'bookAudit', 'goldenThree'];
+        const globalTasks = ['memory', 'blueprint', 'budget', 'beats', 'board', 'arcs', 'volume', 'rhythm', 'bookAudit', 'goldenThree', 'voice', 'relationship', 'theme'];
         if (!currentLocalContext.chapterId && !globalTasks.includes(taskType)) return alert("请先选择一个事件。");
         const taskPrompts = {
             budget: `你是长篇小说制片主任。请建立【20万字篇幅规划器】：总字数目标约20万字，建议卷数/幕数/章节数，每章目标字数，三幕或八序列的篇幅比例，关键转折所在章节，高潮与收束字数预算。必须输出可执行表格，并指出当前事件属于哪一段篇幅功能。`,
@@ -880,6 +893,11 @@ ${getBuiltInExpertBaseline()}
             rhythm: `你是章节节奏曲线师。请为全书建立【章节间节奏曲线】：每章的紧张度、情绪强度、信息量、动作量、关系推进、悬念强度、疲劳风险，指出连续平淡/连续解释/连续打斗/连续情绪过载的问题，并给调节建议。`,
             blueprint: `你是好莱坞级商业叙事总监。请为全书建立或更新【大片蓝图】：一句话高概念、类型承诺、主题问题、主角外在目标/内在需求、反派或核心阻力、三幕式/八序列推进、重大转折点、情绪卖点、视觉/场面卖点、终局画面、续写禁区。要求能指导后续所有事件，不写空话。`,
             goldenThree: `你是商业小说开篇诊断师。请建立【开篇黄金三章系统】：前三章必须完成的读者钩子、主角吸引力、世界入口、核心危机、反派/阻力露面、信息差、章末钩子、不能写慢的部分。逐章输出问题和强化方案。`,
+            voice: `你是角色声音设计师。请建立【角色声音系统】：为主要角色设计专属说话方式、词汇偏好、句长节奏、隐喻来源、情绪失控时的语言变化、沉默/回避方式、禁用语气和容易说出口/绝不会说出口的话。要求能让读者不看名字也能分辨是谁在说话。`,
+            dialogue: `你是对白专项打磨编辑。请审查并强化当前章节对白：每段对白是否有潜台词、冲突、身份差异、信息推进、关系变化和节奏停顿；删除解释型对白，避免所有人说话像同一个 AI。输出可直接用于改稿的对白原则和重点句段修改建议。`,
+            setpiece: `你是动作/场面专项导演。请为当前章节设计或审查场面调度：空间位置、行动目标、障碍变化、节奏段落、视角切换、身体代价、道具/环境利用、专业流程、视觉记忆点和收束钩子。适用于动作戏、战争戏、追逐戏、法庭戏、谈判戏、仪式戏等高张力场景。`,
+            relationship: `你是情感线/关系线统筹。请建立或更新【情感/关系线系统】：主要关系的当前状态、隐藏需求、误解、权力差、亲密/疏离节点、破裂/修复/背叛/和解节拍，以及每章应推动的关系变化。要求关系变化必须由事件和人物选择触发。`,
+            theme: `你是主题与母题追踪编辑。请建立或更新【主题与母题追踪】：主题问题、反题、人物各自的价值立场、反复出现的象征物/意象/场景、每次出现的变化、与高潮选择的呼应。要求提升作品高级感，但不能让正文变成说教。`,
             arcs: `你是全局人物弧光统筹。请建立【全局人物/反派弧光表】：主角、关键配角、反派/核心阻力的初始信念、欲望、恐惧、错误策略、关键转折章节、关系变化、最低点、最终选择和结局状态。要求每个弧光都能被具体事件触发。`,
             board: `你是长篇生产看板管理员。请根据当前章节列表和已有正文状态建立【章节生产看板】：每章状态标记为待推演/已大纲/已场景卡/已正文/审查未通过/已改稿/已定稿，并列出下一步生产队列、缺失人物、缺失伏笔和高风险章节。`,
             continuity: `你是连续性账本管理员。请更新【连续性账本】：时间、地点、人物状态/伤势/心理变化、道具、秘密、知情范围、关系变化、能力消耗、未解决矛盾、不能遗忘的细节。发现前后冲突要报警，并给最小修正方案。`,
@@ -916,6 +934,16 @@ ${getBuiltInExpertBaseline()}
                 longformState.storyBlueprint = reply;
             } else if (taskType === 'goldenThree') {
                 longformState.goldenThree = reply;
+            } else if (taskType === 'voice') {
+                longformState.characterVoice = reply;
+            } else if (taskType === 'dialogue') {
+                longformState.dialoguePolish = { ...(longformState.dialoguePolish || {}), [key]: reply };
+            } else if (taskType === 'setpiece') {
+                longformState.setpieceDirector = { ...(longformState.setpieceDirector || {}), [key]: reply };
+            } else if (taskType === 'relationship') {
+                longformState.relationshipLine = reply;
+            } else if (taskType === 'theme') {
+                longformState.themeMotif = reply;
             } else if (taskType === 'arcs') {
                 longformState.arcTracker = reply;
             } else if (taskType === 'board') {
@@ -2841,6 +2869,11 @@ if (data.success) {
     if (btnVersionCompare) btnVersionCompare.onclick = () => compareChapterVersion();
     if (btnBookAudit) btnBookAudit.onclick = () => runBookLevelTask('bookAudit');
     if (btnGoldenThree) btnGoldenThree.onclick = () => runBookLevelTask('goldenThree');
+    if (btnCharacterVoice) btnCharacterVoice.onclick = () => runLongformEditorTask('voice');
+    if (btnDialoguePolish) btnDialoguePolish.onclick = () => runLongformEditorTask('dialogue');
+    if (btnSetpieceDirector) btnSetpieceDirector.onclick = () => runLongformEditorTask('setpiece');
+    if (btnRelationshipLine) btnRelationshipLine.onclick = () => runLongformEditorTask('relationship');
+    if (btnThemeMotif) btnThemeMotif.onclick = () => runLongformEditorTask('theme');
     if (btnWordBudget) btnWordBudget.onclick = () => runLongformEditorTask('budget');
     if (btnBeatSheet) btnBeatSheet.onclick = () => runLongformEditorTask('beats');
     if (btnContinuityLedger) btnContinuityLedger.onclick = () => runLongformEditorTask('continuity');
@@ -2914,10 +2947,12 @@ if (data.success) {
             if (window.lucide) lucide.createIcons();
 
             const sceneCard = await runLongformEditorTask('scene', '\n\n这是正文执笔前的强制场景卡，请把本章拆成能直接写作的场景链。');
+            const dialoguePlan = await runLongformEditorTask('dialogue', '\n\n这是正文执笔前的对白专项打磨，请给出本章对白写作约束。');
+            const setpiecePlan = await runLongformEditorTask('setpiece', '\n\n这是正文执笔前的动作/场面导演，请给出本章场面调度约束。');
             const key = getLongformChapterKey();
 
             // 5. 💥 终极 Payload 融合：将文笔风格无缝缝合进最顶级的强约束提示词中！
-            const strictSynopsisText = `【文学主脑至高契约：请彻底废弃历史缓存旧大纲，必须严格基于以下摘要进行正文扩写，维持情节深度连贯，严禁人设漂移OOC！】\n\n${stylePrompt}\n\n【好莱坞大片蓝图】：\n${longformState.storyBlueprint || '暂无，请以当前救猫咪类型和本章大纲建立商业叙事张力。'}\n\n【本事件反派/阻力升级】：\n${longformState.oppositionPlans?.[key] || '暂无，请确保正文中存在清晰阻力、升级和代价。'}\n\n【本章场景卡】：\n${sceneCard || longformState.sceneCards?.[key] || '暂无'}\n\n【本章剧情起承转合】：\n${latestSynopsis}\n\n【统一规则/专家资料】：\n${worldRules}\n\n【必须100%严密契合的登场角色人设】：\n${characterDetails}\n\n【正文质量监督标准】：\n${getUnifiedQualityGuardrails()}`;
+            const strictSynopsisText = `【文学主脑至高契约：请彻底废弃历史缓存旧大纲，必须严格基于以下摘要进行正文扩写，维持情节深度连贯，严禁人设漂移OOC！】\n\n${stylePrompt}\n\n【好莱坞大片蓝图】：\n${longformState.storyBlueprint || '暂无，请以当前救猫咪类型和本章大纲建立商业叙事张力。'}\n\n【角色声音系统】：\n${longformState.characterVoice || '暂无，请确保主要角色对白有身份、性格、节奏和潜台词差异。'}\n\n【情感/关系线系统】：\n${longformState.relationshipLine || '暂无，请让关系变化由事件选择触发。'}\n\n【主题与母题追踪】：\n${longformState.themeMotif || '暂无，请让主题自然藏在选择、意象和代价中，不要说教。'}\n\n【本事件反派/阻力升级】：\n${longformState.oppositionPlans?.[key] || '暂无，请确保正文中存在清晰阻力、升级和代价。'}\n\n【本章场景卡】：\n${sceneCard || longformState.sceneCards?.[key] || '暂无'}\n\n【本章对白专项打磨】：\n${dialoguePlan || longformState.dialoguePolish?.[key] || '暂无'}\n\n【本章动作/场面导演】：\n${setpiecePlan || longformState.setpieceDirector?.[key] || '暂无'}\n\n【本章剧情起承转合】：\n${latestSynopsis}\n\n【统一规则/专家资料】：\n${worldRules}\n\n【必须100%严密契合的登场角色人设】：\n${characterDetails}\n\n【正文质量监督标准】：\n${getUnifiedQualityGuardrails()}`;
 
             const ultraPayload = {
                 ...currentLocalContext,
