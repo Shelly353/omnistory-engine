@@ -41,6 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let relationNetwork = null;
     let workspaceChapters = [];
     let saveTimeout;
+    let previewSyncTimer;
     let currentSelectedString = "";
     let insertEventContext = { prev: null, next: null, suggestedNumber: null, chat: [] };
     let localSourceDocs = [];
@@ -109,6 +110,58 @@ document.addEventListener('DOMContentLoaded', () => {
             console.warn('最新面板数据读取失败:', e);
             return null;
         }
+    }
+
+    function looksLikeBibleJson(value) {
+        return value && typeof value === 'object' && (
+            Object.prototype.hasOwnProperty.call(value, 'genre') ||
+            Object.prototype.hasOwnProperty.call(value, 'worldview') ||
+            Object.prototype.hasOwnProperty.call(value, 'rules') ||
+            Array.isArray(value.characters) ||
+            Array.isArray(value.timeline) ||
+            Array.isArray(value.chapters)
+        );
+    }
+
+    function extractBibleJsonFromText(text = "") {
+        const candidates = [];
+        const fenceRegex = /```(?:json)?\s*([\s\S]*?)\s*```/gi;
+        let match;
+        while ((match = fenceRegex.exec(text)) !== null) {
+            candidates.push(match[1].trim());
+        }
+        const firstBrace = text.indexOf('{');
+        const lastBrace = text.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace > firstBrace) {
+            candidates.push(text.slice(firstBrace, lastBrace + 1).trim());
+        }
+        for (const candidate of candidates.reverse()) {
+            try {
+                const parsed = JSON.parse(candidate);
+                if (looksLikeBibleJson(parsed)) return parsed;
+            } catch (e) {}
+        }
+        return null;
+    }
+
+    function stripBibleJsonBlocks(text = "") {
+        return String(text || '').replace(/```(?:json)?\s*([\s\S]*?)\s*```/gi, (block, inner) => {
+            try {
+                const parsed = JSON.parse(inner.trim());
+                return looksLikeBibleJson(parsed) ? '' : block;
+            } catch (e) {
+                return block;
+            }
+        }).trim();
+    }
+
+    function applyRealtimeBibleUpdate(bible, options = {}) {
+        if (!looksLikeBibleJson(bible)) return false;
+        saveLatestBible(bible);
+        if (options.render !== false) renderHumanPreview(bible);
+        if (options.audit) window.runSandboxRuleAudit(bible);
+        if (options.cloud !== false) syncGenesisDraftToCloud();
+        return true;
     }
 
     // ==========================================
@@ -242,12 +295,33 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) { console.error("保存失败:", e); }
     }
 
+    function attachPreviewAutosave() {
+        if (!humanPreviewContainer || humanPreviewContainer.dataset.autosaveBound === '1') return;
+        humanPreviewContainer.dataset.autosaveBound = '1';
+        const sync = () => {
+            if (!document.getElementById('prev-genre')) return;
+            clearTimeout(previewSyncTimer);
+            previewSyncTimer = setTimeout(() => {
+                try {
+                    const bible = collectBibleFromPreview();
+                    saveLatestBible(bible);
+                    syncGenesisDraftToCloud();
+                } catch (e) {
+                    console.warn('实时面板自动保存失败:', e);
+                }
+            }, 500);
+        };
+        humanPreviewContainer.addEventListener('input', sync);
+        humanPreviewContainer.addEventListener('change', sync);
+    }
+
     // ==========================================
     // 💥 实时表单渲染系统
     // ==========================================
     function renderHumanPreview(bible) {
         window.OmniWorkspacePreview.renderHumanPreview(humanPreviewContainer, bible);
         renderLocalSourcePanel();
+        attachPreviewAutosave();
     }
 
     function closeGenesisSandbox() {
@@ -1536,12 +1610,9 @@ ${getRulesTextForPrompt()}`;
         genesisConversation.forEach((msg, index) => {
             let text = msg.content;
             if (msg.role === 'assistant') {
-                // 💥 关键修复 2：增强正则表达式容错，哪怕 AI 少写了 'json' 也能精准截获
-                const match = text.match(/```[a-zA-Z]*\s*([\s\S]*?)\s*```/i);
-                if (match) {
-                    text = text.replace(match[0], '').trim();
-                    try { latestParsedBible = JSON.parse(match[1]); } catch(e) {} // 捕获最新数据
-                }
+                const parsed = extractBibleJsonFromText(text);
+                if (parsed) latestParsedBible = parsed;
+                text = stripBibleJsonBlocks(text);
             } else if (msg.role === 'user') {
                 text = text.replace(/\n\n\(系统附加：.*?\)/g, '');
             }
@@ -1588,15 +1659,12 @@ ${getRulesTextForPrompt()}`;
             
             if (data.success) {
                 let aiReplyText = data.reply;
-                const jsonMatch = aiReplyText.match(/```[a-zA-Z]*\s*([\s\S]*?)\s*```/i); // 同步增强容错
-                if (jsonMatch) {
-                    try {
-                        const parsedBible = JSON.parse(jsonMatch[1]);
-                        saveLatestBible(parsedBible);
-                        renderHumanPreview(parsedBible); 
-                        window.runSandboxRuleAudit(parsedBible);
-                        aiReplyText = aiReplyText.replace(jsonMatch[0], '').trim();
-                    } catch(e) { console.error("JSON实时解析失败:", e); }
+                const parsedBible = extractBibleJsonFromText(aiReplyText);
+                if (parsedBible) {
+                    applyRealtimeBibleUpdate(parsedBible, { audit: true });
+                    aiReplyText = stripBibleJsonBlocks(aiReplyText);
+                } else {
+                    console.warn("本轮回复未解析到可用的实时面板 JSON。");
                 }
                 const newIndex = genesisConversation.length;
                 genesisConversation.push({ role: 'assistant', content: aiReplyText || '已更新设定数据。' });
