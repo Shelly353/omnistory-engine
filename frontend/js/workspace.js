@@ -27,6 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const PROJECT_ID = urlParams.get('id');
     const GENESIS_CHAT_KEY = `genesis_chat_${PROJECT_ID}`;
     const LATEST_BIBLE_KEY = `latest_bible_${PROJECT_ID}`;
+    const MANUAL_BIBLE_EDITS_KEY = `manual_bible_edits_${PROJECT_ID}`;
     const GENESIS_CLOUD_TYPE = "上帝沙盒 · 创世圣经";
     const LONGFORM_STATE_KEY = `longform_editor_state_${PROJECT_ID}`;
     const LONGFORM_CLOUD_TYPE = "长篇连载编辑系统";
@@ -120,9 +121,102 @@ document.addEventListener('DOMContentLoaded', () => {
         return merged;
     }
 
+    function loadManualBibleEdits() {
+        try {
+            const edits = JSON.parse(localStorage.getItem(MANUAL_BIBLE_EDITS_KEY) || '{}');
+            return {
+                characterRenames: edits.characterRenames || {},
+                deletedCharacters: edits.deletedCharacters || {},
+                deletedRelations: edits.deletedRelations || {},
+                deletedTimeline: edits.deletedTimeline || {}
+            };
+        } catch (e) {
+            return { characterRenames: {}, deletedCharacters: {}, deletedRelations: {}, deletedTimeline: {} };
+        }
+    }
+
+    function saveManualBibleEdits(edits) {
+        localStorage.setItem(MANUAL_BIBLE_EDITS_KEY, JSON.stringify({
+            characterRenames: edits.characterRenames || {},
+            deletedCharacters: edits.deletedCharacters || {},
+            deletedRelations: edits.deletedRelations || {},
+            deletedTimeline: edits.deletedTimeline || {}
+        }));
+    }
+
+    function canonicalCharacterName(name, edits = loadManualBibleEdits()) {
+        const key = normalizeStableKey(name);
+        return edits.characterRenames[key] || name;
+    }
+
+    function getRelationManualKey(rel = {}) {
+        return [
+            normalizeStableKey(rel.from_name || rel.from || rel.source),
+            normalizeStableKey(rel.to_name || rel.to || rel.target),
+            normalizeStableKey(rel.label || rel.relation)
+        ].join('|');
+    }
+
+    function getTimelineManualKey(item = {}) {
+        return [
+            normalizeStableKey(item.time_label),
+            normalizeStableKey(item.description)
+        ].join('|');
+    }
+
+    function rememberManualBibleEdits(previousBible = {}, nextBible = {}) {
+        const previousCharacters = Array.isArray(previousBible.characters) ? previousBible.characters : [];
+        const nextCharacters = Array.isArray(nextBible.characters) ? nextBible.characters : [];
+        const edits = loadManualBibleEdits();
+        const renamedOldKeys = new Set();
+
+        nextCharacters.forEach((char, index) => {
+            const previous = previousCharacters[index];
+            const oldName = char.original_name || previous?.name;
+            const newName = char.name;
+            if (!oldName || !newName || normalizeStableKey(oldName) === normalizeStableKey(newName)) return;
+            const oldKey = normalizeStableKey(oldName);
+            renamedOldKeys.add(oldKey);
+            edits.characterRenames[oldKey] = newName;
+            if (previous?.name && normalizeStableKey(previous.name) !== normalizeStableKey(newName)) {
+                const previousKey = normalizeStableKey(previous.name);
+                renamedOldKeys.add(previousKey);
+                edits.characterRenames[previousKey] = newName;
+            }
+            delete edits.deletedCharacters[normalizeStableKey(newName)];
+        });
+
+        const nextNames = new Set(nextCharacters.map(char => normalizeStableKey(char.name)).filter(Boolean));
+        previousCharacters.forEach(char => {
+            const key = normalizeStableKey(char.name);
+            if (!key || nextNames.has(key) || renamedOldKeys.has(key)) return;
+            edits.deletedCharacters[key] = char.name;
+        });
+
+        const nextRelationKeys = new Set((Array.isArray(nextBible.relations) ? nextBible.relations : []).map(getRelationManualKey).filter(Boolean));
+        nextRelationKeys.forEach(key => delete edits.deletedRelations[key]);
+        (Array.isArray(previousBible.relations) ? previousBible.relations : []).forEach(rel => {
+            const key = getRelationManualKey(rel);
+            if (key && !nextRelationKeys.has(key)) edits.deletedRelations[key] = true;
+        });
+
+        const nextTimelineKeys = new Set((Array.isArray(nextBible.timeline) ? nextBible.timeline : []).map(getTimelineManualKey).filter(Boolean));
+        nextTimelineKeys.forEach(key => delete edits.deletedTimeline[key]);
+        (Array.isArray(previousBible.timeline) ? previousBible.timeline : []).forEach(item => {
+            const key = getTimelineManualKey(item);
+            if (key && !nextTimelineKeys.has(key)) edits.deletedTimeline[key] = true;
+        });
+
+        saveManualBibleEdits(edits);
+    }
+
     function mergeCharactersPreservingCards(previousCharacters = [], nextCharacters = []) {
+        const edits = loadManualBibleEdits();
         const previous = Array.isArray(previousCharacters) ? previousCharacters.filter(c => c && c.name) : [];
-        const next = Array.isArray(nextCharacters) ? nextCharacters.filter(c => c && c.name) : [];
+        const next = Array.isArray(nextCharacters) ? nextCharacters
+            .filter(c => c && c.name)
+            .map(c => ({ ...c, name: canonicalCharacterName(c.name, edits) }))
+            .filter(c => !edits.deletedCharacters[normalizeStableKey(c.name)]) : [];
         if (next.length === 0 && previous.length > 0) return previous;
 
         const previousByName = new Map(previous.map(char => [normalizeStableKey(char.name), char]));
@@ -163,6 +257,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function mergeBibleWithStableLists(previous, next) {
         if (!previous || !next || typeof next !== 'object') return next;
         const merged = { ...next };
+        const manualEdits = loadManualBibleEdits();
         Object.entries(previous || {}).forEach(([key, value]) => {
             const nextValue = merged[key];
             if ((nextValue === '' || nextValue === null || nextValue === undefined) && value !== '' && value !== null && value !== undefined) {
@@ -170,15 +265,16 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         merged.characters = mergeCharactersPreservingCards(previous.characters, next.characters);
-        merged.relations = mergeStableArray(previous.relations, next.relations, rel => [
-            normalizeStableKey(rel.from_name || rel.from || rel.source),
-            normalizeStableKey(rel.to_name || rel.to || rel.target),
-            normalizeStableKey(rel.label || rel.relation)
-        ].join('|'));
-        merged.timeline = mergeStableArray(previous.timeline, next.timeline, item => [
-            normalizeStableKey(item.time_label),
-            normalizeStableKey(item.description)
-        ].join('|'));
+        const nextRelations = Array.isArray(next.relations) ? next.relations.map(rel => ({
+            ...rel,
+            from_name: canonicalCharacterName(rel.from_name || rel.from || rel.source, manualEdits),
+            to_name: canonicalCharacterName(rel.to_name || rel.to || rel.target, manualEdits)
+        })).filter(rel => !manualEdits.deletedRelations[getRelationManualKey(rel)]) : next.relations;
+        merged.relations = mergeStableArray(previous.relations, nextRelations, getRelationManualKey);
+        const nextTimeline = Array.isArray(next.timeline)
+            ? next.timeline.filter(item => !manualEdits.deletedTimeline[getTimelineManualKey(item)])
+            : next.timeline;
+        merged.timeline = mergeStableArray(previous.timeline, nextTimeline, getTimelineManualKey);
         merged.chapters = mergeStableArray(previous.chapters, next.chapters, chapter => [
             String(chapter.chapter_number || '').trim(),
             normalizeStableKey(chapter.title)
@@ -189,6 +285,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function saveLatestBible(bible, options = {}) {
         if (!bible) return null;
         const previous = options.preserveStableLists === false ? null : loadLatestBible();
+        if (options.preserveStableLists === false) rememberManualBibleEdits(loadLatestBible(), bible);
         const bibleToSave = mergeBibleWithStableLists(previous, bible);
         if (previous && options.backup !== false) backupLatestBible(previous);
         localStorage.setItem(LATEST_BIBLE_KEY, JSON.stringify(bibleToSave));
@@ -928,6 +1025,7 @@ document.addEventListener('DOMContentLoaded', () => {
             worldview: document.getElementById('prev-worldview') ? document.getElementById('prev-worldview').value.trim() : "",
             rules: buildRulesWithReferenceMaterials(rulesInput, sourceMaterials),
             characters: Array.from(document.querySelectorAll('.prev-char-item')).map(el => ({
+                original_name: el.dataset.originalName || "",
                 name: el.querySelector('.char-name')?.value.trim() || "",
                 role: el.querySelector('.char-role')?.value.trim() || "",
                 faction: el.querySelector('.char-faction')?.value.trim() || "",

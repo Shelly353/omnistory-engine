@@ -62,13 +62,14 @@ window.OmniWorkspacePreview = (() => {
         const eventCount = getCharacterEventCount(c, bible);
         const usage = getCharacterUsageStyle(eventCount);
         return `
-            <div class="prev-char-item group relative bg-gray-900 rounded-lg border ${usage.border} hover:border-blue-500 transition-all duration-300">
+            <div class="prev-char-item group relative bg-gray-900 rounded-lg border ${usage.border} hover:border-blue-500 transition-all duration-300" data-original-name="${escapePreviewValue(c.name || '')}">
                 <div class="flex space-x-2 p-2 relative z-10 bg-gray-900 rounded-lg">
                     <input type="text" class="w-1/6 bg-gray-950 border border-gray-600 rounded-md p-2 text-white text-xs char-name" value="${escapePreviewValue(c.name || '')}" placeholder="姓名">
                     <input type="text" class="w-1/6 bg-gray-950 border border-gray-600 rounded-md p-2 text-blue-300 text-xs char-role" value="${escapePreviewValue(c.role || '')}" placeholder="定位">
                     <input type="text" class="w-1/6 bg-gray-950 border border-gray-600 rounded-md p-2 text-yellow-300 text-xs char-faction" value="${escapePreviewValue(c.faction || '')}" placeholder="阵营">
                     <input type="text" class="flex-1 bg-gray-950 border border-gray-600 rounded-md p-2 text-gray-300 text-xs char-desc" value="${escapePreviewValue(c.description || '')}" placeholder="一句话简介">
                     <span class="shrink-0 text-[10px] px-2 py-1 rounded border ${usage.badge}" title="当前人物出现在事件/时间轴中的次数">${usage.label} · ${eventCount}</span>
+                    <button type="button" onclick="removeSandboxPreviewItem(this)" class="shrink-0 text-red-300 hover:text-white hover:bg-red-700 border border-red-900/60 rounded px-2" title="删除人物"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
                 </div>
                 <div class="max-h-0 overflow-hidden group-hover:max-h-[800px] transition-all duration-500 ease-in-out opacity-0 group-hover:opacity-100 px-3 pb-3">
                     <div class="grid grid-cols-3 gap-2 mt-2 pt-2 border-t border-gray-700">
@@ -165,10 +166,11 @@ window.OmniWorkspacePreview = (() => {
                 <div class="space-y-2" id="prev-rels-list">
                     ${(bible.relations||[]).map(r => `
                         <div class="flex space-x-3 items-center prev-rel-item bg-gray-900 p-2 rounded-lg border border-gray-700">
-                            <input type="text" class="w-1/3 bg-gray-950 border border-gray-600 rounded-md p-2 text-white text-xs text-center rel-from" value="${r.from_name || ''}" placeholder="发起人">
+                            <input type="text" class="w-1/3 bg-gray-950 border border-gray-600 rounded-md p-2 text-white text-xs text-center rel-from" value="${escapePreviewValue(r.from_name || '')}" placeholder="发起人">
                             <span class="text-gray-500 font-bold">➔</span>
-                            <input type="text" class="w-1/3 bg-gray-950 border border-gray-600 rounded-md p-2 text-white text-xs text-center rel-to" value="${r.to_name || ''}" placeholder="接收人">
-                            <input type="text" class="w-1/3 bg-gray-950 border border-gray-600 rounded-md p-2 text-emerald-300 font-bold text-xs text-center rel-label" value="${r.label || ''}" placeholder="羁绊关系">
+                            <input type="text" class="w-1/3 bg-gray-950 border border-gray-600 rounded-md p-2 text-white text-xs text-center rel-to" value="${escapePreviewValue(r.to_name || '')}" placeholder="接收人">
+                            <input type="text" class="w-1/3 bg-gray-950 border border-gray-600 rounded-md p-2 text-emerald-300 font-bold text-xs text-center rel-label" value="${escapePreviewValue(r.label || '')}" placeholder="羁绊关系">
+                            <button type="button" onclick="removeSandboxPreviewItem(this)" class="text-red-300 hover:text-white hover:bg-red-700 border border-red-900/60 rounded px-2 self-stretch" title="删除羁绊"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
                         </div>
                     `).join('')}
                 </div>
@@ -181,9 +183,10 @@ window.OmniWorkspacePreview = (() => {
                 <div class="space-y-2" id="prev-tl-list">
                     ${(bible.timeline||[]).map(t => `
                         <div class="flex space-x-2 prev-tl-item bg-gray-900 p-2 rounded-lg border border-gray-700">
-                            <input type="text" class="w-1/4 bg-gray-950 border border-gray-600 rounded-md p-2 text-indigo-300 font-bold text-xs tl-time" value="${t.time_label || ''}" placeholder="时间标度">
+                            <input type="text" class="w-1/4 bg-gray-950 border border-gray-600 rounded-md p-2 text-indigo-300 font-bold text-xs tl-time" value="${escapePreviewValue(t.time_label || '')}" placeholder="时间标度">
                             <input type="number" class="w-16 bg-gray-950 border border-gray-600 rounded-md p-2 text-white text-xs text-center tl-chap" value="${t.chapter_number || 1}" placeholder="发生章">
-                            <input type="text" class="flex-1 bg-gray-950 border border-gray-600 rounded-md p-2 text-gray-300 text-xs tl-desc" value="${t.description || ''}" placeholder="事件描述">
+                            <input type="text" class="flex-1 bg-gray-950 border border-gray-600 rounded-md p-2 text-gray-300 text-xs tl-desc" value="${escapePreviewValue(t.description || '')}" placeholder="事件描述">
+                            <button type="button" onclick="removeSandboxPreviewItem(this)" class="text-red-300 hover:text-white hover:bg-red-700 border border-red-900/60 rounded px-2" title="删除时间轴事件"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
                         </div>
                     `).join('')}
                 </div>
@@ -270,6 +273,14 @@ window.OmniWorkspacePreview = (() => {
         if (window.lucide) lucide.createIcons();
         const latest = list.lastElementChild;
         latest?.querySelector('.char-name')?.focus();
+    };
+
+    window.removeSandboxPreviewItem = (button) => {
+        const item = button?.closest('.prev-char-item, .prev-rel-item, .prev-tl-item, .prev-chap-item, .prev-narrative-item');
+        if (!item) return;
+        if (!confirm('确认删除这一条设定吗？')) return;
+        item.remove();
+        document.getElementById('human-preview-container')?.dispatchEvent(new Event('input', { bubbles: true }));
     };
 
     return {
