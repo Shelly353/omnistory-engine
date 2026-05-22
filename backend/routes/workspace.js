@@ -67,6 +67,41 @@ router.post('/cloud-sync', async (req, res) => {
     if (!projectId) return res.status(400).json({ success: false, error: '缺少 projectId' });
 
     try {
+        if (!String(type).endsWith('::backup')) {
+            const { data: previousState } = await supabase
+                .from(CLOUD_STATE_TABLE)
+                .select('payload, updated_at')
+                .eq('project_id', projectId)
+                .eq('data_type', type)
+                .maybeSingle();
+
+            if (previousState?.payload) {
+                const backupType = `${type}::backup`;
+                const { data: backupState } = await supabase
+                    .from(CLOUD_STATE_TABLE)
+                    .select('payload')
+                    .eq('project_id', projectId)
+                    .eq('data_type', backupType)
+                    .maybeSingle();
+                const items = Array.isArray(backupState?.payload?.items) ? backupState.payload.items : [];
+                const latestPayload = items[0]?.payload ? JSON.stringify(items[0].payload) : '';
+                const previousPayload = JSON.stringify(previousState.payload);
+                if (latestPayload !== previousPayload) {
+                    await supabase.from(CLOUD_STATE_TABLE).upsert({
+                        project_id: projectId,
+                        data_type: backupType,
+                        payload: {
+                            items: [
+                                { saved_at: new Date().toISOString(), source_updated_at: previousState.updated_at, payload: previousState.payload },
+                                ...items
+                            ].slice(0, 5)
+                        },
+                        updated_at: new Date().toISOString()
+                    }, { onConflict: 'project_id,data_type' });
+                }
+            }
+        }
+
         const { error } = await supabase.from(CLOUD_STATE_TABLE).upsert({
             project_id: projectId,
             data_type: type,

@@ -189,8 +189,28 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bible) return null;
         const previous = options.preserveStableLists === false ? null : loadLatestBible();
         const bibleToSave = mergeBibleWithStableLists(previous, bible);
+        if (previous && options.backup !== false) backupLatestBible(previous);
         localStorage.setItem(LATEST_BIBLE_KEY, JSON.stringify(bibleToSave));
         return bibleToSave;
+    }
+
+    function backupLatestBible(bible) {
+        try {
+            const hasRecoverableData = (bible.characters || []).length > 0
+                || (bible.relations || []).length > 0
+                || (bible.timeline || []).length > 0
+                || (bible.chapters || []).length > 0;
+            if (!hasRecoverableData) return;
+            const backupKey = `${LATEST_BIBLE_KEY}_backups`;
+            const backups = JSON.parse(localStorage.getItem(backupKey) || '[]');
+            const latest = backups[0]?.bible ? JSON.stringify(backups[0].bible) : '';
+            const current = JSON.stringify(bible);
+            if (latest === current) return;
+            backups.unshift({ savedAt: new Date().toISOString(), bible });
+            localStorage.setItem(backupKey, JSON.stringify(backups.slice(0, 12)));
+        } catch (e) {
+            console.warn('世界圣经本地备份失败:', e);
+        }
     }
 
     function loadLatestBible() {
@@ -213,6 +233,35 @@ document.addEventListener('DOMContentLoaded', () => {
             console.warn('数据库圣经快照读取失败:', e);
             return null;
         }
+    }
+
+    function loadLatestBibleBackups() {
+        try {
+            const backups = JSON.parse(localStorage.getItem(`${LATEST_BIBLE_KEY}_backups`) || '[]');
+            return Array.isArray(backups) ? backups.map(item => item.bible).filter(Boolean) : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    async function fetchGenesisCloudBibleBackups() {
+        try {
+            const res = await fetch(`/api/workspace/cloud-sync/${PROJECT_ID}?type=${encodeURIComponent(`${GENESIS_CLOUD_TYPE}::backup`)}`);
+            if (!res.ok) return [];
+            const data = await res.json();
+            const items = data.payload?.items || [];
+            return Array.isArray(items) ? items.map(item => item.payload?.bible).filter(Boolean) : [];
+        } catch (e) {
+            console.warn('云端世界圣经备份读取失败:', e);
+            return [];
+        }
+    }
+
+    function hasStableBibleGaps(bible = {}) {
+        return !bible
+            || !Array.isArray(bible.relations) || bible.relations.length === 0
+            || !Array.isArray(bible.timeline) || bible.timeline.length === 0
+            || !Array.isArray(bible.characters) || bible.characters.length === 0;
     }
 
     function looksLikeBibleJson(value) {
@@ -293,25 +342,57 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.lucide) lucide.createIcons();
     }
 
-    async function buildExtractionConversationFromChat(conversation, instruction) {
-        const payload = buildChatPayload(conversation, 16);
+    function buildRecoveryLedger(conversation = []) {
+        const correctionPattern = /(不是|不对|否定|改成|修改|更改|换成|不要|应该|必须|设定为|新增|加入|删除|保留|关系|羁绊|时间轴|事件|人物|性格|动机|目标|规则)/;
+        const cleaned = conversation.map((msg, index) => {
+            const raw = msg.role === 'assistant' ? stripBibleJsonBlocks(msg.content) : stripSystemAppendix(msg.content);
+            return {
+                index,
+                role: msg.role === 'user' ? '用户' : 'AI',
+                content: limitText(raw, msg.role === 'user' ? 1200 : 700)
+            };
+        }).filter(msg => msg.content && msg.content !== '已更新设定数据。');
+        const userCorrections = cleaned
+            .filter(msg => msg.role === '用户' && correctionPattern.test(msg.content))
+            .slice(-80)
+            .map(msg => `${msg.index + 1}. ${msg.content}`)
+            .join('\n\n');
+        const fullTrail = cleaned
+            .slice(-100)
+            .map(msg => `${msg.index + 1}. ${msg.role}: ${msg.content}`)
+            .join('\n\n');
+        return {
+            userCorrections: limitText(userCorrections, 18000),
+            fullTrail: limitText(fullTrail, 26000)
+        };
+    }
+
+    async function buildExtractionConversationFromChat(conversation, instruction, options = {}) {
+        const payload = buildChatPayload(conversation, options.recoveryMode ? 24 : 16);
         const databaseBible = await fetchBibleSnapshotFromDatabase();
         const currentBibleRaw = getCurrentBibleSnapshot();
-        const stableBible = databaseBible
+        const cloudBackups = await fetchGenesisCloudBibleBackups();
+        const backupBible = [...loadLatestBibleBackups(), ...cloudBackups].find(item => !hasStableBibleGaps(item));
+        let stableBible = databaseBible
             ? mergeBibleWithStableLists(databaseBible, currentBibleRaw || {})
             : currentBibleRaw;
+        if (backupBible) stableBible = stableBible ? mergeBibleWithStableLists(backupBible, stableBible) : backupBible;
         if (stableBible) saveLatestBible(stableBible);
         const currentBible = compactBibleForPrompt(stableBible);
+        const recoveryMode = options.recoveryMode || hasStableBibleGaps(stableBible);
+        const recoveryLedger = recoveryMode ? buildRecoveryLedger(conversation) : null;
         return [
             currentBible ? { role: 'system', content: `【当前面板数据】\n${JSON.stringify(currentBible)}` } : null,
             payload.memorySummary ? { role: 'system', content: `【较早对话摘要】\n${payload.memorySummary}` } : null,
+            recoveryLedger?.userCorrections ? { role: 'system', content: `【全量用户修正记录：恢复模式最高优先级】\n以下是从整个沙盒对话中筛出的用户否定、修改、新增、关系、时间轴、人物设定相关记录。恢复丢失人物卡、人物羁绊和细密时间轴时，优先服从这里，而不是 AI 早期旧方案。\n${recoveryLedger.userCorrections}` } : null,
+            recoveryLedger?.fullTrail ? { role: 'system', content: `【全量沙盒对话尾迹：用于补全丢失资产】\n${recoveryLedger.fullTrail}` } : null,
             ...payload.conversation,
             { role: 'user', content: instruction }
         ].filter(Boolean);
     }
 
-    async function extractAndSaveBibleFromConversation(conversation, instruction) {
-        const extractionConversation = await buildExtractionConversationFromChat(conversation, instruction);
+    async function extractAndSaveBibleFromConversation(conversation, instruction, options = {}) {
+        const extractionConversation = await buildExtractionConversationFromChat(conversation, instruction, options);
         const res = await fetch('/api/crystallize/preview', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -336,11 +417,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return { synced: true, replyText: formatSandboxVisibleReply(stripBibleJsonBlocks(aiReplyText)), source: 'json' };
         }
 
-        await extractAndSaveBibleFromConversation(conversationForExtraction, `上一轮 AI 回复没有提供合法 JSON。请根据当前面板数据、最近对话和上一轮 AI 回复，提取并合并最新共识，输出完整世界圣经 JSON。
+        await extractAndSaveBibleFromConversation(conversationForExtraction, `上一轮 AI 回复没有提供合法 JSON。请根据当前面板数据、全量用户修正记录、最近对话和上一轮 AI 回复，提取并合并最新共识，输出完整世界圣经 JSON。
 要求：
 1. 必须记录用户在对话中否定、修正或新增的人物/事件/规则。
 2. characters 详细字段、relations 人物羁绊、timeline 细密时间轴是稳定资产；除非用户明确说删除，否则必须保留。
-3. 只输出 JSON，不要输出正文。`);
+3. 如果当前面板中的人物羁绊或细密时间轴为空，必须从全量用户修正记录和全量沙盒对话尾迹中重建，不要留空。
+4. 只输出 JSON，不要输出正文。`, { recoveryMode: true });
         return { synced: true, replyText: formatSandboxVisibleReply(aiReplyText), source: 'auto-extract' };
     }
 
@@ -2070,7 +2152,7 @@ ${getRulesTextForPrompt()}`;
             if (window.lucide) lucide.createIcons();
 
             try {
-                await extractAndSaveBibleFromConversation(genesisConversation, `请根据当前面板数据与最近对话，提取并合并最新共识，输出完整世界圣经 JSON。
+                await extractAndSaveBibleFromConversation(genesisConversation, `请根据当前面板数据、全量用户修正记录与最近对话，提取并合并最新共识，输出完整世界圣经 JSON。
 要求：
 1. 用户后续通过对话否定或修改过的低质量人物/事件必须被替换，不要保留旧版本。
 2. 沙盒有事件、人物、规则/专家三个模块，它们互相影响，不能各自孤立更新。
@@ -2078,7 +2160,8 @@ ${getRulesTextForPrompt()}`;
 4. 人物必须尽量绑定到 timeline/chapters 的具体事件；参与事件少于三个的人物要在 description 或 character_arc 中提示后续复用价值，避免一次性人物。
 5. 如果对话出现律师、医生、警察、金融、政治、文化、历史、古代、朝代、科举、官职、礼法、战争、技能等专业关键词，请把对应专家资料合并进 rules，而不是单独创建新系统。
 6. 历史专家为内置后台能力：遇到历史剧/古代背景时，必须检查朝代、官职、称谓、礼仪、服饰器物、交通通讯、军队调动、审案/科举/婚嫁/朝会流程，以及现代价值观误套问题。
-7. 当前面板数据中的 characters 详细字段、relations 人物羁绊、timeline 细密时间轴是稳定资产；除非最近对话明确要求删除某一项，否则必须完整保留，不允许用摘要版、空数组或字段缺失版覆盖。`);
+7. 当前面板数据中的 characters 详细字段、relations 人物羁绊、timeline 细密时间轴是稳定资产；除非最近对话明确要求删除某一项，否则必须完整保留，不允许用摘要版、空数组或字段缺失版覆盖。
+8. 如果当前面板中的人物羁绊或细密时间轴为空，必须从全量用户修正记录和全量沙盒对话尾迹中重建，不要留空。`, { recoveryMode: true });
                 alert('✅ 已根据当前对话刷新右侧面板。');
             } catch (e) {
                 console.error('手动刷新面板失败:', e);

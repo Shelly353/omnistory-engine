@@ -161,7 +161,7 @@ router.post('/preview', async (req, res) => {
             body: JSON.stringify({
                 model: "deepseek-v4-flash",
                 // 提示词已由前端 prompts.js 在对话开头注入，这里只需极简系统音
-                messages: [{ role: "system", content: "你是一个严格的JSON提取器。请提取对话中的设定，必须包含 genre、worldview、rules、characters、relations、timeline、narrative_logic、chapters；narrative_logic 需要包含 mode、description、presentation_order。事件、人物、规则/专家三个模块互相影响；规则/世界观/专家资料权限最高。不符合规则、专业流程或人物逻辑的事件，要把警报和整改约束写入 rules。人物应尽量绑定到具体 timeline/chapters；参与事件少于三个的人物，要在人物简介或弧光中保留后续复用提示，避免一次性人物。当前面板数据中的 characters 详细字段、relations 人物羁绊、timeline 细密时间轴是稳定资产；除非最近对话明确要求删除某一项，否则必须完整保留，不允许用摘要版、空数组或字段缺失版覆盖。律师、医生、警察、金融、政治、文化、种族、技能、历史、古代、朝代、官职、科举、礼法、战争等专业关键词对应的专家资料也合并进 rules。历史专家为后台内置能力：遇到历史剧/古代背景时，必须检查朝代、年代、官职称谓、礼法礼仪、服饰器物、交通通讯、军队调动、审案/科举/婚嫁/朝会流程，以及现代价值观误套问题；史实不确定时必须标注不确定，不能编成确定事实。" }, { role: "user", content: userContent }],
+                messages: [{ role: "system", content: "你是一个严格的JSON提取器。请提取对话中的设定，必须包含 genre、worldview、rules、characters、relations、timeline、narrative_logic、chapters；narrative_logic 需要包含 mode、description、presentation_order。事件、人物、规则/专家三个模块互相影响；规则/世界观/专家资料权限最高。不符合规则、专业流程或人物逻辑的事件，要把警报和整改约束写入 rules。人物应尽量绑定到具体 timeline/chapters；参与事件少于三个的人物，要在人物简介或弧光中保留后续复用提示，避免一次性人物。用户修正记录的优先级高于 AI 早期方案；凡是用户说“不是、不对、改成、不要、应该、必须、设定为”的内容，都视为最新事实。当前面板数据中的 characters 详细字段、relations 人物羁绊、timeline 细密时间轴是稳定资产；除非最近对话明确要求删除某一项，否则必须完整保留，不允许用摘要版、空数组或字段缺失版覆盖。如果当前面板的 relations 或 timeline 为空，必须从全量用户修正记录和沙盒对话尾迹中重建，不允许留空。律师、医生、警察、金融、政治、文化、种族、技能、历史、古代、朝代、官职、科举、礼法、战争等专业关键词对应的专家资料也合并进 rules。历史专家为后台内置能力：遇到历史剧/古代背景时，必须检查朝代、年代、官职称谓、礼法礼仪、服饰器物、交通通讯、军队调动、审案/科举/婚嫁/朝会流程，以及现代价值观误套问题；史实不确定时必须标注不确定，不能编成确定事实。" }, { role: "user", content: userContent }],
                 temperature: 0.1 
             })
         });
