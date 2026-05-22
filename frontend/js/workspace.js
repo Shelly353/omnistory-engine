@@ -194,6 +194,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnSelectionHook = document.getElementById('btn-selection-hook');
     const btnCancelHook = document.getElementById('btn-cancel-hook');
     const btnConfirmHook = document.getElementById('btn-confirm-hook');
+    const btnHollywoodBlueprint = document.getElementById('btn-hollywood-blueprint');
+    const btnOppositionPlan = document.getElementById('btn-opposition-plan');
+    const btnSceneCard = document.getElementById('btn-scene-card');
+    const btnRewriteLoop = document.getElementById('btn-rewrite-loop');
     const btnLongformGate = document.getElementById('btn-longform-gate');
     const btnLongformHook = document.getElementById('btn-longform-hook');
     const btnLongformState = document.getElementById('btn-longform-state');
@@ -822,10 +826,14 @@ ${getBuiltInExpertBaseline()}
     function getLongformEditorialContext() {
         const key = getLongformChapterKey();
         return [
+            longformState.storyBlueprint ? `【好莱坞大片蓝图】\n${longformState.storyBlueprint}` : '',
             longformState.stageMemory ? `【阶段记忆压缩】\n${longformState.stageMemory}` : '',
             longformState.characterStates ? `【人物当前状态】\n${longformState.characterStates}` : '',
+            longformState.oppositionPlans?.[key] ? `【本事件反派/阻力升级】\n${longformState.oppositionPlans[key]}` : '',
+            longformState.sceneCards?.[key] ? `【本章场景卡】\n${longformState.sceneCards[key]}` : '',
             longformState.eventGates?.[key] ? `【本事件质量闸门】\n${longformState.eventGates[key]}` : '',
-            longformState.attractionPlans?.[key] ? `【本章吸引力设计】\n${longformState.attractionPlans[key]}` : ''
+            longformState.attractionPlans?.[key] ? `【本章吸引力设计】\n${longformState.attractionPlans[key]}` : '',
+            longformState.rewriteReports?.[key] ? `【最近一次改稿闭环】\n${longformState.rewriteReports[key]}` : ''
         ].filter(Boolean).join('\n\n') || '暂无长篇编辑状态。';
     }
 
@@ -835,8 +843,11 @@ ${getBuiltInExpertBaseline()}
     }
 
     async function runLongformEditorTask(taskType, extra = "") {
-        if (!currentLocalContext.chapterId && taskType !== 'memory') return alert("请先选择一个事件。");
+        if (!currentLocalContext.chapterId && !['memory', 'blueprint'].includes(taskType)) return alert("请先选择一个事件。");
         const taskPrompts = {
+            blueprint: `你是好莱坞级商业叙事总监。请为全书建立或更新【大片蓝图】：一句话高概念、类型承诺、主题问题、主角外在目标/内在需求、反派或核心阻力、三幕式/八序列推进、重大转折点、情绪卖点、视觉/场面卖点、终局画面、续写禁区。要求能指导后续所有事件，不写空话。`,
+            opposition: `你是【反派与阻力升级设计器】。请为当前事件设计对抗：谁/什么在阻止主角、对方目标与计划、压迫如何升级、主角每次选择的代价、对方下一步反制、主角赢了什么又失去什么、如何避免反派降智。输出可直接写进大纲的阻力链。`,
+            scene: `你是【场景卡导演】。请把当前大纲拆成 3-7 个可写场景卡。每张场景卡必须包含：场景目标、登场人物、人物策略、冲突/阻力、情绪起点与终点、信息释放、反转/升级点、视觉或感官记忆点、结尾钩子、不可写成流水账的提醒。`,
             gate: `你是长篇连载的【事件质量闸门】。请在事件进入正文前审查：因果必要性、救猫咪类型功能是否成立、人物是否必须这样做、人物行为是否符合 MBTI/性格/欲望/缺陷、是否有更聪明选择、反派是否降智、是否靠巧合、读者是否会觉得假、删掉事件主线是否断裂。输出：通过/不通过、风险点、最小整改方案、必须补充的问题。`,
             hook: `你是长篇连载的【章节吸引力设计器】。请为当前事件设计章节级吸引力：符合当前救猫咪类型承诺的读者钩子、冲突升级、信息差、情绪波峰、关系变化、结尾悬念、爽点/痛点/疑问点；同时利用角色 MBTI/性格差异制造自然冲突，避免平淡流水账。`,
             state: `你是长篇连载的【人物状态追踪器】。请根据当前事件/正文更新人物当前状态：当前目标、误解、情绪状态、关系变化、获得/失去资源、身体/心理代价、秘密、下一次行动倾向。每个变化都要注明来自人物的性格/欲望/缺陷/恐惧中的哪一项，只更新当前事件影响到的人物。`,
@@ -853,7 +864,13 @@ ${getBuiltInExpertBaseline()}
             const data = await res.json();
             const reply = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `长篇系统失败：${data.error || '未知错误'}`;
             const key = getLongformChapterKey();
-            if (taskType === 'gate') {
+            if (taskType === 'blueprint') {
+                longformState.storyBlueprint = reply;
+            } else if (taskType === 'opposition') {
+                longformState.oppositionPlans = { ...(longformState.oppositionPlans || {}), [key]: reply };
+            } else if (taskType === 'scene') {
+                longformState.sceneCards = { ...(longformState.sceneCards || {}), [key]: reply };
+            } else if (taskType === 'gate') {
                 longformState.eventGates = { ...(longformState.eventGates || {}), [key]: reply };
             } else if (taskType === 'hook') {
                 longformState.attractionPlans = { ...(longformState.attractionPlans || {}), [key]: reply };
@@ -876,7 +893,7 @@ ${getBuiltInExpertBaseline()}
         const text = editorTextarea.value.trim();
         if (text.length < 80) {
             renderDeviationItems(["正文太短，暂不进行完整监督检测。"]);
-            return;
+            return "";
         }
         renderDeviationItems(["统一监督系统检测中：专业真实感、叙事逻辑、救猫咪类型、人设一致性、世界规则、伏笔闭环..."]);
         const eventContext = getAdjacentEventContext(currentLocalContext.chapterNumber);
@@ -907,9 +924,61 @@ ${getUnifiedQualityGuardrails()}
                 body: JSON.stringify(buildChatPayloadWithLocalSources([{ role: 'user', content: prompt }], 1, prompt))
             });
             const data = await res.json();
-            renderDeviationItems([data.success ? (stripFencedBlocks(data.reply) || data.reply) : `监督检测失败：${data.error || '未知错误'}`]);
+            const reply = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `监督检测失败：${data.error || '未知错误'}`;
+            renderDeviationItems([reply]);
+            return reply;
         } catch (e) {
             renderDeviationItems(["监督检测请求失败，请稍后重试。"]);
+            return "";
+        }
+    }
+
+    async function runHollywoodRewriteLoop(reviewText = "") {
+        if (!editorTextarea || !currentLocalContext.chapterId) return;
+        const draft = editorTextarea.value.trim();
+        if (draft.length < 80) return alert("正文太短，暂时不适合进入改稿闭环。");
+        const review = reviewText || await runUnifiedContentReview("rewrite-loop");
+        const key = getLongformChapterKey();
+        renderDeviationItems(["好莱坞改稿闭环运行中：正在根据审查报告重写正文..."]);
+        const prompt = `你是好莱坞级小说改稿导演。请根据审查报告，对正文进行一次完整重写。
+目标：更强的戏剧冲突、更清楚的主角目标、更聪明的阻力、更有画面感的场面、更稳定的人物性格、更有钩子的结尾。
+必须保留：已确认事实、世界规则、人物卡、伏笔方向、当前事件边界。
+禁止：改成新剧情、引入无关人物、解决后续事件、用解释代替场景。
+
+${getUnifiedQualityGuardrails()}
+
+【本章场景卡】\n${longformState.sceneCards?.[key] || '暂无，请在重写时先内化场景目标、冲突、转折和结尾钩子。'}
+
+【审查报告】\n${review || '暂无审查报告，请按大片级叙事标准自行审查后重写。'}
+
+【待重写正文】\n${limitText(draft, 6500)}
+
+请只输出重写后的正文，不要输出解释。`;
+        try {
+            const res = await fetch('/api/chat/deduce', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(buildChatPayloadWithLocalSources([{ role: 'user', content: prompt }], 1, prompt))
+            });
+            const data = await res.json();
+            const rewritten = data.success ? (stripFencedBlocks(data.reply) || data.reply) : "";
+            if (!rewritten) {
+                renderDeviationItems([`改稿失败：${data.error || '未知错误'}`]);
+                return "";
+            }
+            longformState.rewriteReports = { ...(longformState.rewriteReports || {}), [key]: `已根据审查报告完成一次重写。\n\n${review || '未提供审查报告'}` };
+            saveLongformState();
+            if (confirm("改稿闭环已生成重写版本。是否替换当前正文？")) {
+                editorTextarea.value = rewritten;
+                saveChapterContent();
+                renderDeviationItems(["已替换为改稿闭环版本。建议再点一次“检测正文”做最终验收。"]);
+            } else {
+                renderDeviationItems([`改稿闭环生成了重写版本，但尚未替换。可再次点击“改稿闭环”重新生成。\n\n${limitText(rewritten, 1800)}`]);
+            }
+            return rewritten;
+        } catch (e) {
+            renderDeviationItems(["改稿闭环请求失败，请稍后重试。"]);
+            return "";
         }
     }
 
@@ -2509,11 +2578,15 @@ if (btnTriggerHook) {
 
             // 💥 核心修复：强硬指令，绝不允许自我放飞
             const eventContext = getAdjacentEventContext(currentLocalContext.chapterNumber);
+            const blueprint = await runLongformEditorTask('blueprint', '\n\n这是敲定大纲前的全书大片蓝图校准，请确保当前事件服务全书商业叙事骨架。');
+            const oppositionPlan = await runLongformEditorTask('opposition', '\n\n这是敲定大纲前的反派/阻力升级设计，请给出必须写进大纲的对抗链。');
             const gateReport = await runLongformEditorTask('gate', '\n\n这是敲定大纲前的自动闸门，请严格判断是否允许进入正文。');
             const attractionPlan = await runLongformEditorTask('hook', '\n\n这是敲定大纲前的自动章节吸引力设计，请给出必须写进大纲的钩子和节奏要求。');
             const strictPrompt = `讨论结束。请严格基于我们刚才在对话中敲定的内容，提取一份最终的【分章写作大纲】。
 【当前事件】：${eventContext.startInfo}
 【下一事件过渡锚点】：${eventContext.endInfo}
+【好莱坞大片蓝图】：${blueprint || longformState.storyBlueprint || '暂无'}
+【本事件反派/阻力升级】：${oppositionPlan || '暂无'}
 【统一规则/专家资料】：${getWorldRulesText()}
 【救猫咪类型监督】：${getSaveTheCatGenreGuide(getCurrentStoryGenre())}
 【可调用人物卡】：${getCharacterDetailsForSop()}
@@ -2527,9 +2600,10 @@ if (btnTriggerHook) {
 3. 每章必须包含：标题、起因、经过、结果、参与人物、救猫咪类型功能、人物行为来源、可种植伏笔/需回收伏笔、世界观/核心戒律/专业资料校验、与下一章衔接。
 4. 所有人物行为必须能从 MBTI/性格、欲望、目标、动机、缺陷、恐惧或成长弧线中找到来源。
 5. 每章都要说明它如何履行当前救猫咪类型的读者承诺；如果不契合，必须给出修正。
-6. 如果涉及职业、行业或学科，必须依据已入库的专业顾问资料检查流程、术语、权限边界和常见误区；资料不足时不要编造确定细节。
-7. 必须吸收事件质量闸门和章节吸引力设计的整改要求。
-8. 本事件结尾必须能自然过渡到下一事件，但不得展开下一事件正文内容。
+6. 每章都要写出：对抗/阻力、主角选择、胜利代价、对方反制或下一步压力。
+7. 如果涉及职业、行业或学科，必须依据已入库的专业顾问资料检查流程、术语、权限边界和常见误区；资料不足时不要编造确定细节。
+8. 必须吸收大片蓝图、反派/阻力升级、事件质量闸门和章节吸引力设计的整改要求。
+9. 本事件结尾必须能自然过渡到下一事件，但不得展开下一事件正文内容。
 请直接输出这份最终大纲，不要掺杂任何废话，它将作为正文执笔的严格依据。`;
 
             // 深拷贝一份不污染原对话的提纯队列
@@ -2577,6 +2651,10 @@ if (data.success) {
     }
     if (btnSaveChapter) btnSaveChapter.onclick = saveChapterContent;
     if (btnReviewCurrentDraft) btnReviewCurrentDraft.onclick = () => runUnifiedContentReview("manual");
+    if (btnHollywoodBlueprint) btnHollywoodBlueprint.onclick = () => runLongformEditorTask('blueprint');
+    if (btnOppositionPlan) btnOppositionPlan.onclick = () => runLongformEditorTask('opposition');
+    if (btnSceneCard) btnSceneCard.onclick = () => runLongformEditorTask('scene');
+    if (btnRewriteLoop) btnRewriteLoop.onclick = () => runHollywoodRewriteLoop();
     if (btnLongformGate) btnLongformGate.onclick = () => runLongformEditorTask('gate');
     if (btnLongformHook) btnLongformHook.onclick = () => runLongformEditorTask('hook');
     if (btnLongformState) btnLongformState.onclick = () => runLongformEditorTask('state');
@@ -2639,8 +2717,11 @@ if (data.success) {
             btnAiWrite.innerHTML = `<i data-lucide="loader" class="w-3 h-3 mr-1 animate-spin"></i>执笔中...`;
             if (window.lucide) lucide.createIcons();
 
+            const sceneCard = await runLongformEditorTask('scene', '\n\n这是正文执笔前的强制场景卡，请把本章拆成能直接写作的场景链。');
+            const key = getLongformChapterKey();
+
             // 5. 💥 终极 Payload 融合：将文笔风格无缝缝合进最顶级的强约束提示词中！
-            const strictSynopsisText = `【文学主脑至高契约：请彻底废弃历史缓存旧大纲，必须严格基于以下摘要进行正文扩写，维持情节深度连贯，严禁人设漂移OOC！】\n\n${stylePrompt}\n\n【本章剧情起承转合】：\n${latestSynopsis}\n\n【统一规则/专家资料】：\n${worldRules}\n\n【必须100%严密契合的登场角色人设】：\n${characterDetails}\n\n【正文质量监督标准】：\n${getUnifiedQualityGuardrails()}`;
+            const strictSynopsisText = `【文学主脑至高契约：请彻底废弃历史缓存旧大纲，必须严格基于以下摘要进行正文扩写，维持情节深度连贯，严禁人设漂移OOC！】\n\n${stylePrompt}\n\n【好莱坞大片蓝图】：\n${longformState.storyBlueprint || '暂无，请以当前救猫咪类型和本章大纲建立商业叙事张力。'}\n\n【本事件反派/阻力升级】：\n${longformState.oppositionPlans?.[key] || '暂无，请确保正文中存在清晰阻力、升级和代价。'}\n\n【本章场景卡】：\n${sceneCard || longformState.sceneCards?.[key] || '暂无'}\n\n【本章剧情起承转合】：\n${latestSynopsis}\n\n【统一规则/专家资料】：\n${worldRules}\n\n【必须100%严密契合的登场角色人设】：\n${characterDetails}\n\n【正文质量监督标准】：\n${getUnifiedQualityGuardrails()}`;
 
             const ultraPayload = {
                 ...currentLocalContext,
@@ -2648,7 +2729,9 @@ if (data.success) {
                 content: strictSynopsisText,
                 synopsis_text: strictSynopsisText,
                 currentText: currentText,
-                qualityGuardrails: getUnifiedQualityGuardrails()
+                qualityGuardrails: getUnifiedQualityGuardrails(),
+                sceneCard: sceneCard || longformState.sceneCards?.[key] || '',
+                blockbusterContext: getLongformEditorialContext()
             };
 
             try {
@@ -2663,7 +2746,12 @@ if (data.success) {
                     editorTextarea.scrollTop = editorTextarea.scrollHeight;
                     saveChapterContent(); 
                     runLongformEditorTask('state', '\n\n这是正文生成后的自动人物状态更新。');
-                    runUnifiedContentReview("after-ai-write");
+                    const reviewText = await runUnifiedContentReview("after-ai-write");
+                    if (/【风险等级】\s*(中|高)|风险等级[:：]\s*(中|高)|不通过|严重|降智|OOC/.test(reviewText || '')) {
+                        longformState.rewriteReports = { ...(longformState.rewriteReports || {}), [key]: `自动审查发现需要改稿的风险。\n\n${reviewText}` };
+                        saveLongformState();
+                        renderDeviationItems([`${reviewText}\n\n已进入改稿闭环待命：点击“改稿闭环”可按审查意见重写正文。`]);
+                    }
                 } else {
                     alert("AI 执笔失败: " + data.error);
                 }
@@ -2952,12 +3040,14 @@ if (data.success) {
 2. 陪作者讨论当前事件内部的行动、阻力、人物选择、代价、转折和信息释放；不要展开讨论下一事件的具体内容。
 3. 每次提出事件细节，都要说明：行动人物、行为来源、冲突对象、不可逆后果、如何让当前事件结尾自然过渡到下一事件。
 4. 用救猫咪类型监督检查当前事件是否承担了应有类型功能；如果偏离类型承诺，要指出偏离点并给出改法。
-5. 用统一规则/专家资料校验事件是否合理；如果涉及职业、行业或学科，要检查工作流程、术语、权限边界、常见误区和真实感细节，不合理时必须指出并给出修正方向。
-6. 主动提出【可种植伏笔】和【需要回收伏笔】：说明种下位置、回收位置、误导/信息差作用、回收方式，以及如果不回收会造成的逻辑断裂。
-7. 当作者说“推演差不多了”或“开始总结”时，先确认这段内容分成几章，再生成每章标题与详细摘要；每章必须列出救猫咪类型功能、人物行为来源、可种植伏笔/需回收伏笔。
-8. 下一事件只作为结尾衔接目标，不能把 SOP 讨论变成两个事件的联合推演。
-9. 只能使用下方【可调用人物卡】中的角色来推导行为；不要查阅、调用或主动引入无关人物，除非作者明确要求新增角色。
-10. 每次回复最后必须给作者 2-4 个可直接选择或改写的输入方向，例如“选 A/B/C”“补充某角色动机”“指定一个必须发生的事件”。禁止只说“你觉得呢”。`;
+5. 主动检查大片蓝图：当前事件是否服务主题问题、三幕式/八序列推进、主角弧光、终局压力和读者情绪卖点。
+6. 主动设计反派/阻力升级：谁阻止主角、对方计划、主角胜利代价、对方下一步反制，避免轻松过关。
+7. 用统一规则/专家资料校验事件是否合理；如果涉及职业、行业或学科，要检查工作流程、术语、权限边界、常见误区和真实感细节，不合理时必须指出并给出修正方向。
+8. 主动提出【可种植伏笔】和【需要回收伏笔】：说明种下位置、回收位置、误导/信息差作用、回收方式，以及如果不回收会造成的逻辑断裂。
+9. 当作者说“推演差不多了”或“开始总结”时，先确认这段内容分成几章，再生成每章标题与详细摘要；每章必须列出救猫咪类型功能、人物行为来源、对抗/代价、可种植伏笔/需回收伏笔。
+10. 下一事件只作为结尾衔接目标，不能把 SOP 讨论变成两个事件的联合推演。
+11. 只能使用下方【可调用人物卡】中的角色来推导行为；不要查阅、调用或主动引入无关人物，除非作者明确要求新增角色。
+12. 每次回复最后必须给作者 2-4 个可直接选择或改写的输入方向，例如“选 A/B/C”“补充某角色动机”“指定一个必须发生的事件”。禁止只说“你觉得呢”。`;
 
                 // 3. 把私货、工作流、防 OOC 指令、伏笔全塞进最后一句话里发给 AI！
                 let lastUserMsg = payloadConvo[payloadConvo.length - 1];

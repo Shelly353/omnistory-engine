@@ -4,7 +4,7 @@ const router = express.Router();
 const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY;
 
 router.post('/generate-chapter', async (req, res) => {
-    const { title, synopsis, characters, hooks, currentText, qualityGuardrails } = req.body;
+    const { title, synopsis, characters, hooks, currentText, qualityGuardrails, sceneCard, blockbusterContext } = req.body;
 
     try {
         // 1. 结构化上下文压缩 (Context Compression)
@@ -34,8 +34,10 @@ router.post('/generate-chapter', async (req, res) => {
 6. 写作时内置监督系统：检查因果链、信息来源、人物动机、救猫咪类型契合度、专业真实感、伏笔闭环，避免不合逻辑、强行巧合、人物降智。
 7. 救猫咪类型如果出现在《统一规则/专家资料与正文监督标准》中，必须作为本章叙事承诺执行；每个主要场景都要服务该类型的读者期待。
 8. MBTI/性格不是标签，必须影响人物的措辞、风险偏好、回避策略、冲突处理和关键选择；除非有明确压力和转折，否则不要写出与性格相反的行为。
-9. 语言风格要符合当前作品调性，文字要有画面感和张力。
-10. 直接输出正文内容，绝不要输出任何解释性废话（如“好的，我这就开始写”）。`;
+9. 好莱坞级叙事要求：每个场景都必须有明确目标、阻力、情绪变化、信息释放或反转；必须有场面记忆点和结尾钩子，避免流水账。
+10. 如果提供了《本章场景卡》，必须按场景卡顺序写作；可以润色合并，但不能丢掉场景目标、冲突、升级点和结尾钩子。
+11. 语言风格要符合当前作品调性，文字要有画面感和张力。
+12. 直接输出正文内容，绝不要输出任何解释性废话（如“好的，我这就开始写”）。`;
 
         // 3. 组装发给 AI 的弹药
         const userContent = `
@@ -47,6 +49,12 @@ ${charContext}
 
 【局部时空雷达】(伏笔):
 ${hookContext}
+
+【好莱坞大片蓝图/阻力/长篇状态】:
+${blockbusterContext || '暂无额外大片蓝图；请按本章大纲建立目标、阻力、代价、反转和结尾钩子。'}
+
+【本章场景卡】:
+${sceneCard || '暂无独立场景卡；请自行按目标-阻力-转折-情绪变化-结尾钩子组织场景。'}
 
 【统一规则/专家资料与正文监督标准】:
 ${qualityGuardrails || '暂无额外规则；请优先保持因果清楚、人物动机可信、专业细节谨慎。'}
