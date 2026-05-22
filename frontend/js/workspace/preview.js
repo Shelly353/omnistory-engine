@@ -61,8 +61,9 @@ window.OmniWorkspacePreview = (() => {
     function renderCharacterCard(c = {}, bible = {}) {
         const eventCount = getCharacterEventCount(c, bible);
         const usage = getCharacterUsageStyle(eventCount);
+        const characterId = c.character_id || c.id || `char_${String(c.original_name || c.name || '').trim()}`;
         return `
-            <div class="prev-char-item group relative bg-gray-900 rounded-lg border ${usage.border} hover:border-blue-500 transition-all duration-300" data-original-name="${escapePreviewValue(c.name || '')}">
+            <div class="prev-char-item group relative bg-gray-900 rounded-lg border ${usage.border} hover:border-blue-500 transition-all duration-300" data-character-id="${escapePreviewValue(characterId)}" data-original-name="${escapePreviewValue(c.original_name || c.name || '')}">
                 <div class="flex space-x-2 p-2 relative z-10 bg-gray-900 rounded-lg">
                     <input type="text" class="w-1/6 bg-gray-950 border border-gray-600 rounded-md p-2 text-white text-xs char-name" value="${escapePreviewValue(c.name || '')}" placeholder="姓名">
                     <input type="text" class="w-1/6 bg-gray-950 border border-gray-600 rounded-md p-2 text-blue-300 text-xs char-role" value="${escapePreviewValue(c.role || '')}" placeholder="定位">

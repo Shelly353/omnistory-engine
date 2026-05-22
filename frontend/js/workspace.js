@@ -123,6 +123,23 @@ document.addEventListener('DOMContentLoaded', () => {
         return String(value || '').trim().replace(/\s+/g, '').toLowerCase();
     }
 
+    function stableHash(value = '') {
+        let hash = 0;
+        String(value || '').split('').forEach(char => {
+            hash = ((hash << 5) - hash) + char.charCodeAt(0);
+            hash |= 0;
+        });
+        return Math.abs(hash).toString(36);
+    }
+
+    function ensureCharacterIdentity(char = {}) {
+        const seed = char.character_id || char.id || char.original_name || char.name || JSON.stringify(char);
+        return {
+            ...char,
+            character_id: char.character_id || char.id || `char_${stableHash(seed)}`
+        };
+    }
+
     function mergeObjectMissingFields(previousItem = {}, nextItem = {}) {
         const merged = { ...previousItem, ...nextItem };
         Object.entries(previousItem || {}).forEach(([key, value]) => {
@@ -140,12 +157,13 @@ document.addEventListener('DOMContentLoaded', () => {
             return {
                 characterRenames: edits.characterRenames || {},
                 characterRenameLabels: edits.characterRenameLabels || {},
+                characterRenameIds: edits.characterRenameIds || {},
                 deletedCharacters: edits.deletedCharacters || {},
                 deletedRelations: edits.deletedRelations || {},
                 deletedTimeline: edits.deletedTimeline || {}
             };
         } catch (e) {
-            return { characterRenames: {}, characterRenameLabels: {}, deletedCharacters: {}, deletedRelations: {}, deletedTimeline: {} };
+            return { characterRenames: {}, characterRenameLabels: {}, characterRenameIds: {}, deletedCharacters: {}, deletedRelations: {}, deletedTimeline: {} };
         }
     }
 
@@ -153,6 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.setItem(MANUAL_BIBLE_EDITS_KEY, JSON.stringify({
             characterRenames: edits.characterRenames || {},
             characterRenameLabels: edits.characterRenameLabels || {},
+            characterRenameIds: edits.characterRenameIds || {},
             deletedCharacters: edits.deletedCharacters || {},
             deletedRelations: edits.deletedRelations || {},
             deletedTimeline: edits.deletedTimeline || {}
@@ -173,6 +192,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 newName
             }))
             .filter(item => item.oldName && item.newName && normalizeStableKey(item.oldName) !== normalizeStableKey(item.newName));
+    }
+
+    function rememberCharacterRename(oldName, newName, characterId = '') {
+        const cleanOldName = cleanupMixedCharacterName(oldName);
+        const cleanNewName = cleanupMixedCharacterName(newName);
+        if (!cleanOldName || !cleanNewName || normalizeStableKey(cleanOldName) === normalizeStableKey(cleanNewName)) return false;
+        const edits = loadManualBibleEdits();
+        const oldKey = normalizeStableKey(cleanOldName);
+        edits.characterRenames[oldKey] = cleanNewName;
+        edits.characterRenameLabels[oldKey] = cleanOldName;
+        if (characterId) edits.characterRenameIds[characterId] = cleanNewName;
+        delete edits.deletedCharacters[normalizeStableKey(cleanNewName)];
+        saveManualBibleEdits(edits);
+        return true;
+    }
+
+    function refreshCurrentBibleAfterCharacterRename(oldName, newName, characterId = '') {
+        const renamed = rememberCharacterRename(oldName, newName, characterId);
+        if (!renamed) return;
+        const currentBible = loadLatestBible();
+        if (!currentBible) return;
+        const normalizedBible = normalizeManualBibleSnapshot(currentBible);
+        localStorage.setItem(LATEST_BIBLE_KEY, JSON.stringify(normalizedBible));
+        renderHumanPreview(normalizedBible);
+        syncGenesisDraftToCloud().catch(error => console.warn('人物改名后云端同步失败:', error));
     }
 
     function escapeRegExp(value = '') {
@@ -238,14 +282,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const edits = loadManualBibleEdits();
         const renamedOldKeys = new Set();
 
+        const previousById = new Map(previousCharacters.map(char => [char.character_id || char.id, char]).filter(([id]) => id));
         nextCharacters.forEach((char) => {
-            const oldName = char.original_name;
+            const previousBySameId = previousById.get(char.character_id || char.id);
+            const oldName = char.original_name || previousBySameId?.name;
             const newName = char.name;
             if (!oldName || !newName || normalizeStableKey(oldName) === normalizeStableKey(newName)) return;
             const oldKey = normalizeStableKey(oldName);
             renamedOldKeys.add(oldKey);
             edits.characterRenames[oldKey] = newName;
             edits.characterRenameLabels[oldKey] = oldName;
+            if (char.character_id || char.id) edits.characterRenameIds[char.character_id || char.id] = newName;
             delete edits.deletedCharacters[normalizeStableKey(newName)];
         });
 
@@ -370,6 +417,7 @@ document.addEventListener('DOMContentLoaded', () => {
             savedAt: new Date().toISOString(),
             warnings: warnings.slice(0, 12)
         }));
+        if (warnings.every(warning => warning.startsWith('你修改了人物') && warning.includes('name'))) return;
         alert(`设定变更提醒：\n\n${warnings.slice(0, 4).join('\n\n')}\n\n后续 AI 已会按新设定继续，但建议你检查以上事件是否需要重写/调整。`);
     }
 
@@ -384,29 +432,29 @@ document.addEventListener('DOMContentLoaded', () => {
         const edits = loadManualBibleEdits();
         const previous = Array.isArray(previousCharacters) ? previousCharacters
             .filter(c => c && c.name)
-            .map(c => ({ ...c, name: canonicalCharacterName(c.name, edits) }))
+            .map(c => ensureCharacterIdentity({ ...c, name: canonicalCharacterName(c.name, edits) }))
             .filter(c => !edits.deletedCharacters[normalizeStableKey(c.name)]) : [];
         const next = Array.isArray(nextCharacters) ? nextCharacters
             .filter(c => c && c.name)
-            .map(c => ({ ...c, name: canonicalCharacterName(c.name, edits) }))
+            .map(c => ensureCharacterIdentity({ ...c, name: canonicalCharacterName(c.name, edits) }))
             .filter(c => !edits.deletedCharacters[normalizeStableKey(c.name)]) : [];
         if (next.length === 0 && previous.length > 0) return previous;
 
-        const previousByName = new Map(previous.map(char => [normalizeStableKey(char.name), char]));
+        const previousByIdentity = new Map(previous.map(char => [char.character_id || normalizeStableKey(char.name), char]));
         const seen = new Set();
         const merged = next.map(char => {
-            const key = normalizeStableKey(char.name);
+            const key = char.character_id || normalizeStableKey(char.name);
             seen.add(key);
-            return mergeObjectMissingFields(previousByName.get(key), char);
+            return mergeObjectMissingFields(previousByIdentity.get(key), char);
         });
 
         previous.forEach(char => {
-            const key = normalizeStableKey(char.name);
+            const key = char.character_id || normalizeStableKey(char.name);
             if (!seen.has(key)) merged.push(char);
         });
         const unique = new Map();
         merged.forEach(char => {
-            const key = normalizeStableKey(char.name);
+            const key = char.character_id || normalizeStableKey(char.name);
             if (!key) return;
             unique.set(key, unique.has(key) ? mergeObjectMissingFields(unique.get(key), char) : char);
         });
@@ -448,8 +496,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const normalized = applyManualBibleEditsToValue(bible, edits) || {};
         normalized.characters = uniqueStableArray((normalized.characters || [])
             .filter(char => char?.name)
-            .map(char => ({ ...char, name: canonicalCharacterName(char.name, edits) }))
-            .filter(char => !edits.deletedCharacters[normalizeStableKey(char.name)]), char => normalizeStableKey(char.name));
+            .map(char => ensureCharacterIdentity({ ...char, name: canonicalCharacterName(char.name, edits) }))
+            .filter(char => !edits.deletedCharacters[normalizeStableKey(char.name)]), char => char.character_id || normalizeStableKey(char.name));
         normalized.relations = uniqueStableArray((normalized.relations || [])
             .map(rel => ({
                 ...rel,
@@ -897,15 +945,17 @@ document.addEventListener('DOMContentLoaded', () => {
     function attachPreviewAutosave() {
         if (!humanPreviewContainer || humanPreviewContainer.dataset.autosaveBound === '1') return;
         humanPreviewContainer.dataset.autosaveBound = '1';
-        const sync = () => {
+        const sync = (event) => {
             if (!document.getElementById('prev-genre')) return;
+            const shouldRenderAfterSave = event?.type === 'change' && event.target?.classList?.contains('char-name');
             clearTimeout(previewSyncTimer);
             previewSyncTimer = setTimeout(() => {
                 try {
                     const previousBible = loadLatestBible();
                     const bible = collectBibleFromPreview();
                     warnBibleEditConflicts(previousBible, bible);
-                    saveLatestBible(bible, { preserveStableLists: false });
+                    const savedBible = saveLatestBible(bible, { preserveStableLists: false });
+                    if (shouldRenderAfterSave && savedBible) renderHumanPreview(savedBible);
                     syncGenesisDraftToCloud();
                 } catch (e) {
                     console.warn('实时面板自动保存失败:', e);
@@ -1256,6 +1306,8 @@ document.addEventListener('DOMContentLoaded', () => {
             worldview: document.getElementById('prev-worldview') ? document.getElementById('prev-worldview').value.trim() : "",
             rules: buildRulesWithReferenceMaterials(rulesInput, sourceMaterials),
             characters: Array.from(document.querySelectorAll('.prev-char-item')).map(el => ({
+                character_id: el.dataset.characterId || "",
+                id: el.dataset.characterId || "",
                 original_name: el.dataset.originalName || "",
                 name: cleanupMixedCharacterName(el.querySelector('.char-name')?.value.trim() || ""),
                 role: el.querySelector('.char-role')?.value.trim() || "",
@@ -2545,10 +2597,11 @@ if (data.success) {
             if (!res.ok) return; // 💥 拦截 404，没有角色就算了，安静退出
             const data = await res.json();
             if (data.success) {
-                window.globalCharacters = data.characters;
+                const manualEdits = loadManualBibleEdits();
+                window.globalCharacters = applyManualBibleEditsToValue(data.characters || [], manualEdits);
                 const assetCharacterList = document.getElementById('asset-character-list');
                 if (assetCharacterList) {
-                    assetCharacterList.innerHTML = data.characters.map(c => `
+                    assetCharacterList.innerHTML = window.globalCharacters.map(c => `
                         <li class="cursor-pointer p-2 bg-gray-950 hover:bg-gray-800 rounded-lg mb-2 group" onclick="editCharacter('${c.id}')">
                             <div class="flex justify-between items-center">
                                 <span class="text-xs font-bold group-hover:text-blue-400">${c.name}</span>
@@ -3211,15 +3264,16 @@ if (data.success) {
     async function saveSelectedAssetCharacter() {
         const charId = document.getElementById('asset-char-id')?.value;
         if (!charId) return alert("请先选择要更新的角色。");
+        const oldCharacter = (window.globalCharacters || []).find(c => c.id === charId) || {};
         const detailPayload = parseCharacterDetailText(document.getElementById('asset-character-detail')?.value || "");
         const payload = { ...detailPayload, projectId: PROJECT_ID, id: charId };
         if(!payload.name) return alert("姓名不能为空");
         const res = await fetch('/api/workspace/character', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const data = await res.json();
         if (data.success) {
+            refreshCurrentBibleAfterCharacterRename(oldCharacter.name, payload.name, charId);
             await loadGlobalAssets();
             if (currentLocalContext.chapterId) loadChapterContext(currentLocalContext.chapterId, currentLocalContext.chapterNumber, currentLocalContext.title);
-            alert("全局人物卡已更新，后续调用将使用新数据。");
             document.getElementById('asset-character-modal')?.classList.add('hidden');
         } else alert("保存失败：" + (data.error || "未知错误"));
     }
@@ -3768,6 +3822,7 @@ if (data.success) {
         btnSaveAsset.addEventListener('click', async () => {
             const charId = document.getElementById('asset-char-id').value;
             if (!charId) return alert("请先从左侧选择要更新的角色。新角色请从主面板“拉入已建角色”里创建。");
+            const oldCharacter = (window.globalCharacters || []).find(c => c.id === charId) || {};
             const detailPayload = parseCharacterDetailText(document.getElementById('asset-character-detail')?.value || "");
             const payload = {
                 ...detailPayload,
@@ -3777,9 +3832,9 @@ if (data.success) {
             const res = await fetch('/api/workspace/character', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             const data = await res.json();
             if (data.success) {
+                refreshCurrentBibleAfterCharacterRename(oldCharacter.name, payload.name, charId);
                 await loadGlobalAssets();
                 if (currentLocalContext.chapterId) loadChapterContext(currentLocalContext.chapterId, currentLocalContext.chapterNumber, currentLocalContext.title);
-                alert("全局人物卡已更新，后续调用将使用新数据。");
             } else alert("保存失败：" + (data.error || "未知错误"));
         });
     }
