@@ -102,9 +102,23 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    function saveLatestBible(bible) {
-        if (!bible) return;
-        localStorage.setItem(LATEST_BIBLE_KEY, JSON.stringify(bible));
+    function mergeBibleWithStableRelations(previous, next) {
+        if (!previous || !next || typeof next !== 'object') return next;
+        const merged = { ...next };
+        const previousRelations = Array.isArray(previous.relations) ? previous.relations.filter(Boolean) : [];
+        const nextRelations = Array.isArray(next.relations) ? next.relations.filter(Boolean) : null;
+        if ((!nextRelations || nextRelations.length === 0) && previousRelations.length > 0) {
+            merged.relations = previousRelations;
+        }
+        return merged;
+    }
+
+    function saveLatestBible(bible, options = {}) {
+        if (!bible) return null;
+        const previous = options.preserveStableLists === false ? null : loadLatestBible();
+        const bibleToSave = mergeBibleWithStableRelations(previous, bible);
+        localStorage.setItem(LATEST_BIBLE_KEY, JSON.stringify(bibleToSave));
+        return bibleToSave;
     }
 
     function loadLatestBible() {
@@ -162,9 +176,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function applyRealtimeBibleUpdate(bible, options = {}) {
         if (!looksLikeBibleJson(bible)) return false;
-        saveLatestBible(bible);
-        if (options.render !== false) renderHumanPreview(bible);
-        if (options.audit) window.runSandboxRuleAudit(bible);
+        const mergedBible = saveLatestBible(bible) || bible;
+        if (options.render !== false) renderHumanPreview(mergedBible);
+        if (options.audit) window.runSandboxRuleAudit(mergedBible);
         if (options.cloud !== false) syncGenesisDraftToCloud();
         return true;
     }
@@ -309,7 +323,7 @@ document.addEventListener('DOMContentLoaded', () => {
             previewSyncTimer = setTimeout(() => {
                 try {
                     const bible = collectBibleFromPreview();
-                    saveLatestBible(bible);
+                    saveLatestBible(bible, { preserveStableLists: false });
                     syncGenesisDraftToCloud();
                 } catch (e) {
                     console.warn('实时面板自动保存失败:', e);
@@ -1625,7 +1639,7 @@ ${getRulesTextForPrompt()}`;
         });
 
         // 💥 面板数据独立于聊天历史保存，避免清理大 JSON 后丢失右侧实时表单。
-        if (latestParsedBible) saveLatestBible(latestParsedBible);
+        if (latestParsedBible) latestParsedBible = saveLatestBible(latestParsedBible) || latestParsedBible;
         const bibleForPreview = latestParsedBible || loadLatestBible();
         if (bibleForPreview) renderHumanPreview(bibleForPreview);
     }
@@ -1824,8 +1838,8 @@ ${getRulesTextForPrompt()}`;
                 localStorage.setItem(GENESIS_CHAT_KEY, JSON.stringify(genesisConversation));
             }
             if (payload.bible) {
-                saveLatestBible(payload.bible);
-                renderHumanPreview(payload.bible);
+                const mergedBible = saveLatestBible(payload.bible) || payload.bible;
+                renderHumanPreview(mergedBible);
             }
             if (genesisConversation.length > 0) renderChatHistory();
             return genesisConversation.length > 0 || !!payload.bible;
@@ -1863,8 +1877,8 @@ ${getRulesTextForPrompt()}`;
                 || data.bible.rules;
 
             if (!hasBibleData) return false;
-            saveLatestBible(data.bible);
-            renderHumanPreview(data.bible);
+            const mergedBible = saveLatestBible(data.bible) || data.bible;
+            renderHumanPreview(mergedBible);
             return true;
         } catch (e) {
             console.warn('数据库圣经快照恢复失败:', e);
@@ -1904,9 +1918,9 @@ ${getRulesTextForPrompt()}`;
                 const data = await res.json();
 
                 if (!data.success) throw new Error(data.error || '提取失败');
-                saveLatestBible(data.bible);
-                renderHumanPreview(data.bible);
-                window.runSandboxRuleAudit(data.bible);
+                const mergedBible = saveLatestBible(data.bible) || data.bible;
+                renderHumanPreview(mergedBible);
+                window.runSandboxRuleAudit(mergedBible);
                 syncGenesisDraftToCloud();
                 alert('✅ 已根据当前对话刷新右侧面板。');
             } catch (e) {

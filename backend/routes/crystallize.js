@@ -90,6 +90,28 @@ function getOrderedChapters(bible = {}) {
     return [...ordered, ...remaining];
 }
 
+function normalizeRelationName(value = '') {
+    return String(value || '').trim();
+}
+
+function relationNamesFromRows(rows = [], characters = []) {
+    const charMap = new Map((characters || []).map(c => [c.id, c.name]));
+    return (rows || []).map(rel => ({
+        from_name: normalizeRelationName(charMap.get(rel.from_char_id)),
+        to_name: normalizeRelationName(charMap.get(rel.to_char_id)),
+        label: rel.label || '羁绊'
+    })).filter(rel => rel.from_name && rel.to_name);
+}
+
+function normalizeIncomingRelations(relations = []) {
+    if (!Array.isArray(relations)) return [];
+    return relations.map(rel => ({
+        from_name: normalizeRelationName(rel.from_name || rel.from || rel.source),
+        to_name: normalizeRelationName(rel.to_name || rel.to || rel.target),
+        label: rel.label || rel.relation || '羁绊'
+    })).filter(rel => rel.from_name && rel.to_name);
+}
+
 // 🔍 阶段一：预览提取
 router.get('/snapshot/:projectId', async (req, res) => {
     const { projectId } = req.params;
@@ -102,17 +124,12 @@ router.get('/snapshot/:projectId', async (req, res) => {
         const { data: timeline } = await supabase.from('timeline_events').select('*').eq('project_id', projectId).order('chapter_number', { ascending: true });
         const { data: chapters } = await supabase.from('chapters').select('chapter_number, title, content').eq('project_id', projectId).order('chapter_number', { ascending: true });
 
-        const charMap = new Map((characters || []).map(c => [c.id, c.name]));
         const bible = {
             genre: project.genre || '',
             worldview: project.worldview || '',
             rules: project.rules || '',
             characters: characters || [],
-            relations: (relations || []).map(rel => ({
-                from_name: charMap.get(rel.from_char_id) || '',
-                to_name: charMap.get(rel.to_char_id) || '',
-                label: rel.label || ''
-            })).filter(rel => rel.from_name && rel.to_name),
+            relations: relationNamesFromRows(relations, characters),
             timeline: (timeline || []).map(item => ({
                 time_label: item.time_label || '',
                 chapter_number: item.chapter_number || 1,
@@ -172,6 +189,17 @@ router.post('/confirm', async (req, res) => {
     const { projectId, bible } = req.body;
     try {
         console.log("📥 开始执行数据库写入...");
+        const incomingRelations = normalizeIncomingRelations(bible?.relations);
+        let relationsToWrite = incomingRelations;
+
+        if (relationsToWrite.length === 0) {
+            const { data: existingCharacters } = await supabase.from('characters').select('id, name').eq('project_id', projectId);
+            const { data: existingRelations } = await supabase.from('character_relations').select('*').eq('project_id', projectId);
+            relationsToWrite = relationNamesFromRows(existingRelations, existingCharacters);
+            if (relationsToWrite.length > 0) {
+                console.log(`🧷 新圣经未携带人物关系，已继承 ${relationsToWrite.length} 条旧关系。`);
+            }
+        }
         
         // 0. 清理旧数据
         await supabase.from('character_relations').delete().eq('project_id', projectId);
@@ -203,8 +231,8 @@ router.post('/confirm', async (req, res) => {
 
         // 💥 3. 插入人物关系连线 (加入智能模糊匹配引擎) 💥
         const { data: allChars } = await supabase.from('characters').select('id, name').eq('project_id', projectId);
-        if (bible.relations && bible.relations.length > 0 && allChars && allChars.length > 0) {
-            const relPayload = bible.relations.map(rel => {
+        if (relationsToWrite.length > 0 && allChars && allChars.length > 0) {
+            const relPayload = relationsToWrite.map(rel => {
                 const fromName = rel.from_name || '';
                 const toName = rel.to_name || '';
                 // 核心：只要名字互相包含，就认定是同一个人，强制牵线！
