@@ -724,22 +724,26 @@ document.addEventListener('DOMContentLoaded', () => {
         return mergedBible;
     }
 
-    async function ensurePanelSyncedFromReply(aiReplyText, conversationForExtraction) {
+    function syncPanelFromReplyInBackground(aiReplyText, conversationForExtraction) {
         const parsedBible = extractBibleJsonFromText(aiReplyText);
         if (parsedBible) {
             applyRealtimeBibleUpdate(parsedBible, { audit: true, cloud: false });
-            await syncGenesisDraftToCloud();
+            syncGenesisDraftToCloud().catch(error => {
+                console.warn('沙盒云端同步失败:', error);
+            });
             setGenesisSyncBlocked(false);
-            return { synced: true, replyText: formatSandboxVisibleReply(stripBibleJsonBlocks(aiReplyText)), source: 'json' };
+            return;
         }
 
-        await extractAndSaveBibleFromConversation(conversationForExtraction, `上一轮 AI 回复没有提供合法 JSON。请根据当前面板数据、全量用户修正记录、最近对话和上一轮 AI 回复，提取并合并最新共识，输出完整世界圣经 JSON。
+        extractAndSaveBibleFromConversation(conversationForExtraction, `上一轮 AI 回复没有提供合法 JSON。请根据当前面板数据、全量用户修正记录、最近对话和上一轮 AI 回复，提取并合并最新共识，输出完整世界圣经 JSON。
 要求：
 1. 必须记录用户在对话中否定、修正或新增的人物/事件/规则。
 2. characters 详细字段、relations 人物羁绊、timeline 细密时间轴是稳定资产；除非用户明确说删除，否则必须保留。
 3. 如果当前面板中的人物羁绊或细密时间轴为空，必须从全量用户修正记录和全量沙盒对话尾迹中重建，不要留空。
-4. 只输出 JSON，不要输出正文。`, { recoveryMode: true });
-        return { synced: true, replyText: formatSandboxVisibleReply(aiReplyText), source: 'auto-extract' };
+4. 只输出 JSON，不要输出正文。`, { recoveryMode: true }).catch(error => {
+            console.error('后台面板补同步失败:', error);
+            setGenesisSyncBlocked(true, `后台面板同步失败：${error.message || '未知错误'}\n可以先阅读本轮回复；继续对话前建议点“从对话刷新面板”修复。`);
+        });
     }
 
     function formatSandboxVisibleReply(text = '') {
@@ -2236,7 +2240,7 @@ ${getRulesTextForPrompt()}`;
 
     async function fetchChatResponse() {
         if(!chatHistory) return;
-        setGenesisChatLocked(true, `<i data-lucide="loader" class="w-4 h-4 mr-1.5 animate-spin"></i>同步中`);
+        setGenesisChatLocked(true, `<i data-lucide="loader" class="w-4 h-4 mr-1.5 animate-spin"></i>推演中`);
         const loadingId = 'loading-' + Date.now();
         chatHistory.innerHTML += `<div id="${loadingId}" class="flex justify-start"><div class="bg-gray-800 p-4 rounded-2xl text-purple-400 text-sm animate-pulse flex items-center"><i data-lucide="loader" class="w-4 h-4 mr-2 animate-spin"></i>主脑推演中...</div></div>`;
         chatHistory.scrollTop = chatHistory.scrollHeight;
@@ -2252,17 +2256,17 @@ ${getRulesTextForPrompt()}`;
             if (data.success) {
                 let aiReplyText = data.reply;
                 const conversationForExtraction = [...genesisConversation, { role: 'assistant', content: aiReplyText }];
-                const syncResult = await ensurePanelSyncedFromReply(aiReplyText, conversationForExtraction);
-                aiReplyText = syncResult.replyText;
+                syncPanelFromReplyInBackground(aiReplyText, conversationForExtraction);
+                aiReplyText = formatSandboxVisibleReply(stripBibleJsonBlocks(aiReplyText) || aiReplyText);
                 const newIndex = genesisConversation.length;
                 genesisConversation.push({ role: 'assistant', content: aiReplyText || '已更新设定数据。' });
                 if(aiReplyText.length > 0) appendMessage('assistant', aiReplyText, newIndex);
                 localStorage.setItem(GENESIS_CHAT_KEY, JSON.stringify(genesisConversation));
-                await syncGenesisDraftToCloud();
+                syncGenesisDraftToCloud().catch(error => console.warn('聊天记录云端同步失败:', error));
             }
         } catch (error) {
-            console.error('沙盒推演或面板同步失败:', error);
-            setGenesisSyncBlocked(true, `本轮回复未能确认写入实时面板：${error.message || '未知错误'}\n请先点击“从对话刷新面板”恢复同步，再继续下一轮。`);
+            console.error('沙盒推演失败:', error);
+            alert(`本轮 AI 回复失败：${error.message || '未知错误'}`);
         } finally {
             document.getElementById(loadingId)?.remove();
             setGenesisChatLocked(false);
