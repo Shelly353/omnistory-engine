@@ -54,6 +54,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const MESSAGE_CONTENT_LIMIT = 3500;
     const WorkspaceMemory = window.OmniWorkspaceMemory;
     const stripFencedBlocks = WorkspaceMemory.stripFencedBlocks;
+    const stripSystemAppendix = WorkspaceMemory.stripSystemAppendix;
     const limitText = WorkspaceMemory.limitText;
     const buildChatPayloadBase = WorkspaceMemory.buildChatPayload;
 
