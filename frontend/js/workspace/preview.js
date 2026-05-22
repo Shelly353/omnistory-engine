@@ -278,7 +278,10 @@ window.OmniWorkspacePreview = (() => {
     window.removeSandboxPreviewItem = (button) => {
         const item = button?.closest('.prev-char-item, .prev-rel-item, .prev-tl-item, .prev-chap-item, .prev-narrative-item');
         if (!item) return;
-        if (!confirm('确认删除这一条设定吗？')) return;
+        if (item.classList.contains('prev-char-item') && window.getSandboxCharacterDeleteWarning) {
+            const warning = window.getSandboxCharacterDeleteWarning(item);
+            if (warning && !confirm(warning)) return;
+        } else if (!confirm('确认删除这一条设定吗？')) return;
         item.remove();
         document.getElementById('human-preview-container')?.dispatchEvent(new Event('input', { bubbles: true }));
     };
