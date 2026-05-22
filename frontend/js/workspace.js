@@ -649,6 +649,33 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('\n');
     }
 
+    function getCurrentStoryGenre() {
+        const previewGenre = document.getElementById('prev-genre')?.value?.trim();
+        if (previewGenre) return previewGenre;
+        const assetGenre = document.getElementById('asset-genre')?.value?.trim();
+        if (assetGenre) return assetGenre;
+        const badgeText = document.getElementById('story-genre-badge')?.innerText || '';
+        return badgeText.replace(/^类型[:：]\s*/, '').trim() || '未锁定';
+    }
+
+    function getSaveTheCatGenreGuide(genre = '') {
+        const key = (genre || '未锁定').trim();
+        const guides = {
+            '屋里有鬼': '类型承诺：怪物/威胁、封闭或难以逃离的屋子、角色过去或欲望造成的罪。监督重点：威胁必须逐步升级，逃离失败要有规则原因，人物越想掩盖问题越被逼近真相。',
+            '金羊毛': '类型承诺：明确目标、路途/任务、同伴关系与主角变化。监督重点：每个事件都应是通往目标的一站，障碍要改变人物关系或价值观，不能只是换地图流水账。',
+            '神灯出窍': '类型承诺：愿望/奇迹带来短期满足，也带来代价和反噬。监督重点：能力或好运必须有使用条件、代价和误判，最终要让主角面对真正需求。',
+            '面临困境': '类型承诺：普通人被压进异常压力，必须在坏选择中做选择。监督重点：困境不能靠巧合解除，主角每次选择都要付出道德、关系或现实成本。',
+            '成长仪式': '类型承诺：外部事件逼出内在成长。监督重点：事件要持续戳中缺陷/恐惧，让主角从旧自我走向新自我，不能只靠说教完成变化。',
+            '伙伴情谊': '类型承诺：两人或多人关系互补、冲突、破裂、再选择。监督重点：事件必须测试关系，冲突应来自性格/欲望差异，和解要有行动证明。',
+            '推理侦探': '类型承诺：谜题、线索、嫌疑、误导、公平揭示。监督重点：关键真相必须提前有线索，调查手段要符合权限和专业流程，不能靠神来一笔破案。',
+            '愚者成功': '类型承诺：被低估者进入强规则环境，用独特视角打破虚伪秩序。监督重点：成功不能靠装傻或运气，必须来自隐藏能力、真诚优势或系统漏洞。',
+            '进退两难': '类型承诺：两边都有代价的不可兼得选择。监督重点：不能给无痛第三选项，抉择必须暴露价值排序，并制造不可逆后果。',
+            '超级英雄': '类型承诺：非凡能力/身份与责任负担。监督重点：能力必须有代价、限制、反制和身份压力，对手应攻击主角的价值弱点而不只是战力。'
+        };
+        if (guides[key]) return `当前救猫咪类型：${key}\n${guides[key]}`;
+        return `当前救猫咪类型：${key || '未锁定'}\n尚未锁定明确类型。监督重点：在继续大纲或正文前，应先确认故事主承诺属于哪一类；若暂时未分类，也要说明本事件承担的类型功能和读者期待。`;
+    }
+
     function getBuiltInExpertBaseline() {
         return `【内置专家系统基线】
 专家系统不需要作者手动粘贴模板。作者只需说明题材、时代、职业、行业或关键词；AI 必须自动调用对应专家审查标准。
@@ -693,14 +720,16 @@ document.addEventListener('DOMContentLoaded', () => {
             `【统一规则/专家资料】\n${getWorldRulesText()}`,
             localSnippets ? `【本地资料库相关片段】\n${localSnippets}` : '',
             getBuiltInExpertBaseline(),
+            `【救猫咪类型监督】\n${getSaveTheCatGenreGuide(getCurrentStoryGenre())}`,
             `【长篇连载编辑状态】\n${getLongformEditorialContext()}`,
             `【当前事件可调用人物卡】\n${getCharacterDetailsForSop()}`,
             `【监督标准】
 1. 专业真实感：涉及职业、行业、学科时，必须符合已入库的流程、术语、权限边界、常见误区；资料不足时避免装懂。
 2. 叙事逻辑：因果链成立，信息来源清楚，关键转折不得靠无铺垫巧合。
-3. 人物一致性：行为必须来自欲望、目标、动机、缺陷、恐惧或成长弧线，禁止为了剧情强行降智。
-4. 世界规则：力量、资源、制度、技能必须有代价、限制和反制，不允许无敌解法。
-5. 伏笔闭环：本章需要回应的伏笔必须处理；新伏笔要有后续回收方向。`
+3. 救猫咪类型契合度：本事件必须承担当前类型的叙事功能，不能违背读者对该类型的核心期待。
+4. MBTI/人物性格一致性：性格不是标签；人物的说话方式、风险偏好、回避策略、冲突处理和关键选择必须能从性格、欲望、目标、动机、缺陷、恐惧或成长弧线中找到来源。
+5. 世界规则：力量、资源、制度、技能必须有代价、限制和反制，不允许无敌解法。
+6. 伏笔闭环：本章需要回应的伏笔必须处理；新伏笔要有后续回收方向。`
         ].filter(Boolean).join('\n\n');
     }
 
@@ -802,15 +831,15 @@ ${getBuiltInExpertBaseline()}
 
     function buildLongformBasePrompt() {
         const eventContext = getAdjacentEventContext(currentLocalContext.chapterNumber);
-        return `【当前事件】\n${eventContext.startInfo}\n【下一事件锚点】\n${eventContext.endInfo}\n【当前大纲】\n${currentLocalContext.synopsis || editorSopConflict?.innerText || '暂无'}\n【正文草稿】\n${limitText(editorTextarea?.value || '', 2600)}\n【人物卡】\n${getCharacterDetailsForSop()}\n【统一规则/专家资料】\n${getWorldRulesText()}\n【已有长篇编辑状态】\n${getLongformEditorialContext()}`;
+        return `【当前事件】\n${eventContext.startInfo}\n【下一事件锚点】\n${eventContext.endInfo}\n【当前大纲】\n${currentLocalContext.synopsis || editorSopConflict?.innerText || '暂无'}\n【正文草稿】\n${limitText(editorTextarea?.value || '', 2600)}\n【救猫咪类型监督】\n${getSaveTheCatGenreGuide(getCurrentStoryGenre())}\n【人物卡】\n${getCharacterDetailsForSop()}\n【统一规则/专家资料】\n${getWorldRulesText()}\n【已有长篇编辑状态】\n${getLongformEditorialContext()}`;
     }
 
     async function runLongformEditorTask(taskType, extra = "") {
         if (!currentLocalContext.chapterId && taskType !== 'memory') return alert("请先选择一个事件。");
         const taskPrompts = {
-            gate: `你是长篇连载的【事件质量闸门】。请在事件进入正文前审查：因果必要性、人物是否必须这样做、是否有更聪明选择、反派是否降智、是否靠巧合、读者是否会觉得假、删掉事件主线是否断裂。输出：通过/不通过、风险点、最小整改方案、必须补充的问题。`,
-            hook: `你是长篇连载的【章节吸引力设计器】。请为当前事件设计章节级吸引力：读者钩子、冲突升级、信息差、情绪波峰、关系变化、结尾悬念、爽点/痛点/疑问点，以及避免平淡流水账的写法。`,
-            state: `你是长篇连载的【人物状态追踪器】。请根据当前事件/正文更新人物当前状态：当前目标、误解、情绪状态、关系变化、获得/失去资源、身体/心理代价、秘密、下一次行动倾向。只更新当前事件影响到的人物。`,
+            gate: `你是长篇连载的【事件质量闸门】。请在事件进入正文前审查：因果必要性、救猫咪类型功能是否成立、人物是否必须这样做、人物行为是否符合 MBTI/性格/欲望/缺陷、是否有更聪明选择、反派是否降智、是否靠巧合、读者是否会觉得假、删掉事件主线是否断裂。输出：通过/不通过、风险点、最小整改方案、必须补充的问题。`,
+            hook: `你是长篇连载的【章节吸引力设计器】。请为当前事件设计章节级吸引力：符合当前救猫咪类型承诺的读者钩子、冲突升级、信息差、情绪波峰、关系变化、结尾悬念、爽点/痛点/疑问点；同时利用角色 MBTI/性格差异制造自然冲突，避免平淡流水账。`,
+            state: `你是长篇连载的【人物状态追踪器】。请根据当前事件/正文更新人物当前状态：当前目标、误解、情绪状态、关系变化、获得/失去资源、身体/心理代价、秘密、下一次行动倾向。每个变化都要注明来自人物的性格/欲望/缺陷/恐惧中的哪一项，只更新当前事件影响到的人物。`,
             memory: `你是长篇连载的【阶段记忆压缩器】。请压缩目前全部事件为长篇续写记忆：阶段总结、不可逆变化、已兑现伏笔、未兑现伏笔、人物状态变化、世界规则新增、下一阶段风险。要求短而硬，供后续 20 万字持续调用。`
         };
         const prompt = `${taskPrompts[taskType]}\n\n${buildLongformBasePrompt()}\n${extra}`;
@@ -849,7 +878,7 @@ ${getBuiltInExpertBaseline()}
             renderDeviationItems(["正文太短，暂不进行完整监督检测。"]);
             return;
         }
-        renderDeviationItems(["统一监督系统检测中：专业真实感、叙事逻辑、人设一致性、世界规则、伏笔闭环..."]);
+        renderDeviationItems(["统一监督系统检测中：专业真实感、叙事逻辑、救猫咪类型、人设一致性、世界规则、伏笔闭环..."]);
         const eventContext = getAdjacentEventContext(currentLocalContext.chapterNumber);
         const prompt = `请作为统一正文监督系统，审查下面正文。专家系统已经合并进规则系统，监督系统已经合并进偏离审查系统。
 【当前事件】\n${eventContext.startInfo}
@@ -863,6 +892,8 @@ ${getUnifiedQualityGuardrails()}
 【风险等级】低/中/高
 【专业真实感问题】
 【叙事逻辑问题】
+【救猫咪类型契合度】
+【MBTI/人物性格一致性】
 【人物降智/OOC问题】
 【世界规则/设定冲突】
 【伏笔闭环问题】
@@ -2484,6 +2515,7 @@ if (btnTriggerHook) {
 【当前事件】：${eventContext.startInfo}
 【下一事件过渡锚点】：${eventContext.endInfo}
 【统一规则/专家资料】：${getWorldRulesText()}
+【救猫咪类型监督】：${getSaveTheCatGenreGuide(getCurrentStoryGenre())}
 【可调用人物卡】：${getCharacterDetailsForSop()}
 【事件质量闸门】：${gateReport || '暂无'}
 【章节吸引力设计】：${attractionPlan || '暂无'}
@@ -2492,11 +2524,12 @@ if (btnTriggerHook) {
 要求：
 1. 绝不允许自我放飞，严禁编造我们没讨论过的重大情节。
 2. 必须按已确认的章数输出；如果章数未确认，请按最合理章数输出并说明依据。
-3. 每章必须包含：标题、起因、经过、结果、参与人物、人物行为来源、可种植伏笔/需回收伏笔、世界观/核心戒律/专业资料校验、与下一章衔接。
-4. 所有人物行为必须能从性格、欲望、目标、动机、缺陷、恐惧或成长弧线中找到来源。
-5. 如果涉及职业、行业或学科，必须依据已入库的专业顾问资料检查流程、术语、权限边界和常见误区；资料不足时不要编造确定细节。
-6. 必须吸收事件质量闸门和章节吸引力设计的整改要求。
-7. 本事件结尾必须能自然过渡到下一事件，但不得展开下一事件正文内容。
+3. 每章必须包含：标题、起因、经过、结果、参与人物、救猫咪类型功能、人物行为来源、可种植伏笔/需回收伏笔、世界观/核心戒律/专业资料校验、与下一章衔接。
+4. 所有人物行为必须能从 MBTI/性格、欲望、目标、动机、缺陷、恐惧或成长弧线中找到来源。
+5. 每章都要说明它如何履行当前救猫咪类型的读者承诺；如果不契合，必须给出修正。
+6. 如果涉及职业、行业或学科，必须依据已入库的专业顾问资料检查流程、术语、权限边界和常见误区；资料不足时不要编造确定细节。
+7. 必须吸收事件质量闸门和章节吸引力设计的整改要求。
+8. 本事件结尾必须能自然过渡到下一事件，但不得展开下一事件正文内容。
 请直接输出这份最终大纲，不要掺杂任何废话，它将作为正文执笔的严格依据。`;
 
             // 深拷贝一份不污染原对话的提纯队列
@@ -2594,13 +2627,7 @@ if (data.success) {
             const worldRules = document.getElementById('world-rules-container') ? document.getElementById('world-rules-container').innerText.trim() : "无特殊限制";
 
             // 3. 提取登场群星档案
-            let characterDetails = "无详细资产设定";
-            if (currentLocalContext.characters && currentLocalContext.characters.length > 0 && window.globalCharacters) {
-                characterDetails = currentLocalContext.characters.map(lc => {
-                    const gc = window.globalCharacters.find(c => c.name === lc.name) || {};
-                    return `【角色：${lc.name}】性格(MBTI):${gc.personality || '未知'} | 核心欲望(Want):${gc.core_desire || '未知'} | 动机(Motivation):${gc.motivation || '未知'} | 简介:${gc.description || '无'}`;
-                }).join('\n');
-            }
+            const characterDetails = getCharacterDetailsForSop();
 
             // 🌟 4. 提取当前用户选择的【文笔风格提示词】
             const selectedStyleKey = styleSelect.value;
@@ -2924,18 +2951,19 @@ if (data.success) {
 1. 第一步必须先复述你理解的当前事件，并指出当前事件内部缺失的切入点、冲突、人物选择或不可逆后果。
 2. 陪作者讨论当前事件内部的行动、阻力、人物选择、代价、转折和信息释放；不要展开讨论下一事件的具体内容。
 3. 每次提出事件细节，都要说明：行动人物、行为来源、冲突对象、不可逆后果、如何让当前事件结尾自然过渡到下一事件。
-4. 用统一规则/专家资料校验事件是否合理；如果涉及职业、行业或学科，要检查工作流程、术语、权限边界、常见误区和真实感细节，不合理时必须指出并给出修正方向。
-5. 主动提出【可种植伏笔】和【需要回收伏笔】：说明种下位置、回收位置、误导/信息差作用、回收方式，以及如果不回收会造成的逻辑断裂。
-6. 当作者说“推演差不多了”或“开始总结”时，先确认这段内容分成几章，再生成每章标题与详细摘要；每章必须列出可种植伏笔/需回收伏笔。
-7. 下一事件只作为结尾衔接目标，不能把 SOP 讨论变成两个事件的联合推演。
-8. 只能使用下方【可调用人物卡】中的角色来推导行为；不要查阅、调用或主动引入无关人物，除非作者明确要求新增角色。
-9. 每次回复最后必须给作者 2-4 个可直接选择或改写的输入方向，例如“选 A/B/C”“补充某角色动机”“指定一个必须发生的事件”。禁止只说“你觉得呢”。`;
+4. 用救猫咪类型监督检查当前事件是否承担了应有类型功能；如果偏离类型承诺，要指出偏离点并给出改法。
+5. 用统一规则/专家资料校验事件是否合理；如果涉及职业、行业或学科，要检查工作流程、术语、权限边界、常见误区和真实感细节，不合理时必须指出并给出修正方向。
+6. 主动提出【可种植伏笔】和【需要回收伏笔】：说明种下位置、回收位置、误导/信息差作用、回收方式，以及如果不回收会造成的逻辑断裂。
+7. 当作者说“推演差不多了”或“开始总结”时，先确认这段内容分成几章，再生成每章标题与详细摘要；每章必须列出救猫咪类型功能、人物行为来源、可种植伏笔/需回收伏笔。
+8. 下一事件只作为结尾衔接目标，不能把 SOP 讨论变成两个事件的联合推演。
+9. 只能使用下方【可调用人物卡】中的角色来推导行为；不要查阅、调用或主动引入无关人物，除非作者明确要求新增角色。
+10. 每次回复最后必须给作者 2-4 个可直接选择或改写的输入方向，例如“选 A/B/C”“补充某角色动机”“指定一个必须发生的事件”。禁止只说“你觉得呢”。`;
 
                 // 3. 把私货、工作流、防 OOC 指令、伏笔全塞进最后一句话里发给 AI！
                 let lastUserMsg = payloadConvo[payloadConvo.length - 1];
                 if (lastUserMsg && lastUserMsg.role === 'user') {
                     // 如果有必须要回收的伏笔 (hookAlert)，它会变成红字警告随同发送！
-                    lastUserMsg.content += `\n\n${hiddenWorkflow}` + (currentLocalContext.hookAlert || "") + `\n\n[统一监督指令]：请严格遵循规则/专家资料、人物档案和长篇编辑状态推演，严禁专业乱写、逻辑跳步、人物降智或OOC。\n【统一规则/专家资料】：\n${worldRules}\n【人物卡】：\n${characterDetails}\n【长篇编辑状态】：\n${getLongformEditorialContext()}`;
+                    lastUserMsg.content += `\n\n${hiddenWorkflow}` + (currentLocalContext.hookAlert || "") + `\n\n[统一监督指令]：请严格遵循规则/专家资料、救猫咪类型、人物档案和长篇编辑状态推演，严禁专业乱写、逻辑跳步、人物降智或OOC。\n【救猫咪类型监督】：\n${getSaveTheCatGenreGuide(getCurrentStoryGenre())}\n【统一规则/专家资料】：\n${worldRules}\n【人物卡】：\n${characterDetails}\n【长篇编辑状态】：\n${getLongformEditorialContext()}`;
                 }
 
                 // 4. 发送给主脑
