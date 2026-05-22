@@ -82,6 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function buildGenesisChatPayload() {
         const currentBible = getCurrentBibleSnapshot();
+        const currentBibleText = JSON.stringify(compactBibleForPrompt(currentBible) || {});
         const queryText = [
             getActiveSandboxModuleLabel(),
             currentBible?.worldview || '',
@@ -89,8 +90,12 @@ document.addEventListener('DOMContentLoaded', () => {
             (currentBible?.chapters || []).map(ch => `${ch.title || ''} ${ch.content || ''}`).join('\n'),
             genesisConversation.slice(-3).map(msg => msg.content).join('\n')
         ].join('\n');
+        const priorityMessage = currentBible ? [{
+            role: 'user',
+            content: `【最高优先级校准：以右侧实时面板为准】\n用户可能已经在右侧实时灵感面板手动修改了你之前提出的低质量设定。以下面板快照是最新有效设定，优先级高于旧聊天记录和你过去的方案。若旧内容冲突，必须废弃旧内容，并基于此快照继续推演。\n${currentBibleText}`
+        }] : [];
         return {
-            ...buildChatPayload(genesisConversation),
+            ...buildChatPayload([...priorityMessage, ...genesisConversation]),
             currentBible: compactBibleForPrompt(currentBible),
             localReferenceSnippets: getRelevantLocalSourceSnippets(queryText),
             requirePanelJson: true
@@ -1685,7 +1690,7 @@ ${getRulesTextForPrompt()}`;
             if (!text) return;
             chatInput.value = '';
             const userMsgWithContext = text
-                + `\n\n(系统附加：当前沙盒模块是【${getActiveSandboxModuleLabel()}】。事件、人物、规则三个模块互相影响；规则/世界观/专家资料拥有最高权限。右侧数据面板已由用户实时更新，请在下一次生成 JSON 时尊重并保留这些设定。若当前输入新增人物，请将其绑定到相关事件，并提醒参与少于三个事件的人物需要后续复用或合并。)`
+                + `\n\n(系统附加：当前沙盒模块是【${getActiveSandboxModuleLabel()}】。事件、人物、规则三个模块互相影响；规则/世界观/专家资料拥有最高权限。右侧数据面板已由用户实时更新，优先级高于旧聊天记录和你之前提出的方案。若旧设定与面板冲突，必须废弃旧设定，以面板为准继续推演。若当前输入新增人物，请将其绑定到相关事件，并提醒参与少于三个事件的人物需要后续复用或合并。)`
                 + getExpertKeywordHint(text);
             const newIndex = genesisConversation.length;
             genesisConversation.push({ role: 'user', content: userMsgWithContext });

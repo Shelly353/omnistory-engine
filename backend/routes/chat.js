@@ -19,10 +19,10 @@ router.post('/deduce', async (req, res) => {
 
     const messages = [
         { role: "system", content: systemPrompt },
-        memorySummary ? { role: "system", content: `【长期记忆摘要】\n以下是较早对话中需要继续遵守的关键上下文。不要逐字复述，只在推演时保持一致：\n${memorySummary}` } : null,
-        currentBible ? { role: "system", content: `【当前实时面板快照】\n这是右侧可视化面板当前保存的结构化设定。后续推演必须在此基础上增量更新，不要丢失已确认的人物、关系、时间线、叙事逻辑和章节：\n${JSON.stringify(currentBible)}` } : null,
+        currentBible ? { role: "system", content: `【最高优先级：当前实时面板快照】\n这是用户当前确认/手动修改后的结构化设定，优先级高于旧聊天记录、长期记忆摘要和你之前提出过的方案。后续推演必须在此基础上增量更新，不要丢失已确认的人物、关系、时间线、叙事逻辑和章节。若旧聊天记录与本快照冲突，必须以本快照为准，并主动承认“以用户最新修改为准”。\n${JSON.stringify(currentBible)}` } : null,
+        memorySummary ? { role: "system", content: `【长期记忆摘要】\n以下是较早对话中需要继续遵守的关键上下文。但如果它与【当前实时面板快照】冲突，必须服从当前实时面板快照。不要逐字复述，只在推演时保持一致：\n${memorySummary}` } : null,
         localReferenceSnippets ? { role: "system", content: `【本地资料库按需检索片段】\n以下资料来自用户电脑本地资料库，仅为本次问题按关键词检索出的相关片段。不要声称已读取完整资料；如果片段不足，请说明需要调用更多资料或让作者补充关键词。\n${localReferenceSnippets}` } : null,
-        requirePanelJson ? { role: "system", content: `【创世沙盒守门规则】你的核心任务是串联开始事件到结束事件的因果时间线，并创造能推动时间线的人物。任何建议都必须来自已有设定，尤其是人物 MBTI/性格、欲望、目标、动机、缺陷、恐惧。genre 是救猫咪类型，不是展示标签；每个关键事件都必须说明它承担当前类型的什么功能。救猫咪类型包括：屋里有鬼、金羊毛、神灯出窍、面临困境、成长仪式、伙伴情谊、推理侦探、愚者成功、进退两难、超级英雄。目标是好莱坞级商业叙事：强目标、强阻力、强代价、强转折、强场面记忆点和结尾钩子。提出事件前先说明当前缺口；提出事件时必须说明触发原因、行动人物、类型功能、行为来源、对抗/阻力、胜利代价、不可逆后果、推向终局的作用，并做反傻瓜测试。禁止低智商反派、明显骗局、无理由背叛、靠巧合推进、角色为了剧情突然变笨。创世收束前必须确认叙事逻辑：区分真实时间线 timeline 与读者阅读顺序 narrative_logic.presentation_order，说明顺叙/倒叙/双线/多视角等选择如何服务人物弧线、悬念和信息释放。` } : null,
+        requirePanelJson ? { role: "system", content: `【创世沙盒守门规则】你的核心任务是串联开始事件到结束事件的因果时间线，并创造能推动时间线的人物。任何建议都必须来自【当前实时面板快照】中的最新设定，尤其是人物 MBTI/性格、欲望、目标、动机、缺陷、恐惧。genre 是救猫咪类型，不是展示标签；每个关键事件都必须说明它承担当前类型的什么功能。救猫咪类型包括：屋里有鬼、金羊毛、神灯出窍、面临困境、成长仪式、伙伴情谊、推理侦探、愚者成功、进退两难、超级英雄。目标是好莱坞级商业叙事：强目标、强阻力、强代价、强转折、强场面记忆点和结尾钩子。提出事件前先说明当前缺口；提出事件时必须说明触发原因、行动人物、类型功能、行为来源、对抗/阻力、胜利代价、不可逆后果、推向终局的作用，并做反傻瓜测试。禁止低智商反派、明显骗局、无理由背叛、靠巧合推进、角色为了剧情突然变笨。如果用户通过面板或对话修改了旧设定，禁止继续沿用旧设定，除非用户明确要求回滚。创世收束前必须确认叙事逻辑：区分真实时间线 timeline 与读者阅读顺序 narrative_logic.presentation_order，说明顺叙/倒叙/双线/多视角等选择如何服务人物弧线、悬念和信息释放。` } : null,
         requirePanelJson ? { role: "system", content: `【实时灵感可视化面板更新协议】每次回复末尾必须追加一个 json 代码块，包含当前已确认的 genre、worldview、rules、characters、relations、timeline、narrative_logic、chapters。字段不存在时使用空字符串、空对象或空数组。聊天正文可以简洁，但 json 代码块必须是合法 JSON。narrative_logic 必须包含 mode、description、presentation_order；presentation_order 的每项包含 order、source_chapter_number、title、purpose、transition。` } : null,
         ...conversation
     ].filter(Boolean);
