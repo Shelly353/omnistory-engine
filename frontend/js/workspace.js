@@ -85,21 +85,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function buildGenesisChatPayload() {
-        const currentBible = getCurrentBibleSnapshot();
+        const manualEdits = loadManualBibleEdits();
+        const currentBible = applyManualBibleEditsToValue(getCurrentBibleSnapshot(), manualEdits);
         const currentBibleText = JSON.stringify(compactBibleForPrompt(currentBible) || {});
         const queryText = [
             getActiveSandboxModuleLabel(),
             currentBible?.worldview || '',
             currentBible?.rules || '',
             (currentBible?.chapters || []).map(ch => `${ch.title || ''} ${ch.content || ''}`).join('\n'),
-            genesisConversation.slice(-3).map(msg => msg.content).join('\n')
+            genesisConversation.slice(-3).map(msg => applyManualCharacterRenamesToText(msg.content, manualEdits)).join('\n')
         ].join('\n');
+        const renamedConversation = genesisConversation.map(msg => ({
+            ...msg,
+            content: applyManualCharacterRenamesToText(msg.content, manualEdits)
+        }));
         const priorityMessage = currentBible ? [{
             role: 'user',
             content: `【最高优先级校准：以右侧实时面板为准】\n用户可能已经在右侧实时灵感面板手动修改了你之前提出的低质量设定。以下面板快照是最新有效设定，优先级高于旧聊天记录和你过去的方案。若旧内容冲突，必须废弃旧内容，并基于此快照继续推演。\n${currentBibleText}`
         }] : [];
         return {
-            ...buildChatPayload([...priorityMessage, ...genesisConversation]),
+            ...buildChatPayload([...priorityMessage, ...renamedConversation]),
             currentBible: compactBibleForPrompt(currentBible),
             localReferenceSnippets: getRelevantLocalSourceSnippets(queryText),
             requirePanelJson: true
@@ -126,18 +131,20 @@ document.addEventListener('DOMContentLoaded', () => {
             const edits = JSON.parse(localStorage.getItem(MANUAL_BIBLE_EDITS_KEY) || '{}');
             return {
                 characterRenames: edits.characterRenames || {},
+                characterRenameLabels: edits.characterRenameLabels || {},
                 deletedCharacters: edits.deletedCharacters || {},
                 deletedRelations: edits.deletedRelations || {},
                 deletedTimeline: edits.deletedTimeline || {}
             };
         } catch (e) {
-            return { characterRenames: {}, deletedCharacters: {}, deletedRelations: {}, deletedTimeline: {} };
+            return { characterRenames: {}, characterRenameLabels: {}, deletedCharacters: {}, deletedRelations: {}, deletedTimeline: {} };
         }
     }
 
     function saveManualBibleEdits(edits) {
         localStorage.setItem(MANUAL_BIBLE_EDITS_KEY, JSON.stringify({
             characterRenames: edits.characterRenames || {},
+            characterRenameLabels: edits.characterRenameLabels || {},
             deletedCharacters: edits.deletedCharacters || {},
             deletedRelations: edits.deletedRelations || {},
             deletedTimeline: edits.deletedTimeline || {}
@@ -147,6 +154,40 @@ document.addEventListener('DOMContentLoaded', () => {
     function canonicalCharacterName(name, edits = loadManualBibleEdits()) {
         const key = normalizeStableKey(name);
         return edits.characterRenames[key] || name;
+    }
+
+    function getCharacterRenameEntries(edits = loadManualBibleEdits()) {
+        return Object.entries(edits.characterRenames || {})
+            .map(([oldKey, newName]) => ({
+                oldName: edits.characterRenameLabels?.[oldKey] || oldKey,
+                oldKey,
+                newName
+            }))
+            .filter(item => item.oldName && item.newName && normalizeStableKey(item.oldName) !== normalizeStableKey(item.newName));
+    }
+
+    function escapeRegExp(value = '') {
+        return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function applyManualCharacterRenamesToText(text = '', edits = loadManualBibleEdits()) {
+        let result = String(text || '');
+        getCharacterRenameEntries(edits)
+            .sort((a, b) => b.oldName.length - a.oldName.length)
+            .forEach(({ oldName, oldKey, newName }) => {
+                if (oldName) result = result.replace(new RegExp(escapeRegExp(oldName), 'g'), newName);
+                if (oldKey && oldKey !== oldName) result = result.replace(new RegExp(escapeRegExp(oldKey), 'g'), newName);
+            });
+        return result;
+    }
+
+    function applyManualBibleEditsToValue(value, edits = loadManualBibleEdits()) {
+        if (typeof value === 'string') return applyManualCharacterRenamesToText(value, edits);
+        if (Array.isArray(value)) return value.map(item => applyManualBibleEditsToValue(item, edits));
+        if (value && typeof value === 'object') {
+            return Object.fromEntries(Object.entries(value).map(([key, entryValue]) => [key, applyManualBibleEditsToValue(entryValue, edits)]));
+        }
+        return value;
     }
 
     function getRelationManualKey(rel = {}) {
@@ -178,10 +219,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const oldKey = normalizeStableKey(oldName);
             renamedOldKeys.add(oldKey);
             edits.characterRenames[oldKey] = newName;
+            edits.characterRenameLabels[oldKey] = oldName;
             if (previous?.name && normalizeStableKey(previous.name) !== normalizeStableKey(newName)) {
                 const previousKey = normalizeStableKey(previous.name);
                 renamedOldKeys.add(previousKey);
                 edits.characterRenames[previousKey] = newName;
+                edits.characterRenameLabels[previousKey] = previous.name;
             }
             delete edits.deletedCharacters[normalizeStableKey(newName)];
         });
@@ -255,27 +298,29 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function mergeBibleWithStableLists(previous, next) {
-        if (!previous || !next || typeof next !== 'object') return next;
-        const merged = { ...next };
         const manualEdits = loadManualBibleEdits();
-        Object.entries(previous || {}).forEach(([key, value]) => {
+        if (!previous || !next || typeof next !== 'object') return applyManualBibleEditsToValue(next, manualEdits);
+        const editedPrevious = applyManualBibleEditsToValue(previous, manualEdits);
+        const editedNext = applyManualBibleEditsToValue(next, manualEdits);
+        const merged = { ...editedNext };
+        Object.entries(editedPrevious || {}).forEach(([key, value]) => {
             const nextValue = merged[key];
             if ((nextValue === '' || nextValue === null || nextValue === undefined) && value !== '' && value !== null && value !== undefined) {
-                merged[key] = value;
+                merged[key] = applyManualBibleEditsToValue(value, manualEdits);
             }
         });
-        merged.characters = mergeCharactersPreservingCards(previous.characters, next.characters);
-        const nextRelations = Array.isArray(next.relations) ? next.relations.map(rel => ({
+        merged.characters = mergeCharactersPreservingCards(editedPrevious.characters, editedNext.characters);
+        const nextRelations = Array.isArray(editedNext.relations) ? editedNext.relations.map(rel => ({
             ...rel,
             from_name: canonicalCharacterName(rel.from_name || rel.from || rel.source, manualEdits),
             to_name: canonicalCharacterName(rel.to_name || rel.to || rel.target, manualEdits)
-        })).filter(rel => !manualEdits.deletedRelations[getRelationManualKey(rel)]) : next.relations;
-        merged.relations = mergeStableArray(previous.relations, nextRelations, getRelationManualKey);
-        const nextTimeline = Array.isArray(next.timeline)
-            ? next.timeline.filter(item => !manualEdits.deletedTimeline[getTimelineManualKey(item)])
-            : next.timeline;
-        merged.timeline = mergeStableArray(previous.timeline, nextTimeline, getTimelineManualKey);
-        merged.chapters = mergeStableArray(previous.chapters, next.chapters, chapter => [
+        })).filter(rel => !manualEdits.deletedRelations[getRelationManualKey(rel)]) : editedNext.relations;
+        merged.relations = mergeStableArray(editedPrevious.relations, nextRelations, getRelationManualKey);
+        const nextTimeline = Array.isArray(editedNext.timeline)
+            ? editedNext.timeline.filter(item => !manualEdits.deletedTimeline[getTimelineManualKey(item)])
+            : editedNext.timeline;
+        merged.timeline = mergeStableArray(editedPrevious.timeline, nextTimeline, getTimelineManualKey);
+        merged.chapters = mergeStableArray(editedPrevious.chapters, editedNext.chapters, chapter => [
             String(chapter.chapter_number || '').trim(),
             normalizeStableKey(chapter.title)
         ].join('|'));
@@ -442,12 +487,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function buildRecoveryLedger(conversation = []) {
         const correctionPattern = /(不是|不对|否定|改成|修改|更改|换成|不要|应该|必须|设定为|新增|加入|删除|保留|关系|羁绊|时间轴|事件|人物|性格|动机|目标|规则)/;
+        const manualEdits = loadManualBibleEdits();
         const cleaned = conversation.map((msg, index) => {
             const raw = msg.role === 'assistant' ? stripBibleJsonBlocks(msg.content) : stripSystemAppendix(msg.content);
             return {
                 index,
                 role: msg.role === 'user' ? '用户' : 'AI',
-                content: limitText(raw, msg.role === 'user' ? 1200 : 700)
+                content: limitText(applyManualCharacterRenamesToText(raw, manualEdits), msg.role === 'user' ? 1200 : 700)
             };
         }).filter(msg => msg.content && msg.content !== '已更新设定数据。');
         const userCorrections = cleaned
@@ -468,7 +514,8 @@ document.addEventListener('DOMContentLoaded', () => {
     async function buildExtractionConversationFromChat(conversation, instruction, options = {}) {
         const payload = buildChatPayload(conversation, options.recoveryMode ? 24 : 16);
         const databaseBible = await fetchBibleSnapshotFromDatabase();
-        const currentBibleRaw = getCurrentBibleSnapshot();
+        const manualEdits = loadManualBibleEdits();
+        const currentBibleRaw = applyManualBibleEditsToValue(getCurrentBibleSnapshot(), manualEdits);
         const cloudBackups = await fetchGenesisCloudBibleBackups();
         const backupBible = [...loadLatestBibleBackups(), ...cloudBackups].find(item => !hasStableBibleGaps(item));
         let stableBible = databaseBible
@@ -484,7 +531,7 @@ document.addEventListener('DOMContentLoaded', () => {
             payload.memorySummary ? { role: 'system', content: `【较早对话摘要】\n${payload.memorySummary}` } : null,
             recoveryLedger?.userCorrections ? { role: 'system', content: `【全量用户修正记录：恢复模式最高优先级】\n以下是从整个沙盒对话中筛出的用户否定、修改、新增、关系、时间轴、人物设定相关记录。恢复丢失人物卡、人物羁绊和细密时间轴时，优先服从这里，而不是 AI 早期旧方案。\n${recoveryLedger.userCorrections}` } : null,
             recoveryLedger?.fullTrail ? { role: 'system', content: `【全量沙盒对话尾迹：用于补全丢失资产】\n${recoveryLedger.fullTrail}` } : null,
-            ...payload.conversation,
+            ...payload.conversation.map(msg => ({ ...msg, content: applyManualCharacterRenamesToText(msg.content, manualEdits) })),
             { role: 'user', content: instruction }
         ].filter(Boolean);
     }
@@ -1074,7 +1121,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getCurrentBibleSnapshot() {
         if (document.getElementById('prev-genre')) return collectBibleFromPreview();
-        return loadLatestBible();
+        return applyManualBibleEditsToValue(loadLatestBible());
     }
 
     function compactBibleForPrompt(value) {
@@ -2176,9 +2223,10 @@ ${getRulesTextForPrompt()}`;
 
     async function syncGenesisDraftToCloud() {
         if (genesisConversation.length === 0 && !getCurrentBibleSnapshot()) return;
+        const manualEdits = loadManualBibleEdits();
         await window.syncToCloud(GENESIS_CLOUD_TYPE, {
-            bible: getCurrentBibleSnapshot(),
-            chat: genesisConversation
+            bible: applyManualBibleEditsToValue(getCurrentBibleSnapshot(), manualEdits),
+            chat: genesisConversation.map(msg => ({ ...msg, content: applyManualCharacterRenamesToText(msg.content, manualEdits) }))
         }, { silent: true });
     }
 
@@ -2278,7 +2326,7 @@ ${getRulesTextForPrompt()}`;
     // ==========================================
     if (btnConfirmCrystallize) {
         btnConfirmCrystallize.addEventListener('click', async () => {
-            let finalBible = collectBibleFromPreview();
+            let finalBible = applyManualBibleEditsToValue(collectBibleFromPreview());
 
             btnConfirmCrystallize.disabled = true;
             btnConfirmCrystallize.innerHTML = `<i data-lucide="loader" class="w-4 h-4 animate-spin mr-1 inline"></i>铸造中...`;
@@ -2291,7 +2339,11 @@ ${getRulesTextForPrompt()}`;
                 const data = await res.json();
 if (data.success) { 
                     // 💥 任务完成：静默将沙盒数据与聊天记录同步至云端
-                    await window.syncToCloud(GENESIS_CLOUD_TYPE, { bible: finalBible, chat: genesisConversation });
+                    const manualEdits = loadManualBibleEdits();
+                    await window.syncToCloud(GENESIS_CLOUD_TYPE, {
+                        bible: finalBible,
+                        chat: genesisConversation.map(msg => ({ ...msg, content: applyManualCharacterRenamesToText(msg.content, manualEdits) }))
+                    });
                     alert("✨ 世界圣经已结晶并同步云端！"); 
                     window.location.reload(); 
                 }                else { alert("铸造入库失败: " + data.error); }
@@ -2379,13 +2431,16 @@ if (data.success) {
                 const timeline = document.getElementById('master-timeline');
                 if (!timeline) return;
                 if (data.events.length === 0) return;
-                timeline.innerHTML = data.events.map(ev => `
+                const manualEdits = loadManualBibleEdits();
+                timeline.innerHTML = data.events.map(ev => {
+                    const displayDescription = applyManualCharacterRenamesToText(ev.description || '', manualEdits);
+                    return `
                     <div class="relative pl-6 group cursor-pointer" onclick="window.jumpToSourceChapter(${ev.chapter_number})">
                         <div class="absolute left-1 top-1.5 w-2 h-2 rounded-full bg-purple-500 border border-gray-950 group-hover:bg-purple-400 group-hover:scale-125 transition-all"></div>
-                        <span class="block text-[10px] font-mono text-gray-500">${ev.time_label}</span>
-                        <span class="block text-xs font-bold text-gray-300 group-hover:text-purple-400 transition truncate" title="${ev.description}">${ev.description.substring(0,12)}...</span>
+                        <span class="block text-[10px] font-mono text-gray-500">${applyManualCharacterRenamesToText(ev.time_label || '', manualEdits)}</span>
+                        <span class="block text-xs font-bold text-gray-300 group-hover:text-purple-400 transition truncate" title="${displayDescription}">${displayDescription.substring(0,12)}...</span>
                     </div>
-                `).join('');
+                `}).join('');
             }
         } catch (e) { }
     }
@@ -2401,7 +2456,11 @@ if (data.success) {
 
             const data = await res.json();
             if (data.success && data.chapters.length > 0) {
-                workspaceChapters = data.chapters.slice().sort((a,b) => a.chapter_number - b.chapter_number);
+                const manualEdits = loadManualBibleEdits();
+                workspaceChapters = data.chapters
+                    .map(ch => applyManualBibleEditsToValue(ch, manualEdits))
+                    .slice()
+                    .sort((a,b) => a.chapter_number - b.chapter_number);
                 if (chapterTree) chapterTree.innerHTML = '';
                 workspaceChapters.forEach((chap, index) => {
                     const li = document.createElement('li');
@@ -2712,17 +2771,23 @@ if (data.success) {
             const data = await res.json();
 
             if (data.success) {
-                currentLocalContext = { chapterId, chapterNumber, title, synopsis: data.chapter.content || "", characters: data.characters || [], hooks: data.hooks || [] };
-                if (editorTextarea) editorTextarea.value = data.chapter.content_text || "";
-                if (editorSopConflict) editorSopConflict.innerText = data.chapter.content ? data.chapter.content : '尚未生成大纲，请在上方推演室讨论后提取。';
+                const manualEdits = loadManualBibleEdits();
+                const displayChapter = applyManualBibleEditsToValue(data.chapter || {}, manualEdits);
+                const displayCharacters = applyManualBibleEditsToValue(data.characters || [], manualEdits);
+                const displayHooks = applyManualBibleEditsToValue(data.hooks || [], manualEdits);
+                const displayTitle = applyManualCharacterRenamesToText(title, manualEdits);
+                currentLocalContext = { chapterId, chapterNumber, title: displayTitle, synopsis: displayChapter.content || "", characters: displayCharacters || [], hooks: displayHooks || [] };
+                if (currentChapterTitle) currentChapterTitle.innerText = `事件 ${chapterNumber}：${displayTitle}`;
+                if (editorTextarea) editorTextarea.value = displayChapter.content_text || "";
+                if (editorSopConflict) editorSopConflict.innerText = displayChapter.content ? displayChapter.content : '尚未生成大纲，请在上方推演室讨论后提取。';
 
                 // 💥 世界观强制重载，修复不显示的问题
                 await loadProjectSettings();
 
                 const eventContext = getAdjacentEventContext(chapterNumber);
-                const charNames = data.characters && data.characters.length > 0 ? data.characters.map(c => c.name).join('、') : '暂无指定人物';
-                const sourceHooks = (data.hooks || []).filter(h => h.source_chapter_number == chapterNumber);
-                const targetHooks = (data.hooks || []).filter(h => h.target_chapter == chapterNumber);
+                const charNames = displayCharacters && displayCharacters.length > 0 ? displayCharacters.map(c => c.name).join('、') : '暂无指定人物';
+                const sourceHooks = (displayHooks || []).filter(h => h.source_chapter_number == chapterNumber);
+                const targetHooks = (displayHooks || []).filter(h => h.target_chapter == chapterNumber);
                 const hookDescs = [
                     targetHooks.length > 0 ? `需回收：${targetHooks.map(h => h.description).join('；')}` : '',
                     sourceHooks.length > 0 ? `已种下：${sourceHooks.map(h => h.description).join('；')}` : ''
@@ -2739,7 +2804,7 @@ if (data.success) {
                 if (localDeviationPanel) {
                     const warnings = [];
                     if (!worldRules || worldRules === '无特殊限制') warnings.push('世界观/规则/专业顾问资料尚未入库，AI 校验会变弱。');
-                    if (!data.characters || data.characters.length === 0) warnings.push('本章尚未绑定可调用角色，人物行为容易发散。');
+                    if (!displayCharacters || displayCharacters.length === 0) warnings.push('本章尚未绑定可调用角色，人物行为容易发散。');
                     if (targetHooks.length > 0) warnings.push(`本章有 ${targetHooks.length} 个伏笔必须回收，SOP 和正文需逐一回应。`);
                     renderDeviationItems(warnings);
                 }
@@ -2784,8 +2849,8 @@ if (data.success) {
                 if (localCharacters) {
                     const addBtnHTML = `<button onclick="addLocalChar()" class="w-full text-[10px] py-1 mb-2 bg-blue-900/30 hover:bg-blue-600 text-blue-400 hover:text-white rounded transition border border-blue-800/50 flex justify-center items-center"><i data-lucide="plus" class="w-3 h-3 mr-1"></i>拉入已建角色</button>`;
 
-                    const charHTML = data.characters.length > 0 ? data.characters.map(lc => {
-                        const gc = window.globalCharacters?.find(c => c.name === lc.name) || {};
+                    const charHTML = displayCharacters.length > 0 ? displayCharacters.map(lc => {
+                        const gc = applyManualBibleEditsToValue(window.globalCharacters?.find(c => c.id === lc.id || c.name === lc.name) || {}, manualEdits);
                         return `
                         <div class="group relative bg-gray-900/80 border border-gray-800 rounded-lg p-2 hover:border-purple-500 transition-all cursor-pointer overflow-hidden">
                             <div class="flex justify-between items-center relative z-10 bg-gray-900/80">
