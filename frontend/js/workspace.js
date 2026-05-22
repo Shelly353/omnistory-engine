@@ -194,6 +194,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnSelectionHook = document.getElementById('btn-selection-hook');
     const btnCancelHook = document.getElementById('btn-cancel-hook');
     const btnConfirmHook = document.getElementById('btn-confirm-hook');
+    const btnExportBook = document.getElementById('btn-export-book');
+    const btnFinalizeChapter = document.getElementById('btn-finalize-chapter');
+    const btnVolumePlan = document.getElementById('btn-volume-plan');
+    const btnRhythmCurve = document.getElementById('btn-rhythm-curve');
+    const btnSourceCitations = document.getElementById('btn-source-citations');
+    const btnVersionCompare = document.getElementById('btn-version-compare');
+    const btnBookAudit = document.getElementById('btn-book-audit');
+    const btnGoldenThree = document.getElementById('btn-golden-three');
     const btnWordBudget = document.getElementById('btn-word-budget');
     const btnBeatSheet = document.getElementById('btn-beat-sheet');
     const btnContinuityLedger = document.getElementById('btn-continuity-ledger');
@@ -739,7 +747,9 @@ document.addEventListener('DOMContentLoaded', () => {
 3. 救猫咪类型契合度：本事件必须承担当前类型的叙事功能，不能违背读者对该类型的核心期待。
 4. MBTI/人物性格一致性：性格不是标签；人物的说话方式、风险偏好、回避策略、冲突处理和关键选择必须能从性格、欲望、目标、动机、缺陷、恐惧或成长弧线中找到来源。
 5. 世界规则：力量、资源、制度、技能必须有代价、限制和反制，不允许无敌解法。
-6. 伏笔闭环：本章需要回应的伏笔必须处理；新伏笔要有后续回收方向。`
+6. 伏笔闭环：本章需要回应的伏笔必须处理；新伏笔要有后续回收方向。
+7. 资料来源：涉及历史、法律、医疗、行业流程或现实事实时，应优先引用本地资料库片段；资料不足要标注不确定，不能伪造来源。
+8. 定稿标准：章节必须通过验收闸门，且不能破坏分卷结构、节奏曲线、连续性账本和人物/反派弧光表。`
         ].filter(Boolean).join('\n\n');
     }
 
@@ -833,18 +843,24 @@ ${getBuiltInExpertBaseline()}
         const key = getLongformChapterKey();
         return [
             longformState.wordBudget ? `【20万字篇幅规划】\n${longformState.wordBudget}` : '',
+            longformState.volumePlan ? `【分卷/季结构】\n${longformState.volumePlan}` : '',
             longformState.beatSheet ? `【全书节拍表】\n${longformState.beatSheet}` : '',
+            longformState.rhythmCurve ? `【章节节奏曲线】\n${longformState.rhythmCurve}` : '',
             longformState.storyBlueprint ? `【好莱坞大片蓝图】\n${longformState.storyBlueprint}` : '',
+            longformState.goldenThree ? `【开篇黄金三章策略】\n${longformState.goldenThree}` : '',
             longformState.arcTracker ? `【全局人物/反派弧光表】\n${longformState.arcTracker}` : '',
             longformState.productionBoard ? `【章节生产看板】\n${longformState.productionBoard}` : '',
             longformState.stageMemory ? `【阶段记忆压缩】\n${longformState.stageMemory}` : '',
             longformState.characterStates ? `【人物当前状态】\n${longformState.characterStates}` : '',
             longformState.continuityLedger ? `【连续性账本】\n${longformState.continuityLedger}` : '',
+            longformState.bookAudit ? `【成书级一致性总审】\n${longformState.bookAudit}` : '',
             longformState.oppositionPlans?.[key] ? `【本事件反派/阻力升级】\n${longformState.oppositionPlans[key]}` : '',
             longformState.sceneCards?.[key] ? `【本章场景卡】\n${longformState.sceneCards[key]}` : '',
+            longformState.sourceCitations?.[key] ? `【本章资料来源标注】\n${longformState.sourceCitations[key]}` : '',
             longformState.eventGates?.[key] ? `【本事件质量闸门】\n${longformState.eventGates[key]}` : '',
             longformState.attractionPlans?.[key] ? `【本章吸引力设计】\n${longformState.attractionPlans[key]}` : '',
             longformState.acceptanceGates?.[key] ? `【本章强制验收状态】\n${longformState.acceptanceGates[key]}` : '',
+            longformState.finalizedChapters?.[key] ? `【本章定稿记录】\n${longformState.finalizedChapters[key].summary || '已标记定稿'}` : '',
             longformState.rewriteReports?.[key] ? `【最近一次改稿闭环】\n${longformState.rewriteReports[key]}` : ''
         ].filter(Boolean).join('\n\n') || '暂无长篇编辑状态。';
     }
@@ -855,15 +871,20 @@ ${getBuiltInExpertBaseline()}
     }
 
     async function runLongformEditorTask(taskType, extra = "") {
-        const globalTasks = ['memory', 'blueprint', 'budget', 'beats', 'board', 'arcs'];
+        const globalTasks = ['memory', 'blueprint', 'budget', 'beats', 'board', 'arcs', 'volume', 'rhythm', 'bookAudit', 'goldenThree'];
         if (!currentLocalContext.chapterId && !globalTasks.includes(taskType)) return alert("请先选择一个事件。");
         const taskPrompts = {
             budget: `你是长篇小说制片主任。请建立【20万字篇幅规划器】：总字数目标约20万字，建议卷数/幕数/章节数，每章目标字数，三幕或八序列的篇幅比例，关键转折所在章节，高潮与收束字数预算。必须输出可执行表格，并指出当前事件属于哪一段篇幅功能。`,
+            volume: `你是长篇分卷/季结构设计师。请建立【分卷/季结构管理】：每卷/季的主题、核心冲突、开始钩子、中段反转、卷末高潮、卷尾悬念、主角弧光阶段、反派阶段计划、伏笔种植与回收边界。要求能支撑约20万字长篇，不要把所有高潮挤在一卷。`,
             beats: `你是好莱坞节拍表设计师。请建立【全书节拍表】：开场钩子、主题陈述、诱因、犹豫、第一幕转折、B故事/关系线、中点、反派逼近、至暗点、灵魂黑夜、终局计划、高潮、结尾余波。每个节拍要绑定章节/事件、人物弧光、情绪功能和伏笔职责。`,
+            rhythm: `你是章节节奏曲线师。请为全书建立【章节间节奏曲线】：每章的紧张度、情绪强度、信息量、动作量、关系推进、悬念强度、疲劳风险，指出连续平淡/连续解释/连续打斗/连续情绪过载的问题，并给调节建议。`,
             blueprint: `你是好莱坞级商业叙事总监。请为全书建立或更新【大片蓝图】：一句话高概念、类型承诺、主题问题、主角外在目标/内在需求、反派或核心阻力、三幕式/八序列推进、重大转折点、情绪卖点、视觉/场面卖点、终局画面、续写禁区。要求能指导后续所有事件，不写空话。`,
+            goldenThree: `你是商业小说开篇诊断师。请建立【开篇黄金三章系统】：前三章必须完成的读者钩子、主角吸引力、世界入口、核心危机、反派/阻力露面、信息差、章末钩子、不能写慢的部分。逐章输出问题和强化方案。`,
             arcs: `你是全局人物弧光统筹。请建立【全局人物/反派弧光表】：主角、关键配角、反派/核心阻力的初始信念、欲望、恐惧、错误策略、关键转折章节、关系变化、最低点、最终选择和结局状态。要求每个弧光都能被具体事件触发。`,
             board: `你是长篇生产看板管理员。请根据当前章节列表和已有正文状态建立【章节生产看板】：每章状态标记为待推演/已大纲/已场景卡/已正文/审查未通过/已改稿/已定稿，并列出下一步生产队列、缺失人物、缺失伏笔和高风险章节。`,
             continuity: `你是连续性账本管理员。请更新【连续性账本】：时间、地点、人物状态/伤势/心理变化、道具、秘密、知情范围、关系变化、能力消耗、未解决矛盾、不能遗忘的细节。发现前后冲突要报警，并给最小修正方案。`,
+            citations: `你是资料来源标注员。请根据本地资料片段和当前正文/大纲，为专业细节、历史细节、制度流程、术语、事实性描述建立【资料来源标注】。输出：正文/大纲中的说法、可引用的资料片段、来源文件名或片段标题、可信度、仍需补资料的问题。资料不足时必须明确“无资料支撑”，不要编造来源。`,
+            bookAudit: `你是成书级一致性总审。请从整书角度审查：人物是否漂移、事件是否断裂、伏笔是否遗忘、世界规则是否冲突、节拍是否偏移、反派是否变弱、章节节奏是否疲劳、开篇三章是否抓人、结尾是否兑现类型承诺。输出严重问题、影响章节、最小修复方案和优先级。`,
             acceptance: `你是强制验收闸门。请判断当前正文是否允许标记为定稿。必须检查：是否完成本章大纲、是否服从场景卡、是否符合篇幅/节拍功能、连续性是否冲突、人物弧光是否推进或保持合理、反派/阻力是否足够聪明、伏笔是否处理、正文是否有中/高风险。输出：通过/不通过；若不通过，列出必须整改项。`,
             opposition: `你是【反派与阻力升级设计器】。请为当前事件设计对抗：谁/什么在阻止主角、对方目标与计划、压迫如何升级、主角每次选择的代价、对方下一步反制、主角赢了什么又失去什么、如何避免反派降智。输出可直接写进大纲的阻力链。`,
             scene: `你是【场景卡导演】。请把当前大纲拆成 3-7 个可写场景卡。每张场景卡必须包含：场景目标、登场人物、人物策略、冲突/阻力、情绪起点与终点、信息释放、反转/升级点、视觉或感官记忆点、结尾钩子、不可写成流水账的提醒。`,
@@ -885,16 +906,26 @@ ${getBuiltInExpertBaseline()}
             const key = getLongformChapterKey();
             if (taskType === 'budget') {
                 longformState.wordBudget = reply;
+            } else if (taskType === 'volume') {
+                longformState.volumePlan = reply;
             } else if (taskType === 'beats') {
                 longformState.beatSheet = reply;
+            } else if (taskType === 'rhythm') {
+                longformState.rhythmCurve = reply;
             } else if (taskType === 'blueprint') {
                 longformState.storyBlueprint = reply;
+            } else if (taskType === 'goldenThree') {
+                longformState.goldenThree = reply;
             } else if (taskType === 'arcs') {
                 longformState.arcTracker = reply;
             } else if (taskType === 'board') {
                 longformState.productionBoard = reply;
             } else if (taskType === 'continuity') {
                 longformState.continuityLedger = reply;
+            } else if (taskType === 'citations') {
+                longformState.sourceCitations = { ...(longformState.sourceCitations || {}), [key]: reply };
+            } else if (taskType === 'bookAudit') {
+                longformState.bookAudit = reply;
             } else if (taskType === 'acceptance') {
                 longformState.acceptanceGates = { ...(longformState.acceptanceGates || {}), [key]: reply };
             } else if (taskType === 'opposition') {
@@ -1014,6 +1045,115 @@ ${getUnifiedQualityGuardrails()}
             renderDeviationItems(["改稿闭环请求失败，请稍后重试。"]);
             return "";
         }
+    }
+
+    function sanitizeFilename(name = "omnistory") {
+        return String(name || "omnistory").replace(/[\\/:*?"<>|]/g, "_").slice(0, 80);
+    }
+
+    function downloadTextFile(content, filename, mime = "text/plain;charset=utf-8") {
+        const blob = new Blob([content], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    async function fetchBookExport(format = "md") {
+        const res = await fetch(`/api/projects/export/${PROJECT_ID}?format=${encodeURIComponent(format)}`);
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || "导出失败");
+        return data;
+    }
+
+    async function exportWholeBook(format = "md") {
+        try {
+            const data = await fetchBookExport(format);
+            const ext = format === "md" ? "md" : "txt";
+            downloadTextFile(data.content || "", `${sanitizeFilename(data.title)}.${ext}`, format === "md" ? "text/markdown;charset=utf-8" : "text/plain;charset=utf-8");
+            longformState.lastExport = {
+                at: new Date().toISOString(),
+                format,
+                title: data.title,
+                characters: (data.content || "").length
+            };
+            saveLongformState();
+            renderDeviationItems([`整书已导出：${data.title}，格式 ${ext}，约 ${(data.content || "").length} 字符。`]);
+        } catch (e) {
+            renderDeviationItems([`整书导出失败：${e.message}`]);
+        }
+    }
+
+    async function runBookLevelTask(taskType, extra = "") {
+        let bookText = "";
+        try {
+            const data = await fetchBookExport("md");
+            bookText = data.content || "";
+        } catch (e) {
+            bookText = workspaceChapters.map(ch => `事件 ${ch.chapter_number}《${ch.title}》\n${ch.content || ''}`).join('\n\n');
+        }
+        return runLongformEditorTask(taskType, `\n\n【整书当前文本/大纲摘录】\n${limitText(bookText, 9000)}\n${extra}`);
+    }
+
+    async function finalizeCurrentChapter() {
+        if (!currentLocalContext.chapterId) return alert("请先选择一个事件。");
+        const reviewText = await runUnifiedContentReview("finalize");
+        const acceptanceText = await runLongformEditorTask('acceptance', `\n\n这是定稿前强制验收。请结合以下审查报告判断：\n${reviewText || '暂无审查报告'}`);
+        if (/不通过|必须整改|未通过|高风险|中风险/.test(`${reviewText}\n${acceptanceText}`)) {
+            renderDeviationItems([`${acceptanceText || reviewText}\n\n未标记定稿：请先按整改项修正。`]);
+            return;
+        }
+        const key = getLongformChapterKey();
+        longformState.finalizedChapters = {
+            ...(longformState.finalizedChapters || {}),
+            [key]: {
+                chapterId: currentLocalContext.chapterId,
+                chapterNumber: currentLocalContext.chapterNumber,
+                title: currentLocalContext.title,
+                wordCount: (editorTextarea?.value || '').length,
+                finalizedAt: new Date().toISOString(),
+                summary: `事件 ${currentLocalContext.chapterNumber}《${currentLocalContext.title}》已通过验收并标记定稿。`
+            }
+        };
+        saveLongformState();
+        await runLongformEditorTask('board', '\n\n这是章节定稿后的生产看板更新。');
+        renderDeviationItems([`已标记定稿：事件 ${currentLocalContext.chapterNumber}《${currentLocalContext.title}》。`]);
+    }
+
+    async function compareChapterVersion() {
+        if (!currentLocalContext.chapterId || !editorTextarea) return alert("请先选择一个事件。");
+        const key = getLongformChapterKey();
+        const currentText = editorTextarea.value || "";
+        const versions = { ...(longformState.versionSnapshots || {}) };
+        const previous = versions[key]?.text || "";
+        versions[key] = {
+            text: currentText,
+            savedAt: new Date().toISOString(),
+            chapterNumber: currentLocalContext.chapterNumber,
+            title: currentLocalContext.title
+        };
+        longformState.versionSnapshots = versions;
+        saveLongformState();
+        if (!previous) {
+            renderDeviationItems(["已建立本章版本基线。下次点击“版本对比”会和这次快照比较。"]);
+            return;
+        }
+        const prompt = `你是小说改稿版本对比编辑。请比较上一版和当前版，输出：核心剧情变化、人物行为变化、设定/伏笔变化、文风节奏变化、是否偏离原意、是否越改越好、需要回滚或保留的段落。
+
+【上一版】\n${limitText(previous, 4500)}
+
+【当前版】\n${limitText(currentText, 4500)}`;
+        const res = await fetch('/api/chat/deduce', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildChatPayloadWithLocalSources([{ role: 'user', content: prompt }], 1, prompt))
+        });
+        const data = await res.json();
+        renderDeviationItems([data.success ? (stripFencedBlocks(data.reply) || data.reply) : `版本对比失败：${data.error || '未知错误'}`]);
     }
 
     function renderHookItem(hook, mode) {
@@ -2693,6 +2833,14 @@ if (data.success) {
     }
     if (btnSaveChapter) btnSaveChapter.onclick = saveChapterContent;
     if (btnReviewCurrentDraft) btnReviewCurrentDraft.onclick = () => runUnifiedContentReview("manual");
+    if (btnExportBook) btnExportBook.onclick = () => exportWholeBook("md");
+    if (btnFinalizeChapter) btnFinalizeChapter.onclick = () => finalizeCurrentChapter();
+    if (btnVolumePlan) btnVolumePlan.onclick = () => runBookLevelTask('volume');
+    if (btnRhythmCurve) btnRhythmCurve.onclick = () => runBookLevelTask('rhythm');
+    if (btnSourceCitations) btnSourceCitations.onclick = () => runLongformEditorTask('citations', `\n\n【本地资料库相关片段】\n${getRelevantLocalSourceSnippets([currentLocalContext.title, currentLocalContext.synopsis, editorTextarea?.value || ''].join('\n'), 10) || '暂无可匹配资料片段。'}\n\n【当前正文】\n${limitText(editorTextarea?.value || '', 5000)}`);
+    if (btnVersionCompare) btnVersionCompare.onclick = () => compareChapterVersion();
+    if (btnBookAudit) btnBookAudit.onclick = () => runBookLevelTask('bookAudit');
+    if (btnGoldenThree) btnGoldenThree.onclick = () => runBookLevelTask('goldenThree');
     if (btnWordBudget) btnWordBudget.onclick = () => runLongformEditorTask('budget');
     if (btnBeatSheet) btnBeatSheet.onclick = () => runLongformEditorTask('beats');
     if (btnContinuityLedger) btnContinuityLedger.onclick = () => runLongformEditorTask('continuity');
@@ -2795,6 +2943,7 @@ if (data.success) {
                     saveChapterContent(); 
                     runLongformEditorTask('state', '\n\n这是正文生成后的自动人物状态更新。');
                     runLongformEditorTask('continuity', '\n\n这是正文生成后的连续性账本更新。');
+                    runLongformEditorTask('citations', `\n\n这是正文生成后的资料来源标注。\n【本地资料库相关片段】\n${getRelevantLocalSourceSnippets(data.text || '', 10) || '暂无可匹配资料片段。'}`);
                     runLongformEditorTask('board', '\n\n这是正文生成后的章节生产看板更新。');
                     const reviewText = await runUnifiedContentReview("after-ai-write");
                     const acceptanceText = await runLongformEditorTask('acceptance', `\n\n这是正文生成后的强制验收。请结合以下审查报告判断是否允许定稿：\n${reviewText || '暂无审查报告'}`);
