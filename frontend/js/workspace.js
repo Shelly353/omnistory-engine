@@ -632,25 +632,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function setGenesisChatLocked(locked, label = '') {
         genesisRequestInFlight = locked;
-        if (chatInput) chatInput.disabled = locked || genesisPanelSyncBlocked;
+        if (chatInput) chatInput.disabled = locked;
         if (btnSend) {
             btnSend.disabled = locked || genesisPanelSyncBlocked;
             btnSend.dataset.originalText = btnSend.dataset.originalText || btnSend.innerHTML;
             if (locked && label) btnSend.innerHTML = label;
-            if (!locked && !genesisPanelSyncBlocked) btnSend.innerHTML = btnSend.dataset.originalText;
+            if (!locked) {
+                btnSend.innerHTML = genesisPanelSyncBlocked
+                    ? `<i data-lucide="shield-alert" class="w-4 h-4 mr-1.5"></i>等待面板同步`
+                    : btnSend.dataset.originalText;
+            }
         }
         if (window.lucide) lucide.createIcons();
     }
 
     function setGenesisSyncBlocked(blocked, message = '') {
         genesisPanelSyncBlocked = blocked;
-        if (chatInput) chatInput.disabled = blocked || genesisRequestInFlight;
+        if (chatInput) chatInput.disabled = genesisRequestInFlight;
         if (btnSend) {
             btnSend.disabled = blocked || genesisRequestInFlight;
             btnSend.dataset.originalText = btnSend.dataset.originalText || btnSend.innerHTML;
-            btnSend.innerHTML = blocked
-                ? `<i data-lucide="shield-alert" class="w-4 h-4 mr-1.5"></i>等待面板同步`
-                : btnSend.dataset.originalText;
+            if (!genesisRequestInFlight) {
+                btnSend.innerHTML = blocked
+                    ? `<i data-lucide="shield-alert" class="w-4 h-4 mr-1.5"></i>等待面板同步`
+                    : btnSend.dataset.originalText;
+            }
         }
         if (blocked && message) alert(message);
         if (window.lucide) lucide.createIcons();
@@ -735,6 +741,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        setGenesisSyncBlocked(true);
         extractAndSaveBibleFromConversation(conversationForExtraction, `上一轮 AI 回复没有提供合法 JSON。请根据当前面板数据、全量用户修正记录、最近对话和上一轮 AI 回复，提取并合并最新共识，输出完整世界圣经 JSON。
 要求：
 1. 必须记录用户在对话中否定、修正或新增的人物/事件/规则。
@@ -742,7 +749,7 @@ document.addEventListener('DOMContentLoaded', () => {
 3. 如果当前面板中的人物羁绊或细密时间轴为空，必须从全量用户修正记录和全量沙盒对话尾迹中重建，不要留空。
 4. 只输出 JSON，不要输出正文。`, { recoveryMode: true }).catch(error => {
             console.error('后台面板补同步失败:', error);
-            setGenesisSyncBlocked(true, `后台面板同步失败：${error.message || '未知错误'}\n可以先阅读本轮回复；继续对话前建议点“从对话刷新面板”修复。`);
+            setGenesisSyncBlocked(true, `上一轮设定没有确认写入实时面板：${error.message || '未知错误'}\n你可以先看 AI 的问题，也可以在输入框里草拟回答，但暂时不能发送。建议优先用上一条用户消息旁的撤回按钮重新回答；如果连续失败，再点“从对话刷新面板”兜底修复。`);
         });
     }
 
@@ -2280,7 +2287,7 @@ ${getRulesTextForPrompt()}`;
     if (btnSend) {
         btnSend.onclick = () => {
             if (genesisRequestInFlight) return;
-            if (genesisPanelSyncBlocked) return alert('上一轮设定还没有确认写入实时面板。请先点击“从对话刷新面板”，确认保存后再继续。');
+            if (genesisPanelSyncBlocked) return alert('上一轮设定还没有确认写入实时面板。你可以继续编辑输入框，但暂时不能发送；如果同步失败，请优先撤回上一条回答重新回答，连续失败时再使用“从对话刷新面板”。');
             const text = chatInput.value.trim();
             if (!text) return;
             chatInput.value = '';
