@@ -102,21 +102,91 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    function mergeBibleWithStableRelations(previous, next) {
+    function normalizeStableKey(value = '') {
+        return String(value || '').trim().replace(/\s+/g, '').toLowerCase();
+    }
+
+    function mergeObjectMissingFields(previousItem = {}, nextItem = {}) {
+        const merged = { ...previousItem, ...nextItem };
+        Object.entries(previousItem || {}).forEach(([key, value]) => {
+            const nextValue = nextItem ? nextItem[key] : undefined;
+            if ((nextValue === '' || nextValue === null || nextValue === undefined) && value !== '' && value !== null && value !== undefined) {
+                merged[key] = value;
+            }
+        });
+        return merged;
+    }
+
+    function mergeCharactersPreservingCards(previousCharacters = [], nextCharacters = []) {
+        const previous = Array.isArray(previousCharacters) ? previousCharacters.filter(c => c && c.name) : [];
+        const next = Array.isArray(nextCharacters) ? nextCharacters.filter(c => c && c.name) : [];
+        if (next.length === 0 && previous.length > 0) return previous;
+
+        const previousByName = new Map(previous.map(char => [normalizeStableKey(char.name), char]));
+        const seen = new Set();
+        const merged = next.map(char => {
+            const key = normalizeStableKey(char.name);
+            seen.add(key);
+            return mergeObjectMissingFields(previousByName.get(key), char);
+        });
+
+        previous.forEach(char => {
+            const key = normalizeStableKey(char.name);
+            if (!seen.has(key)) merged.push(char);
+        });
+        return merged;
+    }
+
+    function mergeStableArray(previousItems = [], nextItems = [], getKey) {
+        const previous = Array.isArray(previousItems) ? previousItems.filter(Boolean) : [];
+        const next = Array.isArray(nextItems) ? nextItems.filter(Boolean) : [];
+        if (next.length === 0 && previous.length > 0) return previous;
+
+        const previousByKey = new Map(previous.map(item => [getKey(item), item]).filter(([key]) => key));
+        const seen = new Set();
+        const merged = next.map(item => {
+            const key = getKey(item);
+            if (key) seen.add(key);
+            return mergeObjectMissingFields(previousByKey.get(key), item);
+        });
+
+        previous.forEach(item => {
+            const key = getKey(item);
+            if (key && !seen.has(key)) merged.push(item);
+        });
+        return merged;
+    }
+
+    function mergeBibleWithStableLists(previous, next) {
         if (!previous || !next || typeof next !== 'object') return next;
         const merged = { ...next };
-        const previousRelations = Array.isArray(previous.relations) ? previous.relations.filter(Boolean) : [];
-        const nextRelations = Array.isArray(next.relations) ? next.relations.filter(Boolean) : null;
-        if ((!nextRelations || nextRelations.length === 0) && previousRelations.length > 0) {
-            merged.relations = previousRelations;
-        }
+        Object.entries(previous || {}).forEach(([key, value]) => {
+            const nextValue = merged[key];
+            if ((nextValue === '' || nextValue === null || nextValue === undefined) && value !== '' && value !== null && value !== undefined) {
+                merged[key] = value;
+            }
+        });
+        merged.characters = mergeCharactersPreservingCards(previous.characters, next.characters);
+        merged.relations = mergeStableArray(previous.relations, next.relations, rel => [
+            normalizeStableKey(rel.from_name || rel.from || rel.source),
+            normalizeStableKey(rel.to_name || rel.to || rel.target),
+            normalizeStableKey(rel.label || rel.relation)
+        ].join('|'));
+        merged.timeline = mergeStableArray(previous.timeline, next.timeline, item => [
+            normalizeStableKey(item.time_label),
+            normalizeStableKey(item.description)
+        ].join('|'));
+        merged.chapters = mergeStableArray(previous.chapters, next.chapters, chapter => [
+            String(chapter.chapter_number || '').trim(),
+            normalizeStableKey(chapter.title)
+        ].join('|'));
         return merged;
     }
 
     function saveLatestBible(bible, options = {}) {
         if (!bible) return null;
         const previous = options.preserveStableLists === false ? null : loadLatestBible();
-        const bibleToSave = mergeBibleWithStableRelations(previous, bible);
+        const bibleToSave = mergeBibleWithStableLists(previous, bible);
         localStorage.setItem(LATEST_BIBLE_KEY, JSON.stringify(bibleToSave));
         return bibleToSave;
     }
@@ -127,6 +197,18 @@ document.addEventListener('DOMContentLoaded', () => {
             return savedBible ? JSON.parse(savedBible) : null;
         } catch (e) {
             console.warn('最新面板数据读取失败:', e);
+            return null;
+        }
+    }
+
+    async function fetchBibleSnapshotFromDatabase() {
+        try {
+            const res = await fetch(`/api/crystallize/snapshot/${PROJECT_ID}`);
+            if (!res.ok) return null;
+            const data = await res.json();
+            return data.success && data.bible ? data.bible : null;
+        } catch (e) {
+            console.warn('数据库圣经快照读取失败:', e);
             return null;
         }
     }
@@ -1895,7 +1977,13 @@ ${getRulesTextForPrompt()}`;
 
             try {
                 const payload = buildChatPayload(genesisConversation, 16);
-                const currentBible = compactBibleForPrompt(getCurrentBibleSnapshot());
+                const databaseBible = await fetchBibleSnapshotFromDatabase();
+                const currentBibleRaw = getCurrentBibleSnapshot();
+                const stableBible = databaseBible
+                    ? mergeBibleWithStableLists(databaseBible, currentBibleRaw || {})
+                    : currentBibleRaw;
+                if (stableBible) saveLatestBible(stableBible);
+                const currentBible = compactBibleForPrompt(stableBible);
                 const extractionConversation = [
                     currentBible ? { role: 'system', content: `【当前面板数据】\n${JSON.stringify(currentBible)}` } : null,
                     payload.memorySummary ? { role: 'system', content: `【较早对话摘要】\n${payload.memorySummary}` } : null,
@@ -1907,7 +1995,8 @@ ${getRulesTextForPrompt()}`;
 3. 规则/世界观/专家资料权限最高；不符合规则、专业流程或人物逻辑的事件必须在 rules 中记录警报或整改约束。
 4. 人物必须尽量绑定到 timeline/chapters 的具体事件；参与事件少于三个的人物要在 description 或 character_arc 中提示后续复用价值，避免一次性人物。
 5. 如果对话出现律师、医生、警察、金融、政治、文化、历史、古代、朝代、科举、官职、礼法、战争、技能等专业关键词，请把对应专家资料合并进 rules，而不是单独创建新系统。
-6. 历史专家为内置后台能力：遇到历史剧/古代背景时，必须检查朝代、官职、称谓、礼仪、服饰器物、交通通讯、军队调动、审案/科举/婚嫁/朝会流程，以及现代价值观误套问题。` }
+6. 历史专家为内置后台能力：遇到历史剧/古代背景时，必须检查朝代、官职、称谓、礼仪、服饰器物、交通通讯、军队调动、审案/科举/婚嫁/朝会流程，以及现代价值观误套问题。
+7. 当前面板数据中的 characters 详细字段、relations 人物羁绊、timeline 细密时间轴是稳定资产；除非最近对话明确要求删除某一项，否则必须完整保留，不允许用摘要版、空数组或字段缺失版覆盖。` }
                 ].filter(Boolean);
 
                 const res = await fetch('/api/crystallize/preview', {
