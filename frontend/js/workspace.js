@@ -1008,8 +1008,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function isSandboxFocusLine(line = '') {
         const text = String(line || '').trim();
         if (!text) return false;
-        if (/【(规则|风险|降智|警报|自检|下一步|待确认|问题|选择|需要你|请你|你问|回答|推进)/.test(text)) return true;
-        return /(规则|风险|降智|警报|冲突|自检|下一步|待确认|需要你|请你|你问|问题|选择|回复|回答|确认|推进|补充|决定|是否|哪一种|哪个|如何处理|要不要)/.test(text);
+        if (/【(当前任务|监督提醒|规则|风险|降智|警报|自检|下一步|待确认|问题|选择|需要你|请你|你问|回答|推进)/.test(text)) return true;
+        return /(当前任务|本轮只处理|本轮目标|你需要决定|不讨论|规则|风险|降智|警报|冲突|自检|下一步|待确认|需要你|请你|你问|问题|选择|回复|回答|确认|推进|补充|决定|是否|哪一种|哪个|如何处理|要不要)/.test(text);
     }
 
     function splitSandboxAssistantReply(text = '') {
@@ -1023,7 +1023,8 @@ document.addEventListener('DOMContentLoaded', () => {
         lines.forEach(line => {
             const sectionMatch = line.match(/^【(.+?)】/);
             if (sectionMatch) currentSection = sectionMatch[1];
-            const isFocusSection = /(规则|风险|警报|降智|自检|下一步|待确认|问题|选择|需要你)/.test(currentSection);
+            const isExplicitDetails = /可展开|推演依据|完整推演|详细依据|分析依据/.test(currentSection);
+            const isFocusSection = !isExplicitDetails && /(当前任务|监督提醒|规则|风险|警报|降智|自检|下一步|待确认|问题|选择|需要你)/.test(currentSection);
             if (isSandboxFocusLine(line) || isFocusSection) {
                 focus.push(line);
             } else {
@@ -1047,6 +1048,36 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    function splitSopAssistantReply(text = '') {
+        const cleanText = stripFencedBlocks(text).trim();
+        const lines = cleanText.split('\n').map(line => line.trim()).filter(Boolean);
+        if (lines.length === 0) return { focus: '', details: '' };
+        const focus = [];
+        const details = [];
+        let currentSection = '';
+        lines.forEach(line => {
+            const sectionMatch = line.match(/^【(.+?)】/);
+            if (sectionMatch) currentSection = sectionMatch[1];
+            const isExplicitDetails = /可展开|完整|依据|分析|蓝图|审查细则/.test(currentSection);
+            const isFocusSection = !isExplicitDetails && /(当前任务|监督提醒|下一步|选择|需要你|伏笔|信息差|风险|警报)/.test(currentSection);
+            if (isFocusSection || isSandboxFocusLine(line)) {
+                focus.push(line);
+            } else {
+                details.push(line);
+            }
+        });
+        if (focus.length === 0) {
+            const tailQuestionLines = lines.filter(line => /[？?]$|请|需要你|是否|哪|如何|要不要|选择|确认/.test(line));
+            focus.push(...(tailQuestionLines.length ? tailQuestionLines : lines.slice(-5)));
+            const focusSet = new Set(focus);
+            return {
+                focus: focus.join('\n'),
+                details: lines.filter(line => !focusSet.has(line)).join('\n')
+            };
+        }
+        return { focus: focus.join('\n'), details: details.join('\n') };
+    }
+
     window.toggleSandboxMessageDetails = (button) => {
         const bubble = button?.closest('[data-sandbox-assistant-message]');
         const detail = bubble?.querySelector('[data-sandbox-message-details]');
@@ -1055,6 +1086,17 @@ document.addEventListener('DOMContentLoaded', () => {
         button.innerHTML = hidden
             ? `<i data-lucide="chevron-down" class="w-3.5 h-3.5 mr-1"></i>展开完整推演`
             : `<i data-lucide="chevron-up" class="w-3.5 h-3.5 mr-1"></i>收起完整推演`;
+        if (window.lucide) lucide.createIcons();
+    };
+
+    window.toggleSopMessageDetails = (button) => {
+        const bubble = button?.closest('[data-sop-assistant-message]');
+        const detail = bubble?.querySelector('[data-sop-message-details]');
+        if (!detail) return;
+        const hidden = detail.classList.toggle('hidden');
+        button.innerHTML = hidden
+            ? `<i data-lucide="chevron-down" class="w-3.5 h-3.5 mr-1"></i>展开更多信息`
+            : `<i data-lucide="chevron-up" class="w-3.5 h-3.5 mr-1"></i>收起更多信息`;
         if (window.lucide) lucide.createIcons();
     };
 
@@ -1256,7 +1298,7 @@ document.addEventListener('DOMContentLoaded', () => {
             yellow: { label: '黄色', box: 'border-yellow-800/60 text-yellow-100', badge: 'bg-yellow-900/40 text-yellow-200 border-yellow-700/60' },
             red: { label: '红色', box: 'border-red-800/70 text-red-100', badge: 'bg-red-900/50 text-red-200 border-red-700/70' }
         }[level] || {};
-        sandboxAlertCenter.className = `absolute bottom-4 right-4 z-[65] w-[360px] max-w-[calc(100vw-2rem)] bg-gray-950/95 border rounded-xl shadow-2xl p-3 text-xs ${config.box}`;
+        sandboxAlertCenter.className = `mx-6 mt-4 shrink-0 bg-gray-950/95 border rounded-xl shadow-lg p-3 text-xs ${config.box}`;
         sandboxAlertLevel.className = `text-[10px] px-2 py-0.5 rounded border ${config.badge}`;
         sandboxAlertLevel.textContent = config.label || '绿色';
         sandboxAlertSummary.textContent = summary || '当前未发现明显风险。';
@@ -3046,7 +3088,7 @@ ${getRulesTextForPrompt()}`;
             if (!text) return;
             chatInput.value = '';
             const userMsgWithContext = text
-                + `\n\n(系统附加：当前沙盒模块是【${getActiveSandboxModuleLabel()}】，当前权限模式是【${getCurrentControlMode()}】。流程骨架、事件、人物、规则、上帝视角模块互相影响；规则/世界观/专家资料拥有最高权限。右侧数据面板已由用户实时更新，优先级高于旧聊天记录和你之前提出的方案。沙盒主流程必须遵守：类型 -> 起终点 -> 主角/最终反派 -> 双弧线 -> 好莱坞六节点 -> 桥接事件 -> 沙盒验收；沙盒只做故事骨架，不做章节细化或正文。若旧设定与面板冲突，必须废弃旧设定，以面板为准继续推演。若当前输入新增人物，请将其绑定到相关事件，并提醒参与少于三个事件的人物需要后续复用或合并。人物相关专家设定必须沉淀到人物卡的【人物规则】。未揭露/部分揭露的上帝视角秘密只用于后台校验，沙盒推理只能基于观众视角推进；已揭露后才可公开调用上帝视角。沙盒回复禁止写正文式情节段落；请用【缺口诊断】【事件连接】【人物/关系影响】【规则或降智风险】【下一步选择】输出，完整保留关键因果、人物动机、关系变化、不可逆后果和待确认项。)`
+                + `\n\n(系统附加：当前沙盒模块是【${getActiveSandboxModuleLabel()}】，当前权限模式是【${getCurrentControlMode()}】。流程骨架、事件、人物、规则、上帝视角模块互相影响；规则/世界观/专家资料拥有最高权限。右侧数据面板已由用户实时更新，优先级高于旧聊天记录和你之前提出的方案。沙盒主流程必须遵守：类型 -> 起终点 -> 主角/最终反派 -> 双弧线 -> 好莱坞六节点 -> 桥接事件 -> 沙盒验收；沙盒只做故事骨架，不做章节细化或正文。若旧设定与面板冲突，必须废弃旧设定，以面板为准继续推演。若当前输入新增人物，请将其绑定到相关事件，并提醒参与少于三个事件的人物需要后续复用或合并。人物相关专家设定必须沉淀到人物卡的【人物规则】。未揭露/部分揭露的上帝视角秘密只用于后台校验，沙盒推理只能基于观众视角推进；已揭露后才可公开调用上帝视角。沙盒回复禁止写正文式情节段落；第一段必须是【当前任务】，写清阶段、本轮只处理什么、你需要我决定什么。随后用【缺口诊断】【事件连接】【人物/关系影响】【规则或降智风险】【下一步选择】输出；长分析放进【可展开：推演依据】，完整保留关键因果、人物动机、关系变化、不可逆后果和待确认项。)`
                 + getExpertKeywordHint(text);
             const newIndex = genesisConversation.length;
             genesisConversation.push({ role: 'user', content: userMsgWithContext });
@@ -3690,9 +3732,27 @@ if (data.success) {
         const msgDiv = document.createElement('div');
         msgDiv.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
         const bubbleColor = role === 'user' ? 'bg-purple-600 text-white' : 'bg-gray-800 border border-gray-700 text-gray-200';
-        msgDiv.innerHTML = `<div class="max-w-[85%] flex flex-col ${role === 'user' ? 'items-end' : 'items-start'}"><div class="${bubbleColor} p-3 rounded-xl shadow text-xs leading-relaxed whitespace-pre-wrap">${text}</div></div>`;
+        let contentHtml = escapeHtml(text);
+        let assistantAttrs = '';
+        if (role === 'assistant') {
+            const parts = splitSopAssistantReply(text);
+            const hasDetails = parts.details && parts.details.trim();
+            assistantAttrs = 'data-sop-assistant-message="true"';
+            contentHtml = `
+                <div class="text-[10px] uppercase tracking-wide text-purple-300/80 font-bold mb-2">当前任务</div>
+                <div class="bg-gray-950/60 border border-purple-800/50 rounded-lg p-2.5 text-purple-50">${escapeHtml(parts.focus || text)}</div>
+                ${hasDetails ? `
+                    <button type="button" onclick="toggleSopMessageDetails(this)" class="mt-2 inline-flex items-center text-[11px] text-gray-300 hover:text-white bg-gray-900 border border-gray-700 hover:border-purple-600 rounded-lg px-2.5 py-1.5">
+                        <i data-lucide="chevron-down" class="w-3.5 h-3.5 mr-1"></i>展开更多信息
+                    </button>
+                    <div data-sop-message-details class="hidden mt-2 border-t border-gray-700 pt-2 text-gray-300">${escapeHtml(parts.details)}</div>
+                ` : ''}
+            `;
+        }
+        msgDiv.innerHTML = `<div class="max-w-[85%] flex flex-col ${role === 'user' ? 'items-end' : 'items-start'}"><div ${assistantAttrs} class="${bubbleColor} p-3 rounded-xl shadow text-xs leading-relaxed whitespace-pre-wrap">${contentHtml}</div></div>`;
         chapHistoryDiv.appendChild(msgDiv);
         chapHistoryDiv.scrollTop = chapHistoryDiv.scrollHeight;
+        if (window.lucide) lucide.createIcons();
     }
 
     window.loadChapterContext = async function loadChapterContext(chapterId, chapterNumber, title) {
@@ -4918,6 +4978,7 @@ if (data.success) {
 【下一事件过渡锚点】：${eventContext.endInfo}
 
 请按以下逻辑交互，务必耐心：
+0. 每次回复第一段必须是【当前任务】，并包含“当前事件”“本轮目标”“不讨论”“你需要决定”。这四项要简短明确，让作者一眼知道现在该做什么。
 1. 第一步必须先复述你理解的当前事件，并指出当前事件内部缺失的切入点、冲突、人物选择或不可逆后果。
 2. 陪作者讨论当前事件内部的行动、阻力、人物选择、代价、转折和信息释放；不要展开讨论下一事件的具体内容。
 3. 每次提出事件细节，都要说明：行动人物、行为来源、冲突对象、不可逆后果、如何让当前事件结尾自然过渡到下一事件。
@@ -4930,7 +4991,20 @@ if (data.success) {
 10. 当作者说“推演差不多了”或“开始总结”时，先确认这段内容分成几章，再生成每章标题与详细摘要；每章必须列出救猫咪类型功能、人物行为来源、对抗/代价、可种植伏笔/需回收伏笔。
 11. 下一事件只作为结尾衔接目标，不能把 SOP 讨论变成两个事件的联合推演。
 12. 只能使用下方【可调用人物卡】中的角色来推导行为；不要查阅、调用或主动引入无关人物，除非作者明确要求新增角色。
-13. 每次回复最后必须给作者 2-4 个可直接选择或改写的输入方向，例如“选 A/B/C”“补充某角色动机”“指定一个必须发生的事件”。禁止只说“你觉得呢”。`;
+13. 每次回复最后必须给作者 2-4 个可直接选择或改写的输入方向，例如“选 A/B/C”“补充某角色动机”“指定一个必须发生的事件”。禁止只说“你觉得呢”。
+14. 可见回复固定使用：
+【当前任务】
+- 当前事件：
+- 本轮目标：
+- 不讨论：
+- 你需要决定：
+【本章推进建议】
+【人物行为依据】
+【伏笔/信息差】
+【监督提醒】
+【下一步选择】
+【可展开：完整推演依据】
+其中【当前任务】和【下一步选择】必须默认可读；长分析、蓝图校验、专家审查细节放入【可展开：完整推演依据】。`;
 
                 // 3. 把私货、工作流、防 OOC 指令、伏笔全塞进最后一句话里发给 AI！
                 let lastUserMsg = payloadConvo[payloadConvo.length - 1];
