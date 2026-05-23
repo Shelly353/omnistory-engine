@@ -868,29 +868,58 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function isSandboxSignalLine(line = '') {
+    function isSandboxFocusLine(line = '') {
         const text = String(line || '').trim();
         if (!text) return false;
-        if (/^([\-*•]|\d+[.、]|【.+】)/.test(text)) return true;
-        return /(缺口|事件|触发|行动人物|人物|动机|关系|羁绊|冲突|阻力|代价|后果|规则|风险|自检|选择|下一步|待确认|类型功能|行为来源|推向终局|伏笔|回收|修正)/.test(text);
+        if (/【(规则|风险|降智|警报|自检|下一步|待确认|问题|选择|需要你|请你|你问|回答|推进)/.test(text)) return true;
+        return /(规则|风险|降智|警报|冲突|自检|下一步|待确认|需要你|请你|你问|问题|选择|回复|回答|确认|推进|补充|决定|是否|哪一种|哪个|如何处理|要不要)/.test(text);
     }
 
-    function looksLikeDraftProseLine(line = '') {
-        const text = String(line || '').trim();
-        if (isSandboxSignalLine(text)) return false;
-        const hasDialogue = /[“”「」]/.test(text);
-        const hasSceneBeat = /(望着|看着|走进|推开|沉默|低声|夜色|灯光|风声|雨水|血|笑了|皱眉|心里|眼神)/.test(text);
-        return text.length > 90 && (hasDialogue || hasSceneBeat || /[，。；：、]/.test(text));
+    function splitSandboxAssistantReply(text = '') {
+        const cleanText = stripBibleJsonBlocks(text).trim();
+        const lines = cleanText.split('\n').map(line => line.trim()).filter(Boolean);
+        if (lines.length === 0) return { focus: '', details: '' };
+
+        const focus = [];
+        const details = [];
+        let currentSection = '';
+        lines.forEach(line => {
+            const sectionMatch = line.match(/^【(.+?)】/);
+            if (sectionMatch) currentSection = sectionMatch[1];
+            const isFocusSection = /(规则|风险|警报|降智|自检|下一步|待确认|问题|选择|需要你)/.test(currentSection);
+            if (isSandboxFocusLine(line) || isFocusSection) {
+                focus.push(line);
+            } else {
+                details.push(line);
+            }
+        });
+
+        if (focus.length === 0) {
+            const tailQuestionLines = lines.filter(line => /[？?]$|请|需要你|是否|哪|如何|要不要|选择|确认/.test(line));
+            focus.push(...(tailQuestionLines.length ? tailQuestionLines : lines.slice(-4)));
+            const focusSet = new Set(focus);
+            return {
+                focus: focus.join('\n'),
+                details: lines.filter(line => !focusSet.has(line)).join('\n')
+            };
+        }
+
+        return {
+            focus: focus.join('\n'),
+            details: details.join('\n')
+        };
     }
 
-    function formatSandboxVisibleReply(text = '') {
-        const lines = stripBibleJsonBlocks(text)
-            .split('\n')
-            .map(line => line.trim())
-            .filter(Boolean);
-        const signalLines = lines.filter(line => !looksLikeDraftProseLine(line));
-        return (signalLines.length ? signalLines : lines).join('\n').trim();
-    }
+    window.toggleSandboxMessageDetails = (button) => {
+        const bubble = button?.closest('[data-sandbox-assistant-message]');
+        const detail = bubble?.querySelector('[data-sandbox-message-details]');
+        if (!detail) return;
+        const hidden = detail.classList.toggle('hidden');
+        button.innerHTML = hidden
+            ? `<i data-lucide="chevron-down" class="w-3.5 h-3.5 mr-1"></i>展开完整推演`
+            : `<i data-lucide="chevron-up" class="w-3.5 h-3.5 mr-1"></i>收起完整推演`;
+        if (window.lucide) lucide.createIcons();
+    };
 
     // ==========================================
     // 💥 DOM 元素全量声明 (已补齐所有遗漏的沙盒开关按钮) 💥
@@ -2499,11 +2528,28 @@ ${getRulesTextForPrompt()}`;
         msgDiv.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
         const bubbleColor = role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-800 border border-gray-700 text-gray-200';
         const rollbackBtn = role === 'user' ? `<button onclick="rollbackChat(${index})" class="absolute top-2 left-[-30px] text-gray-500 hover:text-red-400 p-1 bg-gray-900 rounded-full shadow opacity-0 group-hover:opacity-100 transition" title="时光倒流至此节点"><i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i></button>` : '';
+        let contentHtml = escapeHtml(text);
+        let assistantAttrs = '';
+        if (role === 'assistant') {
+            const parts = splitSandboxAssistantReply(text);
+            const hasDetails = parts.details && parts.details.trim();
+            assistantAttrs = 'data-sandbox-assistant-message="true"';
+            contentHtml = `
+                <div class="text-[10px] uppercase tracking-wide text-violet-300/80 font-bold mb-2">需要你关注</div>
+                <div class="bg-gray-950/60 border border-violet-800/50 rounded-xl p-3 text-violet-50">${escapeHtml(parts.focus || text)}</div>
+                ${hasDetails ? `
+                    <button type="button" onclick="toggleSandboxMessageDetails(this)" class="mt-3 inline-flex items-center text-xs text-gray-300 hover:text-white bg-gray-900 border border-gray-700 hover:border-violet-600 rounded-lg px-3 py-1.5">
+                        <i data-lucide="chevron-down" class="w-3.5 h-3.5 mr-1"></i>展开完整推演
+                    </button>
+                    <div data-sandbox-message-details class="hidden mt-3 border-t border-gray-700 pt-3 text-gray-300">${escapeHtml(parts.details)}</div>
+                ` : ''}
+            `;
+        }
 
         msgDiv.innerHTML = `<div class="max-w-[85%] flex flex-col ${role === 'user' ? 'items-end' : 'items-start'}">
-            <div class="${bubbleColor} p-4 rounded-2xl shadow-md text-sm leading-relaxed whitespace-pre-wrap relative group">
+            <div ${assistantAttrs} class="${bubbleColor} p-4 rounded-2xl shadow-md text-sm leading-relaxed whitespace-pre-wrap relative group">
                 ${rollbackBtn}
-                ${escapeHtml(text)}
+                ${contentHtml}
             </div>
         </div>`;
         chatHistory.appendChild(msgDiv);
@@ -2530,7 +2576,6 @@ ${getRulesTextForPrompt()}`;
                 let aiReplyText = data.reply;
                 const conversationForExtraction = [...genesisConversation, { role: 'assistant', content: aiReplyText }];
                 syncPanelFromReplyInBackground(aiReplyText, conversationForExtraction);
-                aiReplyText = formatSandboxVisibleReply(stripBibleJsonBlocks(aiReplyText) || aiReplyText);
                 const newIndex = genesisConversation.length;
                 genesisConversation.push({ role: 'assistant', content: aiReplyText || '已更新设定数据。' });
                 if(aiReplyText.length > 0) appendMessage('assistant', aiReplyText, newIndex);
