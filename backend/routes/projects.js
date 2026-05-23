@@ -7,19 +7,50 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+function normalizeProjectTitle(title = '') {
+    return String(title || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function getProjectTimestamp(project = {}) {
+    return new Date(project.updated_at || project.created_at || 0).getTime() || 0;
+}
+
+function dedupeProjects(projects = []) {
+    const byTitle = new Map();
+    (projects || []).forEach(project => {
+        const key = normalizeProjectTitle(project.title) || project.id;
+        const existing = byTitle.get(key);
+        if (!existing || getProjectTimestamp(project) > getProjectTimestamp(existing)) {
+            byTitle.set(key, project);
+        }
+    });
+    return Array.from(byTitle.values()).sort((a, b) => getProjectTimestamp(b) - getProjectTimestamp(a));
+}
+
 // 1. 获取所有项目列表 (大厅主页)
 router.get('/', async (req, res) => {
     try {
         const { data, error } = await supabase.from('projects').select('*').order('created_at', { ascending: false });
         if (error) throw error;
-        res.json({ success: true, projects: data });
+        res.json({ success: true, projects: dedupeProjects(data) });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
 // 2. 创建新项目 (开启新纪元)
 router.post('/create', async (req, res) => {
-    const { title } = req.body;
+    const title = String(req.body?.title || '').trim();
+    if (!title) return res.status(400).json({ success: false, error: '项目标题不能为空' });
     try {
+        const { data: existing, error: existingError } = await supabase
+            .from('projects')
+            .select('id,title,created_at,updated_at')
+            .eq('title', title)
+            .order('created_at', { ascending: false })
+            .limit(1);
+        if (existingError) throw existingError;
+        if (existing && existing.length > 0) {
+            return res.json({ success: true, id: existing[0].id, reused: true });
+        }
         const { data, error } = await supabase.from('projects').insert([{ title }]).select().single();
         if (error) throw error;
         res.json({ success: true, id: data.id });

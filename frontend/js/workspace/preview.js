@@ -102,7 +102,7 @@ window.OmniWorkspacePreview = (() => {
         const narrativeModeHTML = narrativeModes.map(m => `<option value="${m}" ${narrativeLogic.mode === m ? 'selected' : ''}>${m}</option>`).join('');
 
         let html = `
-            <div class="sticky top-0 z-20 bg-gray-950/95 backdrop-blur border border-gray-800 rounded-xl p-2 mb-4 grid grid-cols-3 gap-2">
+            <div class="sticky -top-6 z-30 -mx-6 -mt-6 mb-4 px-6 pt-6 pb-3 bg-gray-950 backdrop-blur border-b border-gray-800 grid grid-cols-3 gap-2">
                 <button type="button" data-sandbox-module-button="events" onclick="switchSandboxModule('events')" class="sandbox-module-btn py-2 rounded-lg text-xs font-bold border border-purple-900/50 text-purple-300 bg-purple-950/30">事件讨论</button>
                 <button type="button" data-sandbox-module-button="characters" onclick="switchSandboxModule('characters')" class="sandbox-module-btn py-2 rounded-lg text-xs font-bold border border-gray-800 text-gray-400 bg-gray-900">人物设定</button>
                 <button type="button" data-sandbox-module-button="rules" onclick="switchSandboxModule('rules')" class="sandbox-module-btn py-2 rounded-lg text-xs font-bold border border-gray-800 text-gray-400 bg-gray-900">规则/专家</button>

@@ -878,6 +878,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // 💥 DOM 元素全量声明 (已补齐所有遗漏的沙盒开关按钮) 💥
     // ==========================================
     const sandbox = document.getElementById('genesis-sandbox');
+    const sandboxChatPane = document.getElementById('sandbox-chat-pane');
+    const sandboxPreviewPane = document.getElementById('sandbox-preview-pane');
+    const btnToggleSandboxLayout = document.getElementById('btn-toggle-sandbox-layout');
     const mainWorkspace = document.getElementById('main-workspace');
     const chatHistory = document.getElementById('chat-history');
     const chatInput = document.getElementById('chat-input');
@@ -1036,6 +1039,45 @@ document.addEventListener('DOMContentLoaded', () => {
         window.OmniWorkspacePreview.renderHumanPreview(humanPreviewContainer, bible);
         renderLocalSourcePanel();
         attachPreviewAutosave();
+    }
+
+    function getSandboxLayoutMode() {
+        return localStorage.getItem('omnistory_sandbox_layout') || 'auto';
+    }
+
+    function resolveSandboxLayout(mode = getSandboxLayoutMode()) {
+        if (mode === 'left' || mode === 'right') return mode;
+        return window.innerWidth >= 1180 ? 'right' : 'left';
+    }
+
+    function applySandboxLayoutMode(mode = getSandboxLayoutMode()) {
+        if (!sandbox || !sandboxChatPane || !sandboxPreviewPane) return;
+        const resolved = resolveSandboxLayout(mode);
+        sandbox.classList.toggle('flex-col', window.innerWidth < 900);
+        sandbox.classList.toggle('flex-row', window.innerWidth >= 900);
+        sandboxChatPane.classList.remove('order-1', 'order-2', 'w-2/5', 'w-full', 'h-2/5', 'h-1/2', 'h-auto', 'border-r', 'border-l', 'border-t');
+        sandboxPreviewPane.classList.remove('order-1', 'order-2', 'w-3/5', 'w-full', 'h-3/5', 'h-1/2', 'h-auto');
+        if (window.innerWidth < 900) {
+            sandboxChatPane.classList.add('order-2', 'w-full', 'h-2/5', 'border-t');
+            sandboxPreviewPane.classList.add('order-1', 'w-full', 'h-3/5');
+        } else {
+            sandboxChatPane.classList.add(resolved === 'right' ? 'order-2' : 'order-1', 'w-2/5', 'h-auto', resolved === 'right' ? 'border-l' : 'border-r');
+            sandboxPreviewPane.classList.add(resolved === 'right' ? 'order-1' : 'order-2', 'w-3/5', 'h-auto');
+        }
+        const label = mode === 'auto' ? '布局：自动' : (mode === 'right' ? '对话：右' : '对话：左');
+        const icon = mode === 'auto' ? 'columns-2' : (mode === 'right' ? 'panel-right' : 'panel-left');
+        if (btnToggleSandboxLayout) {
+            btnToggleSandboxLayout.innerHTML = `<i data-lucide="${icon}" class="w-3.5 h-3.5 mr-1.5"></i><span>${label}</span>`;
+        }
+        if (window.lucide) lucide.createIcons();
+    }
+
+    function cycleSandboxLayoutMode() {
+        const modes = ['auto', 'right', 'left'];
+        const current = getSandboxLayoutMode();
+        const next = modes[(modes.indexOf(current) + 1) % modes.length] || 'auto';
+        localStorage.setItem('omnistory_sandbox_layout', next);
+        applySandboxLayoutMode(next);
     }
 
     function closeGenesisSandbox() {
@@ -4030,8 +4072,11 @@ if (data.success) {
         }
     }
 
-    if (btnForceGenesis) btnForceGenesis.onclick = () => { if(sandbox) sandbox.classList.toggle('hidden'); if(mainWorkspace) mainWorkspace.classList.toggle('opacity-30'); };
+    if (btnForceGenesis) btnForceGenesis.onclick = () => { if(sandbox) { sandbox.classList.toggle('hidden'); applySandboxLayoutMode(); } if(mainWorkspace) mainWorkspace.classList.toggle('opacity-30'); };
     if (btnCloseSandbox) btnCloseSandbox.onclick = closeGenesisSandbox;
+    if (btnToggleSandboxLayout) btnToggleSandboxLayout.onclick = cycleSandboxLayoutMode;
+    window.addEventListener('resize', () => applySandboxLayoutMode());
+    applySandboxLayoutMode();
 
     // 💥 终极修复：章节 SOP 推演发送按钮逻辑 (附带自动伏笔回收与防OOC指令)
     if (btnSendChapterChat) {

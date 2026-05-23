@@ -111,6 +111,40 @@
         const universeGrid = document.getElementById('universe-grid');
         const creationModal = document.getElementById('creation-modal');
         const exportModal = document.getElementById('export-modal');
+        let creationInFlight = false;
+
+        function normalizeProjectTitle(title = '') {
+            return String(title || '').trim().replace(/\s+/g, ' ').toLowerCase();
+        }
+
+        function getProjectTimestamp(project = {}) {
+            return new Date(project.updated_at || project.created_at || 0).getTime() || 0;
+        }
+
+        function dedupeProjects(projects = []) {
+            const byId = new Map();
+            const byTitle = new Map();
+            projects.forEach(project => {
+                if (!project?.id) return;
+                byId.set(project.id, project);
+            });
+            Array.from(byId.values()).forEach(project => {
+                const titleKey = normalizeProjectTitle(project.title);
+                const key = titleKey || project.id;
+                const existing = byTitle.get(key);
+                if (!existing || getProjectTimestamp(project) > getProjectTimestamp(existing)) {
+                    byTitle.set(key, project);
+                }
+            });
+            return Array.from(byTitle.values())
+                .sort((a, b) => getProjectTimestamp(b) - getProjectTimestamp(a));
+        }
+
+        function escapeHtml(value = '') {
+            return String(value).replace(/[&<>"']/g, char => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            })[char]);
+        }
 
         // 加载项目列表
         async function loadUniverses() {
@@ -120,8 +154,14 @@
                 universeGrid.innerHTML = '';
 
                 if (data.success && data.projects) {
-                    data.projects.forEach(proj => {
+                    const projects = dedupeProjects(data.projects);
+                    if (projects.length === 0) {
+                        universeGrid.innerHTML = `<div class="col-span-full text-center text-gray-600 py-20 border border-dashed border-gray-800 rounded-2xl">还没有宇宙。先开启一个新篇章。</div>`;
+                        return;
+                    }
+                    projects.forEach(proj => {
                         const card = document.createElement('div');
+                        const safeTitle = escapeHtml(proj.title || '未命名宇宙');
                         card.className = "group relative bg-gray-900 border border-gray-800 rounded-2xl p-6 hover:border-purple-500/50 hover:shadow-[0_0_30px_rgba(147,51,234,0.1)] transition-all cursor-pointer flex flex-col justify-between";
                         card.onclick = () => window.location.href = `index.html?id=${proj.id}`;
 
@@ -136,12 +176,12 @@
                                         <button class="text-gray-600 hover:text-blue-400 transition transform hover:scale-110" onclick="event.stopPropagation(); openExportModal('${proj.id}')" title="一键导出全书">
                                             <i data-lucide="download" class="w-5 h-5"></i>
                                         </button>
-                                        <button class="text-gray-600 hover:text-red-500 transition transform hover:scale-110" onclick="event.stopPropagation(); deleteProject('${proj.id}', '${proj.title}')" title="彻底删除宇宙">
+                                        <button class="text-gray-600 hover:text-red-500 transition transform hover:scale-110" onclick="event.stopPropagation(); deleteProject('${proj.id}', '${safeTitle}')" title="彻底删除宇宙">
                                             <i data-lucide="trash-2" class="w-5 h-5"></i>
                                         </button>
                                     </div>
                                 </div>
-                                <h3 class="text-xl font-bold text-white mb-2 truncate" title="${proj.title}">${proj.title}</h3>
+                                <h3 class="text-xl font-bold text-white mb-2 truncate" title="${safeTitle}">${safeTitle}</h3>
                                 <div class="space-y-3 mt-6">
                                     <div class="flex justify-between items-center text-xs text-gray-500">
                                         <span>宇宙状态</span>
@@ -169,19 +209,32 @@
         document.getElementById('btn-new-creation').onclick = () => creationModal.classList.remove('hidden');
         document.getElementById('btn-cancel-creation').onclick = () => creationModal.classList.add('hidden');
         document.getElementById('btn-confirm-creation').onclick = async () => {
+            if (creationInFlight) return;
             const title = document.getElementById('universe-title').value;
             const concept = document.getElementById('universe-concept').value;
             if (!title) return alert("请赐予宇宙一个名字！");
+            creationInFlight = true;
+            const btn = document.getElementById('btn-confirm-creation');
+            btn.disabled = true;
+            btn.textContent = '创建中...';
 
-            const res = await fetch(`${API_BASE}/projects/create`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title })
-            });
-            const data = await res.json();
-            if (data.success) {
-                localStorage.setItem(`genesis_initial_concept_${data.id}`, concept);
-                window.location.href = `index.html?id=${data.id}`;
+            try {
+                const res = await fetch(`${API_BASE}/projects/create`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    localStorage.setItem(`genesis_initial_concept_${data.id}`, concept);
+                    window.location.href = `index.html?id=${data.id}`;
+                } else {
+                    alert("创建失败：" + (data.error || "未知错误"));
+                }
+            } finally {
+                creationInFlight = false;
+                btn.disabled = false;
+                btn.textContent = '进入推演';
             }
         };
 
