@@ -51,6 +51,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let insertEventContext = { prev: null, next: null, suggestedNumber: null, chat: [] };
     let localSourceDocs = [];
     let longformState = loadLongformState();
+    let sandboxAutoRepairInFlight = false;
+    let sandboxAutoRepairSignature = '';
 
     const RECENT_CHAT_LIMIT = 10;
     const MEMORY_SUMMARY_LIMIT = 6000;
@@ -974,6 +976,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const sandboxAlertCenter = document.getElementById('sandbox-alert-center');
     const sandboxAlertLevel = document.getElementById('sandbox-alert-level');
     const sandboxAlertSummary = document.getElementById('sandbox-alert-summary');
+    const sandboxAlertActions = document.getElementById('sandbox-alert-actions');
+    const btnSandboxAutoRepair = document.getElementById('btn-sandbox-auto-repair');
+    const btnSandboxFixOptions = document.getElementById('btn-sandbox-fix-options');
+    const btnSandboxRiskReport = document.getElementById('btn-sandbox-risk-report');
     const mainWorkspace = document.getElementById('main-workspace');
     const chatHistory = document.getElementById('chat-history');
     const chatInput = document.getElementById('chat-input');
@@ -1156,10 +1162,15 @@ document.addEventListener('DOMContentLoaded', () => {
             yellow: { label: '黄色', box: 'border-yellow-800/60 text-yellow-100', badge: 'bg-yellow-900/40 text-yellow-200 border-yellow-700/60' },
             red: { label: '红色', box: 'border-red-800/70 text-red-100', badge: 'bg-red-900/50 text-red-200 border-red-700/70' }
         }[level] || {};
-        sandboxAlertCenter.className = `absolute bottom-4 right-4 z-[65] w-[360px] max-w-[calc(100vw-2rem)] bg-gray-950/95 rounded-xl shadow-2xl p-3 text-xs ${config.box}`;
+        sandboxAlertCenter.className = `absolute bottom-4 right-4 z-[65] w-[360px] max-w-[calc(100vw-2rem)] bg-gray-950/95 border rounded-xl shadow-2xl p-3 text-xs ${config.box}`;
         sandboxAlertLevel.className = `text-[10px] px-2 py-0.5 rounded border ${config.badge}`;
         sandboxAlertLevel.textContent = config.label || '绿色';
         sandboxAlertSummary.textContent = summary || '当前未发现明显风险。';
+        if (sandboxAlertActions) sandboxAlertActions.classList.toggle('hidden', level === 'green');
+    }
+
+    function hasEnoughSandboxContentForAutoRepair(bible = {}) {
+        return !!(bible.genre || bible.worldview || bible.rules || (bible.characters || []).length || (bible.timeline || []).length || (bible.chapters || []).length || (bible.hollywood_beats || []).some(beat => beat.title || beat.content));
     }
 
     function getBibleAlarmSnapshot(bible = {}) {
@@ -1194,6 +1205,13 @@ document.addEventListener('DOMContentLoaded', () => {
             snapshot.items.length ? snapshot.items.slice(0, 5).join('\n') : '当前骨架、人物、信息权限未发现明显阻断风险。'
         ].filter(Boolean).join('\n');
         setSandboxAlert(snapshot.level, summary);
+        if (snapshot.level !== 'green' && getCurrentControlMode() === 'auto' && hasEnoughSandboxContentForAutoRepair(targetBible)) {
+            const signature = JSON.stringify({ level: snapshot.level, items: snapshot.items, bibleSeed: stableHash(JSON.stringify(compactBibleForPrompt(targetBible))) });
+            if (!sandboxAutoRepairInFlight && sandboxAutoRepairSignature !== signature) {
+                sandboxAutoRepairSignature = signature;
+                setTimeout(() => runSandboxSupervisionAction('auto'), 800);
+            }
+        }
     }
 
     function getSandboxLayoutMode() {
@@ -1249,6 +1267,78 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    function appendSandboxSystemAssistant(text = '') {
+        if (!text.trim()) return;
+        const newIndex = genesisConversation.length;
+        genesisConversation.push({ role: 'assistant', content: text });
+        appendMessage('assistant', text, newIndex);
+        localStorage.setItem(GENESIS_CHAT_KEY, JSON.stringify(genesisConversation));
+        syncGenesisDraftToCloud().catch(error => console.warn('监督消息云端同步失败:', error));
+    }
+
+    function buildSandboxSupervisionPrompt(bible, issues, mode, intent) {
+        const modeInstruction = {
+            auto: '全自动：请直接生成最小修复后的完整世界圣经 JSON。只修补冲突，不推翻用户已确认设定；修复后 workflow.status 应改为 reviewing 或 approved，并把修复记录写入 workflow.notes。',
+            options: '半自动：不要修改 JSON。请给出 2-3 个修复方案，每个方案说明改哪些事件/人物/规则/上帝视角、优缺点、推荐选择。最后问作者选择哪一个。',
+            report: '手动：不要修改 JSON。只输出冲突报告、影响范围、最小修复建议和继续创作前必须确认的问题。'
+        }[intent] || '';
+        return `你是 OmniStory 实时监督调度器。当前沙盒采用好莱坞六节点骨架，规则/专家系统权限最高。
+【权限模式】${mode}
+【本次动作】${modeInstruction}
+【当前风险】\n${issues.join('\n') || '未列出具体风险，请自行检查。'}
+【当前世界圣经】\n${JSON.stringify(compactBibleForPrompt(bible))}
+
+必须检查：
+1. 救猫咪类型、开始/结束事件、主角/最终反派是否完整。
+2. 主角弧线和反派弧线是否能支撑六节点。
+3. 六节点是否完整、因果是否连续、反派是否聪明升级。
+4. 桥接事件、时间线、人物卡、规则、观众视角/上帝视角是否冲突。
+5. 是否存在降智、巧合、提前泄露真相、人物 OOC 或世界规则失效。
+
+如果本次动作是全自动，请只输出合法 JSON 代码块，包含完整 genre、worldview、rules、workflow、protagonist_arc、antagonist_arc、hollywood_beats、characters、relations、timeline、narrative_logic、secrets、chapters。
+如果本次动作是半自动或手动，请不要输出 JSON。`;
+    }
+
+    async function runSandboxSupervisionAction(intent = 'report') {
+        const bible = getCurrentBibleSnapshot();
+        if (!bible) return;
+        const snapshot = getBibleAlarmSnapshot(bible);
+        const mode = getCurrentControlMode();
+        if (intent === 'auto' && !hasEnoughSandboxContentForAutoRepair(bible)) return;
+        sandboxAutoRepairInFlight = true;
+        setSandboxAlert(snapshot.level || 'yellow', `${intent === 'auto' ? '全自动修复中' : intent === 'options' ? '正在生成修复方案' : '正在生成风险报告'}...\n${snapshot.items.join('\n')}`);
+        try {
+            const prompt = buildSandboxSupervisionPrompt(bible, snapshot.items, mode, intent);
+            const res = await fetch('/api/chat/deduce', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(buildChatPayloadWithLocalSources([{ role: 'user', content: prompt }], 1, prompt))
+            });
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error || '监督调度失败');
+            if (intent === 'auto') {
+                const parsedBible = extractBibleJsonFromText(data.reply);
+                if (!parsedBible) throw new Error('自动修复没有返回合法世界圣经 JSON');
+                const mergedBible = saveLatestBible(parsedBible) || parsedBible;
+                renderHumanPreview(mergedBible);
+                appendSandboxSystemAssistant(`【自动监督修复完成】\n系统已根据当前红/黄风险生成最小修复补丁并写入右侧面板。请检查“流程骨架”和“事件讨论”面板；如果不满意，可以撤回上一轮或切换为半自动讨论方案。`);
+                window.runSandboxRuleAudit(mergedBible);
+                syncGenesisDraftToCloud();
+            } else {
+                appendSandboxSystemAssistant(`${intent === 'options' ? '【半自动修复方案】' : '【手动风险报告】'}\n${stripFencedBlocks(data.reply) || data.reply}`);
+                setSandboxAlert(snapshot.level || 'yellow', `${intent === 'options' ? '修复方案已发送到对话区。' : '风险报告已发送到对话区。'}\n${snapshot.items.slice(0, 4).join('\n')}`);
+            }
+        } catch (error) {
+            setSandboxAlert('yellow', `监督调度失败：${error.message || '未知错误'}。你可以切换为半自动或手动后重试。`);
+        } finally {
+            sandboxAutoRepairInFlight = false;
+        }
+    }
+
+    if (btnSandboxAutoRepair) btnSandboxAutoRepair.addEventListener('click', () => runSandboxSupervisionAction('auto'));
+    if (btnSandboxFixOptions) btnSandboxFixOptions.addEventListener('click', () => runSandboxSupervisionAction('options'));
+    if (btnSandboxRiskReport) btnSandboxRiskReport.addEventListener('click', () => runSandboxSupervisionAction('report'));
 
     function closeGenesisSandbox() {
         if (sandbox) sandbox.classList.add('hidden');
@@ -1996,6 +2086,43 @@ ${getBuiltInExpertBaseline()}
         localDeviationPanel.innerHTML = items.length > 0
             ? items.map(w => `<div class="bg-yellow-950/20 border border-yellow-900/30 rounded p-2 whitespace-pre-wrap">${escapeHtml(w)}</div>`).join('')
             : `<div class="bg-emerald-950/20 border border-emerald-900/30 rounded p-2 text-emerald-300">${emptyText}</div>`;
+    }
+
+    async function runSopRealtimeSupervision(trigger = 'SOP 对话更新') {
+        if (!currentLocalContext.chapterId) return '';
+        const mode = getCurrentControlMode();
+        const prompt = `你是 OmniStory SOP 实时监督器。请在当前事件推演仍在进行时立刻检查，避免等结束后才发现大问题。
+【触发原因】${trigger}
+【权限模式】${mode}
+【当前 SOP 对话尾迹】\n${limitText(currentChapterChatHistory.slice(-8).map(msg => `${msg.role}: ${msg.content}`).join('\n\n'), 5000)}
+${buildLongformBasePrompt()}
+
+请只输出：
+【红色警报】会导致当前事件无法对齐前后事件、人物/时间线矛盾、上帝视角泄露、人物降智的阻断问题；
+【黄色提醒】动机偏弱、吸引力不足、伏笔/资料/规则不足的问题；
+【当前最小修正】${mode === 'auto' ? '直接给出你建议采用的修正版本。' : mode === 'semi' ? '给 2-3 个可选修正方向。' : '只给建议，不改设定。'}
+【下一步应该问作者】1-2 个必须确认的问题。
+如果没有问题，请明确“当前可继续”。`;
+        renderDeviationItems([`实时监督运行中：${trigger}...`]);
+        try {
+            const res = await fetch('/api/chat/deduce', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(buildChatPayloadWithLocalSources([{ role: 'user', content: prompt }], 1, prompt))
+            });
+            const data = await res.json();
+            const reply = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `实时监督失败：${data.error || '未知错误'}`;
+            renderDeviationItems([reply]);
+            if (/红色警报[\s\S]*(无法|矛盾|泄露|降智|阻断)|不通过|严重/.test(reply)) {
+                setSandboxAlert('red', `SOP 实时监督发现阻断风险。\n${limitText(reply, 700)}`);
+            } else if (/黄色提醒|风险|不足|建议/.test(reply)) {
+                setSandboxAlert('yellow', `SOP 实时监督发现可修正风险。\n${limitText(reply, 700)}`);
+            }
+            return reply;
+        } catch (error) {
+            renderDeviationItems([`实时监督请求失败：${error.message || '未知错误'}`]);
+            return '';
+        }
     }
 
     function loadLongformState() {
@@ -4375,6 +4502,7 @@ if (data.success) {
                     runLongformEditorTask('continuity', '\n\n这是正文生成后的连续性账本更新。');
                     runLongformEditorTask('citations', `\n\n这是正文生成后的资料来源标注。\n【本地资料库相关片段】\n${getRelevantLocalSourceSnippets(data.text || '', 10) || '暂无可匹配资料片段。'}`);
                     runLongformEditorTask('board', '\n\n这是正文生成后的章节生产看板更新。');
+                    runSopRealtimeSupervision('正文生成后自动检查');
                     const reviewText = await runUnifiedContentReview("after-ai-write");
                     const acceptanceText = await runLongformEditorTask('acceptance', `\n\n这是正文生成后的强制验收。请结合以下审查报告判断是否允许定稿：\n${reviewText || '暂无审查报告'}`);
                     if (/【风险等级】\s*(中|高)|风险等级[:：]\s*(中|高)|不通过|严重|降智|OOC/.test(reviewText || '')) {
@@ -4707,6 +4835,7 @@ if (data.success) {
                     currentChapterChatHistory.push({ role: 'assistant', content: cleanedReply });
                     appendChapMsg('assistant', cleanedReply);
                     localStorage.setItem(`sop_v3_${PROJECT_ID}_${currentLocalContext.chapterId}`, JSON.stringify(currentChapterChatHistory));
+                    runSopRealtimeSupervision('SOP 新回复后自动检查');
                 }
             } catch (e) { document.getElementById(loadingId)?.remove(); }
         };
