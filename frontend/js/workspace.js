@@ -707,6 +707,23 @@ document.addEventListener('DOMContentLoaded', () => {
         return null;
     }
 
+    function extractJsonObjectFromText(text = "") {
+        const candidates = [];
+        const fenceRegex = /```(?:json)?\s*([\s\S]*?)\s*```/gi;
+        let match;
+        while ((match = fenceRegex.exec(text)) !== null) candidates.push(match[1].trim());
+        const firstBrace = text.indexOf('{');
+        const lastBrace = text.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace > firstBrace) candidates.push(text.slice(firstBrace, lastBrace + 1).trim());
+        for (const candidate of candidates.reverse()) {
+            try {
+                const parsed = JSON.parse(candidate);
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+            } catch (e) {}
+        }
+        return null;
+    }
+
     function stripBibleJsonBlocks(text = "") {
         return String(text || '').replace(/```(?:json)?\s*([\s\S]*?)\s*```/gi, (block, inner) => {
             try {
@@ -1139,6 +1156,16 @@ document.addEventListener('DOMContentLoaded', () => {
         return uniqueStableArray((Array.isArray(secrets) ? secrets : [])
             .map(normalizeSecretItem)
             .filter(secret => secret.title || secret.audience_view || secret.god_view), getSecretMergeKey);
+    }
+
+    function saveSecretToCurrentBible(secretPayload = {}) {
+        const currentBible = collectBibleFromPreview();
+        currentBible.secrets = normalizeSecrets([...(currentBible.secrets || []), normalizeSecretItem(secretPayload)]);
+        const savedBible = saveLatestBible(currentBible) || currentBible;
+        renderHumanPreview(savedBible);
+        if (window.switchSandboxModule) window.switchSandboxModule('secrets');
+        syncGenesisDraftToCloud().catch(error => console.warn('上帝视角云端同步失败:', error));
+        return savedBible;
     }
 
     function openLocalSourceDb() {
@@ -3512,6 +3539,193 @@ if (data.success) {
         if (hookModal) hookModal.classList.remove('hidden');
     }
 
+    let sandboxSecretSelectionText = "";
+
+    function ensureSandboxSecretMenu() {
+        let menu = document.getElementById('sandbox-secret-selection-menu');
+        if (menu) return menu;
+        document.body.insertAdjacentHTML('beforeend', `
+            <div id="sandbox-secret-selection-menu" class="fixed z-[90] hidden bg-gray-950 border border-violet-500/70 rounded-full shadow-[0_0_18px_rgba(139,92,246,0.35)] px-2 py-1.5">
+                <button id="btn-sandbox-selection-secret" type="button" class="px-3 py-1.5 bg-violet-700 hover:bg-violet-600 text-white text-xs font-bold rounded-full flex items-center">
+                    <i data-lucide="eye" class="w-3.5 h-3.5 mr-1.5"></i>设为上帝视角
+                </button>
+            </div>
+        `);
+        menu = document.getElementById('sandbox-secret-selection-menu');
+        menu.addEventListener('mousedown', event => event.preventDefault());
+        document.getElementById('btn-sandbox-selection-secret')?.addEventListener('click', () => {
+            const selected = sandboxSecretSelectionText.trim();
+            hideSandboxSecretMenu();
+            if (selected) openGodViewComposer(selected);
+        });
+        if (window.lucide) lucide.createIcons();
+        return menu;
+    }
+
+    function hideSandboxSecretMenu() {
+        const menu = document.getElementById('sandbox-secret-selection-menu');
+        if (menu) menu.classList.add('hidden');
+    }
+
+    function getSandboxSelectionInfo() {
+        if (!sandbox || sandbox.classList.contains('hidden')) return null;
+        if (document.activeElement === chatInput && chatInput.selectionStart !== chatInput.selectionEnd) {
+            return {
+                text: chatInput.value.substring(chatInput.selectionStart, chatInput.selectionEnd).trim(),
+                rect: chatInput.getBoundingClientRect()
+            };
+        }
+        const selection = window.getSelection();
+        if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+        const anchorElement = selection.anchorNode?.nodeType === Node.TEXT_NODE ? selection.anchorNode.parentElement : selection.anchorNode;
+        if (!anchorElement || !chatHistory?.contains(anchorElement)) return null;
+        const text = selection.toString().trim();
+        const rect = selection.getRangeAt(0).getBoundingClientRect();
+        return text ? { text, rect } : null;
+    }
+
+    function updateSandboxSecretMenu() {
+        const info = getSandboxSelectionInfo();
+        if (!info || info.text.length < 2) {
+            sandboxSecretSelectionText = "";
+            hideSandboxSecretMenu();
+            return;
+        }
+        sandboxSecretSelectionText = info.text;
+        const menu = ensureSandboxSecretMenu();
+        const left = Math.max(12, Math.min(window.innerWidth - 190, info.rect.left + (info.rect.width / 2) - 80));
+        const top = Math.max(72, info.rect.top - 46);
+        menu.style.left = `${left}px`;
+        menu.style.top = `${top}px`;
+        menu.classList.remove('hidden');
+    }
+
+    function ensureGodViewModal() {
+        let modal = document.getElementById('god-view-composer-modal');
+        if (modal) return modal;
+        document.body.insertAdjacentHTML('beforeend', `
+            <div id="god-view-composer-modal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-[95] hidden flex items-center justify-center p-6">
+                <div class="bg-gray-900 border border-violet-500/60 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6 shadow-[0_0_30px_rgba(139,92,246,0.28)]">
+                    <h3 class="text-lg font-bold text-violet-200 mb-4 flex items-center"><i data-lucide="eye" class="w-5 h-5 mr-2"></i>设为上帝视角</h3>
+                    <div class="space-y-3">
+                        <label class="block text-xs text-gray-500 font-bold">选中内容</label>
+                        <textarea id="god-view-source" class="w-full bg-gray-950 border border-gray-800 rounded-xl p-3 text-gray-300 text-sm h-20 resize-none" readonly></textarea>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <input id="god-view-title" class="md:col-span-2 bg-gray-950 border border-violet-800/60 rounded-xl p-3 text-violet-100 text-sm" placeholder="秘密标题">
+                            <select id="god-view-status" class="bg-gray-950 border border-violet-800/60 rounded-xl p-3 text-violet-200 text-sm">
+                                <option value="hidden">隐藏</option>
+                                <option value="partial">部分揭露</option>
+                                <option value="revealed">已揭露</option>
+                            </select>
+                        </div>
+                        <div>
+                            <div class="flex items-center justify-between mb-1">
+                                <label class="text-xs text-violet-300 font-bold">AI 润色后的上帝视角</label>
+                                <button id="btn-polish-god-view" type="button" class="text-xs px-3 py-1.5 bg-violet-700 hover:bg-violet-600 text-white rounded-lg font-bold">重新润色</button>
+                            </div>
+                            <textarea id="god-view-god" class="w-full bg-gray-950 border border-violet-700/60 rounded-xl p-3 text-violet-100 text-sm h-28 resize-none" placeholder="作者和 AI 后台知道的真实情况。"></textarea>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-amber-300 font-bold mb-1">请你说明观众视角</label>
+                            <textarea id="god-view-audience" class="w-full bg-gray-950 border border-amber-800/60 rounded-xl p-3 text-amber-100 text-sm h-24 resize-none" placeholder="真相揭露前，观众/角色现在只知道什么？这会决定 AI 推演时能公开使用的信息。"></textarea>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <input id="god-view-reveal" class="bg-gray-950 border border-gray-800 rounded-xl p-3 text-gray-300 text-sm" placeholder="揭露事件">
+                            <input id="god-view-chars" class="bg-gray-950 border border-gray-800 rounded-xl p-3 text-gray-300 text-sm" placeholder="关联人物">
+                            <input id="god-view-events" class="bg-gray-950 border border-gray-800 rounded-xl p-3 text-gray-300 text-sm" placeholder="关联事件">
+                        </div>
+                    </div>
+                    <div class="flex justify-end gap-3 mt-5">
+                        <button id="btn-cancel-god-view" type="button" class="px-5 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg font-bold">取消</button>
+                        <button id="btn-save-god-view" type="button" class="px-5 py-2 bg-violet-700 hover:bg-violet-600 text-white rounded-lg font-bold">保存到上帝视角面板</button>
+                    </div>
+                </div>
+            </div>
+        `);
+        modal = document.getElementById('god-view-composer-modal');
+        document.getElementById('btn-cancel-god-view')?.addEventListener('click', () => modal.classList.add('hidden'));
+        document.getElementById('btn-polish-god-view')?.addEventListener('click', () => polishGodViewSelection(document.getElementById('god-view-source')?.value || ""));
+        document.getElementById('btn-save-god-view')?.addEventListener('click', () => {
+            const audience = document.getElementById('god-view-audience')?.value.trim() || "";
+            const god = document.getElementById('god-view-god')?.value.trim() || "";
+            if (!god) return alert("上帝视角不能为空。");
+            if (!audience) return alert("请先说明观众视角，否则 AI 无法判断哪些信息可以公开使用。");
+            saveSecretToCurrentBible({
+                title: document.getElementById('god-view-title')?.value.trim() || god.slice(0, 24),
+                status: document.getElementById('god-view-status')?.value || 'hidden',
+                audience_view: audience,
+                god_view: god,
+                reveal_event: document.getElementById('god-view-reveal')?.value.trim() || "",
+                related_characters: splitListText(document.getElementById('god-view-chars')?.value || ""),
+                related_events: splitListText(document.getElementById('god-view-events')?.value || "")
+            });
+            modal.classList.add('hidden');
+            alert("已保存到上帝视角面板。后续沙盒推演会按观众视角/上帝视角权限调用。");
+        });
+        if (window.lucide) lucide.createIcons();
+        return modal;
+    }
+
+    async function polishGodViewSelection(sourceText) {
+        const btn = document.getElementById('btn-polish-god-view');
+        const godInput = document.getElementById('god-view-god');
+        if (!sourceText.trim()) return;
+        const oldText = btn?.textContent || "重新润色";
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = "润色中...";
+        }
+        try {
+            const prompt = `请把以下选中内容整理成适合写入小说创作系统的【上帝视角秘密】。
+要求：
+1. 只整理作者和 AI 后台知道的真实情况，不要写小说正文。
+2. 不要替作者编造观众视角；观众视角由作者稍后填写。
+3. 输出合法 JSON：{"title":"","god_view":"","reveal_event":"","related_characters":[],"related_events":[]}
+4. god_view 要清楚写明真实因果、真实动机、真实身份或隐藏信息，以及它会如何约束后续事件推演。
+
+【选中内容】
+${sourceText}`;
+            const res = await fetch('/api/chat/deduce', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    conversation: [{ role: 'user', content: prompt }],
+                    currentBible: compactBibleForPrompt(getCurrentBibleSnapshot())
+                })
+            });
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error || '润色失败');
+            const parsed = extractJsonObjectFromText(data.reply) || {};
+            document.getElementById('god-view-title').value = parsed.title || document.getElementById('god-view-title').value || sourceText.slice(0, 24);
+            if (godInput) godInput.value = parsed.god_view || stripFencedBlocks(data.reply) || sourceText;
+            document.getElementById('god-view-reveal').value = parsed.reveal_event || document.getElementById('god-view-reveal').value || "";
+            document.getElementById('god-view-chars').value = Array.isArray(parsed.related_characters) ? parsed.related_characters.join('、') : (parsed.related_characters || "");
+            document.getElementById('god-view-events').value = Array.isArray(parsed.related_events) ? parsed.related_events.join('、') : (parsed.related_events || "");
+        } catch (error) {
+            if (godInput && !godInput.value.trim()) godInput.value = sourceText;
+            alert(`上帝视角润色失败：${error.message || '未知错误'}。已保留原文，你可以手动修改后保存。`);
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = oldText;
+            }
+        }
+    }
+
+    function openGodViewComposer(selectedText = "") {
+        const modal = ensureGodViewModal();
+        document.getElementById('god-view-source').value = selectedText;
+        document.getElementById('god-view-title').value = selectedText.slice(0, 24);
+        document.getElementById('god-view-status').value = 'hidden';
+        document.getElementById('god-view-god').value = selectedText;
+        document.getElementById('god-view-audience').value = "";
+        document.getElementById('god-view-reveal').value = "";
+        document.getElementById('god-view-chars').value = "";
+        document.getElementById('god-view-events').value = "";
+        modal.classList.remove('hidden');
+        polishGodViewSelection(selectedText);
+    }
+
     if (btnOpenTimeline) btnOpenTimeline.addEventListener('click', () => { refreshEventSelects(); renderTimelineModal(); if(timelineModal) timelineModal.classList.remove('hidden'); });
     if (btnCloseTimeline) btnCloseTimeline.addEventListener('click', () => { if(timelineModal) timelineModal.classList.add('hidden');});
     if (btnManualHook) btnManualHook.addEventListener('click', () => {
@@ -3559,6 +3773,24 @@ if (data.success) {
             } else if (floatingToolbar) {
                 floatingToolbar.classList.add('translate-y-20', 'opacity-0', 'pointer-events-none');
             }
+        }
+        setTimeout(updateSandboxSecretMenu, 0);
+    });
+
+    if (chatInput) {
+        ['mouseup', 'keyup', 'select'].forEach(eventName => {
+            chatInput.addEventListener(eventName, () => setTimeout(updateSandboxSecretMenu, 0));
+        });
+    }
+
+    if (chatHistory) {
+        chatHistory.addEventListener('mouseup', () => setTimeout(updateSandboxSecretMenu, 0));
+    }
+
+    document.addEventListener('mousedown', (event) => {
+        const menu = document.getElementById('sandbox-secret-selection-menu');
+        if (menu && !menu.contains(event.target) && event.target !== chatInput && !chatHistory?.contains(event.target)) {
+            hideSandboxSecretMenu();
         }
     });
 
