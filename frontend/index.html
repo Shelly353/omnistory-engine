@@ -110,7 +110,10 @@
                 <div class="bg-gray-950 border border-yellow-900/30 rounded-xl p-3 shadow-md">
                     <div class="flex items-center justify-between mb-2">
                         <h4 class="text-[10px] font-bold text-yellow-400 uppercase tracking-wider flex items-center"><i data-lucide="shield-alert" class="w-3 h-3 mr-1"></i>内容/设定偏离警告</h4>
-                        <button id="btn-review-current-draft" class="text-[10px] px-2 py-1 bg-yellow-900/30 text-yellow-300 border border-yellow-800/50 rounded hover:bg-yellow-700 hover:text-white transition">检测正文</button>
+                        <div class="flex gap-1">
+                            <button id="btn-rerun-change-patch" class="text-[10px] px-2 py-1 bg-red-900/30 text-red-200 border border-red-800/50 rounded hover:bg-red-700 hover:text-white transition">重审变更</button>
+                            <button id="btn-review-current-draft" class="text-[10px] px-2 py-1 bg-yellow-900/30 text-yellow-300 border border-yellow-800/50 rounded hover:bg-yellow-700 hover:text-white transition">检测正文</button>
+                        </div>
                     </div>
                     <details class="mb-2">
                         <summary class="cursor-pointer select-none text-[10px] text-gray-300 bg-gray-900 border border-gray-700 rounded px-2 py-1.5 hover:text-white">高级工具 / 手动重跑</summary>

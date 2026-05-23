@@ -476,6 +476,97 @@ document.addEventListener('DOMContentLoaded', () => {
         return warnings;
     }
 
+    function getEventNumbersFromText(text = '') {
+        const nums = new Set();
+        String(text || '').replace(/(?:事件|章节|第)\s*(\d+(?:\.\d+)?)/g, (_, num) => {
+            nums.add(String(num));
+            return _;
+        });
+        return Array.from(nums);
+    }
+
+    function inferAffectedChapterNumbers(warnings = [], bible = {}) {
+        const nums = new Set();
+        warnings.forEach(warning => getEventNumbersFromText(warning).forEach(num => nums.add(num)));
+        if (warnings.some(w => /规则|世界观|主角弧线|反派|六节点|上帝视角|观众视角/.test(w))) {
+            (bible.chapters || []).forEach(ch => nums.add(String(ch.chapter_number || '')));
+            (bible.timeline || []).forEach(t => nums.add(String(t.chapter_number || '')));
+        }
+        return Array.from(nums).filter(Boolean);
+    }
+
+    function recordChangePatch(previousBible = {}, nextBible = {}, warnings = []) {
+        if (!warnings.length) return null;
+        const affectedChapters = inferAffectedChapterNumbers(warnings, nextBible);
+        const finalized = longformState.finalizedChapters || {};
+        const finalizedAffected = affectedChapters.filter(num => finalized[getLongformChapterKey(num)]);
+        const patch = {
+            id: `patch_${Date.now()}_${stableHash(warnings.join('|')).slice(0, 6)}`,
+            createdAt: new Date().toISOString(),
+            status: finalizedAffected.length > 0 ? 'blocks_finalized' : 'needs_review',
+            warnings,
+            affectedChapters,
+            finalizedAffected,
+            recommendedActions: [
+                affectedChapters.length ? `重跑受影响事件的 SOP：${affectedChapters.join('、')}` : '',
+                finalizedAffected.length ? `已定稿事件受影响，需重新验收：${finalizedAffected.join('、')}` : '',
+                '重跑连续性、人物状态、事件闸门和验收闸门。',
+                '若变更涉及规则/上帝视角，检查是否有信息提前泄露或旧伏笔失效。'
+            ].filter(Boolean)
+        };
+        longformState.changePatches = [patch, ...((longformState.changePatches || []).filter(item => item.status !== 'resolved'))].slice(0, 20);
+        saveLongformState();
+        return patch;
+    }
+
+    function renderChangePatchPanel(patch = null) {
+        const activePatch = patch || (longformState.changePatches || [])[0];
+        if (!activePatch) return;
+        const lines = [
+            `【设定变更补丁】${activePatch.status === 'blocks_finalized' ? '已影响定稿章节' : '需要重审'}`,
+            ...(activePatch.warnings || []).slice(0, 5),
+            activePatch.affectedChapters?.length ? `受影响事件：${activePatch.affectedChapters.join('、')}` : '',
+            activePatch.finalizedAffected?.length ? `受影响定稿事件：${activePatch.finalizedAffected.join('、')}` : '',
+            ...(activePatch.recommendedActions || [])
+        ].filter(Boolean);
+        renderDeviationItems(lines);
+    }
+
+    async function rerunActiveChangePatchReview() {
+        const patch = (longformState.changePatches || []).find(item => item.status !== 'resolved');
+        if (!patch) {
+            renderDeviationItems(['当前没有待处理的设定变更补丁。']);
+            return;
+        }
+        renderDeviationItems([`正在重审设定变更影响：${patch.affectedChapters?.join('、') || '全局'}...`]);
+        const prompt = `你是设定变更传播审查器。请根据补丁记录判断哪些 SOP、正文、定稿章节需要重跑，并给出最小修复顺序。
+【补丁记录】\n${JSON.stringify(patch)}
+【当前世界圣经】\n${JSON.stringify(compactBibleForPrompt(getCurrentBibleSnapshot()))}
+【长篇编辑状态】\n${getLongformEditorialContext()}
+
+请输出：
+【影响范围】受影响事件/人物/规则/伏笔/上帝视角；
+【定稿风险】哪些已定稿章节需要重新验收；
+【重跑清单】SOP、连续性、人物状态、验收闸门、正文改稿的顺序；
+【最小补丁】优先改哪里，避免推倒重来。`;
+        try {
+            const res = await fetch('/api/chat/deduce', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(buildChatPayloadWithLocalSources([{ role: 'user', content: prompt }], 1, prompt))
+            });
+            const data = await res.json();
+            const reply = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `变更重审失败：${data.error || '未知错误'}`;
+            patch.lastReview = reply;
+            patch.lastReviewedAt = new Date().toISOString();
+            patch.status = /无需|没有明显|可继续/.test(reply) ? 'reviewed' : patch.status;
+            saveLongformState();
+            renderDeviationItems([reply]);
+        } catch (error) {
+            renderDeviationItems([`变更重审请求失败：${error.message || '未知错误'}`]);
+        }
+    }
+
     function warnBibleEditConflicts(previousBible, nextBible) {
         const warnings = findBibleEditWarnings(previousBible, nextBible);
         if (warnings.length === 0) return;
@@ -486,8 +577,10 @@ document.addEventListener('DOMContentLoaded', () => {
             savedAt: new Date().toISOString(),
             warnings: warnings.slice(0, 12)
         }));
+        const patch = recordChangePatch(previousBible, nextBible, warnings);
         if (warnings.every(warning => warning.startsWith('你修改了人物') && warning.includes('name'))) return;
         updateRealtimeAlarmFromBible(nextBible, `设定变更传播提醒：\n${warnings.slice(0, 3).join('\n')}`);
+        renderChangePatchPanel(patch);
         alert(`设定变更提醒：\n\n${warnings.slice(0, 4).join('\n\n')}\n\n后续 AI 已会按新设定继续，但建议你检查以上事件是否需要重写/调整。`);
     }
 
@@ -1034,6 +1127,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnSaveChapter = document.getElementById('btn-save-chapter');
     const btnAiWrite = document.getElementById('btn-ai-write');
     const btnReviewCurrentDraft = document.getElementById('btn-review-current-draft');
+    const btnRerunChangePatch = document.getElementById('btn-rerun-change-patch');
     
     const btnOpenTimeline = document.getElementById('btn-open-timeline');
     const btnCloseTimeline = document.getElementById('btn-close-timeline');
@@ -2434,6 +2528,24 @@ ${getUnifiedQualityGuardrails()}
             return;
         }
         const key = getLongformChapterKey();
+        const bible = getCurrentBibleSnapshot() || {};
+        const dependencySnapshot = {
+            bibleHash: stableHash(JSON.stringify(compactBibleForPrompt({
+                genre: bible.genre,
+                worldview: bible.worldview,
+                rules: bible.rules,
+                workflow: bible.workflow,
+                protagonist_arc: bible.protagonist_arc,
+                antagonist_arc: bible.antagonist_arc,
+                hollywood_beats: bible.hollywood_beats,
+                secrets: bible.secrets
+            }))),
+            characterHash: stableHash(JSON.stringify(compactBibleForPrompt(bible.characters || []))),
+            eventHash: stableHash(JSON.stringify(compactBibleForPrompt([
+                ...(bible.timeline || []).filter(item => String(item.chapter_number || '') === String(currentLocalContext.chapterNumber || '')),
+                ...(bible.chapters || []).filter(item => String(item.chapter_number || '') === String(currentLocalContext.chapterNumber || ''))
+            ])))
+        };
         longformState.finalizedChapters = {
             ...(longformState.finalizedChapters || {}),
             [key]: {
@@ -2442,11 +2554,15 @@ ${getUnifiedQualityGuardrails()}
                 title: currentLocalContext.title,
                 wordCount: (editorTextarea?.value || '').length,
                 finalizedAt: new Date().toISOString(),
+                dependencySnapshot,
                 summary: `事件 ${currentLocalContext.chapterNumber}《${currentLocalContext.title}》已通过验收并标记定稿。`
             }
         };
         saveLongformState();
         await runLongformEditorTask('board', '\n\n这是章节定稿后的生产看板更新。');
+        if ((parseFloat(currentLocalContext.chapterNumber) || 0) % 3 === 0) {
+            runLongformEditorTask('memory', '\n\n这是章节定稿后的阶段压缩：请记录已定稿事件、不可逆变化、人物状态、伏笔和设定变更影响。');
+        }
         renderDeviationItems([`已标记定稿：事件 ${currentLocalContext.chapterNumber}《${currentLocalContext.title}》。`]);
     }
 
@@ -4382,6 +4498,7 @@ if (data.success) {
     }
     if (btnSaveChapter) btnSaveChapter.onclick = saveChapterContent;
     if (btnReviewCurrentDraft) btnReviewCurrentDraft.onclick = () => runUnifiedContentReview("manual");
+    if (btnRerunChangePatch) btnRerunChangePatch.onclick = () => rerunActiveChangePatchReview();
     if (btnExportBook) btnExportBook.onclick = () => exportWholeBook("md");
     if (btnFinalizeChapter) btnFinalizeChapter.onclick = () => finalizeCurrentChapter();
     if (btnVolumePlan) btnVolumePlan.onclick = () => runBookLevelTask('volume');
