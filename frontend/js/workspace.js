@@ -801,14 +801,31 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function isSandboxSignalLine(line = '') {
+        const text = String(line || '').trim();
+        if (!text) return false;
+        if (/^([\-*•]|\d+[.、]|【.+】)/.test(text)) return true;
+        return /(缺口|事件|触发|行动人物|人物|动机|关系|羁绊|冲突|阻力|代价|后果|规则|风险|自检|选择|下一步|待确认|类型功能|行为来源|推向终局|伏笔|回收|修正)/.test(text);
+    }
+
+    function looksLikeDraftProseLine(line = '') {
+        const text = String(line || '').trim();
+        if (isSandboxSignalLine(text)) return false;
+        const hasDialogue = /[“”「」]/.test(text);
+        const hasSceneBeat = /(望着|看着|走进|推开|沉默|低声|夜色|灯光|风声|雨水|血|笑了|皱眉|心里|眼神)/.test(text);
+        return text.length > 90 && (hasDialogue || hasSceneBeat || /[，。；：、]/.test(text));
+    }
+
     function formatSandboxVisibleReply(text = '') {
-        const cleaned = stripBibleJsonBlocks(text)
+        const lines = stripBibleJsonBlocks(text)
             .split('\n')
             .map(line => line.trim())
-            .filter(Boolean)
-            .slice(0, 8)
-            .join('\n');
-        return limitText(cleaned, 700);
+            .filter(Boolean);
+        const signalLines = lines.filter(line => !looksLikeDraftProseLine(line));
+        const visibleLines = (signalLines.length ? signalLines : lines)
+            .filter(line => line.length <= 220 || isSandboxSignalLine(line))
+            .slice(0, 22);
+        return limitText(visibleLines.join('\n'), 1800);
     }
 
     // ==========================================
@@ -2344,7 +2361,7 @@ ${getRulesTextForPrompt()}`;
             if (!text) return;
             chatInput.value = '';
             const userMsgWithContext = text
-                + `\n\n(系统附加：当前沙盒模块是【${getActiveSandboxModuleLabel()}】。事件、人物、规则三个模块互相影响；规则/世界观/专家资料拥有最高权限。右侧数据面板已由用户实时更新，优先级高于旧聊天记录和你之前提出的方案。若旧设定与面板冲突，必须废弃旧设定，以面板为准继续推演。若当前输入新增人物，请将其绑定到相关事件，并提醒参与少于三个事件的人物需要后续复用或合并。沙盒回复只输出事件因果、人物选择、规则约束和待确认项，不写正文式情节段落。)`
+                + `\n\n(系统附加：当前沙盒模块是【${getActiveSandboxModuleLabel()}】。事件、人物、规则三个模块互相影响；规则/世界观/专家资料拥有最高权限。右侧数据面板已由用户实时更新，优先级高于旧聊天记录和你之前提出的方案。若旧设定与面板冲突，必须废弃旧设定，以面板为准继续推演。若当前输入新增人物，请将其绑定到相关事件，并提醒参与少于三个事件的人物需要后续复用或合并。沙盒回复禁止写正文式情节段落；请用【缺口诊断】【事件连接】【人物/关系影响】【规则或降智风险】【下一步选择】输出，完整保留关键因果、人物动机、关系变化、不可逆后果和待确认项。)`
                 + getExpertKeywordHint(text);
             const newIndex = genesisConversation.length;
             genesisConversation.push({ role: 'user', content: userMsgWithContext });
