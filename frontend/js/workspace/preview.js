@@ -58,6 +58,127 @@ window.OmniWorkspacePreview = (() => {
         };
     }
 
+    const workflowStages = [
+        ['concept', '概念输入'],
+        ['genre', '类型确认'],
+        ['anchors', '起终点确认'],
+        ['leads', '主角/反派确认'],
+        ['arcs', '双弧线建立'],
+        ['six_beats', '六节点骨架'],
+        ['bridges', '桥接事件'],
+        ['sandbox_acceptance', '沙盒验收'],
+        ['sop', 'SOP 推演'],
+        ['draft', '正文生成'],
+        ['finalize', '正文验收/定稿']
+    ];
+
+    const hollywoodBeatTemplates = [
+        { beat: 'opening', label: '开始事件', purpose: '旧秩序被打破，主角被卷入故事。' },
+        { beat: 'first_turn', label: '第一转折', purpose: '主角做出不可逆选择，进入真正战场。' },
+        { beat: 'midpoint_false_victory', label: '中点/虚假胜利', purpose: '看似赢了，实际埋下更大代价或陷阱。' },
+        { beat: 'opposition_rises', label: '反派逼近', purpose: '反派/阻力开始聪明反制，主角旧方法失效。' },
+        { beat: 'dark_night', label: '至暗时刻', purpose: '外在失败与内在缺陷同时爆发。' },
+        { beat: 'finale', label: '终局事件', purpose: '主角用新的选择面对反派，完成弧线闭环。' }
+    ];
+
+    function getWorkflow(bible = {}) {
+        return {
+            control_mode: bible.workflow?.control_mode || 'semi',
+            stage: bible.workflow?.stage || 'concept',
+            status: bible.workflow?.status || 'draft',
+            notes: bible.workflow?.notes || ''
+        };
+    }
+
+    function renderArcPanel(title, prefix, arc = {}) {
+        return `
+            <div class="bg-gray-900 border border-gray-700 rounded-xl p-3">
+                <h5 class="text-xs font-bold text-purple-300 mb-2">${title}</h5>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <input class="arc-${prefix}-want bg-gray-950 border border-gray-700 rounded p-2 text-xs text-gray-100" value="${escapePreviewValue(arc.want || '')}" placeholder="外在目标 / 他以为自己想要什么">
+                    <input class="arc-${prefix}-need bg-gray-950 border border-gray-700 rounded p-2 text-xs text-gray-100" value="${escapePreviewValue(arc.need || '')}" placeholder="内在需求 / 真正需要面对什么">
+                    <input class="arc-${prefix}-lie bg-gray-950 border border-gray-700 rounded p-2 text-xs text-gray-100" value="${escapePreviewValue(arc.lie || '')}" placeholder="错误信念 / 误判">
+                    <input class="arc-${prefix}-fear bg-gray-950 border border-gray-700 rounded p-2 text-xs text-gray-100" value="${escapePreviewValue(arc.fear || '')}" placeholder="恐惧 / 软肋">
+                    <textarea class="arc-${prefix}-start bg-gray-950 border border-gray-700 rounded p-2 text-xs text-gray-100 h-16 resize-none" placeholder="开始状态">${escapePreviewValue(arc.start || '')}</textarea>
+                    <textarea class="arc-${prefix}-end bg-gray-950 border border-gray-700 rounded p-2 text-xs text-gray-100 h-16 resize-none" placeholder="结束状态">${escapePreviewValue(arc.end || '')}</textarea>
+                    <textarea class="arc-${prefix}-turning-points md:col-span-2 bg-gray-950 border border-gray-700 rounded p-2 text-xs text-gray-100 h-16 resize-none" placeholder="关键转折/压力测试">${escapePreviewValue(arc.turning_points || '')}</textarea>
+                </div>
+            </div>
+        `;
+    }
+
+    function renderHollywoodWorkflow(bible = {}) {
+        const workflow = getWorkflow(bible);
+        const beatsByKey = new Map((bible.hollywood_beats || []).map(item => [item.beat || item.key, item]));
+        const stageOptions = workflowStages.map(([key, label]) => `<option value="${key}" ${workflow.stage === key ? 'selected' : ''}>${label}</option>`).join('');
+        return `
+            <div class="sandbox-module hidden" data-sandbox-module="workflow">
+                <div class="bg-gray-800/50 p-5 rounded-xl border border-purple-800/70 mt-6">
+                    <h4 class="text-purple-300 font-bold mb-3 flex items-center"><i data-lucide="route" class="w-4 h-4 mr-2"></i>创作流程状态机</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div>
+                            <label class="text-[10px] text-gray-500 font-bold uppercase mb-1 block">当前阶段</label>
+                            <select id="workflow-stage" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-purple-200 text-sm">${stageOptions}</select>
+                        </div>
+                        <div>
+                            <label class="text-[10px] text-gray-500 font-bold uppercase mb-1 block">流程状态</label>
+                            <select id="workflow-status" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-purple-200 text-sm">
+                                <option value="draft" ${workflow.status === 'draft' ? 'selected' : ''}>草稿</option>
+                                <option value="reviewing" ${workflow.status === 'reviewing' ? 'selected' : ''}>审查中</option>
+                                <option value="needs_fix" ${workflow.status === 'needs_fix' ? 'selected' : ''}>需要修复</option>
+                                <option value="approved" ${workflow.status === 'approved' ? 'selected' : ''}>已通过</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-[10px] text-gray-500 font-bold uppercase mb-1 block">权限模式</label>
+                            <select id="workflow-control-mode" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-blue-200 text-sm">
+                                <option value="semi" ${workflow.control_mode === 'semi' ? 'selected' : ''}>半自动</option>
+                                <option value="auto" ${workflow.control_mode === 'auto' ? 'selected' : ''}>全自动</option>
+                                <option value="manual" ${workflow.control_mode === 'manual' ? 'selected' : ''}>手动</option>
+                            </select>
+                        </div>
+                    </div>
+                    <textarea id="workflow-notes" class="mt-3 w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-gray-200 text-sm h-20 resize-none" placeholder="阶段说明、用户强制修改、变更传播记录。">${escapePreviewValue(workflow.notes)}</textarea>
+                </div>
+
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-3 mt-6">
+                    ${renderArcPanel('主角弧线', 'protagonist', bible.protagonist_arc || {})}
+                    ${renderArcPanel('最终反派/核心阻力弧线', 'antagonist', bible.antagonist_arc || {})}
+                </div>
+
+                <div class="bg-gray-800/50 p-5 rounded-xl border border-fuchsia-800/70 mt-6">
+                    <h4 class="text-fuchsia-300 font-bold mb-3 flex items-center"><i data-lucide="film" class="w-4 h-4 mr-2"></i>好莱坞六节点骨架</h4>
+                    <div class="space-y-3" id="hollywood-beats-list">
+                        ${hollywoodBeatTemplates.map(template => {
+                            const beat = beatsByKey.get(template.beat) || {};
+                            return `
+                                <div class="hollywood-beat-item bg-gray-900 border border-gray-700 rounded-xl p-3" data-beat="${template.beat}">
+                                    <div class="grid grid-cols-1 md:grid-cols-4 gap-2 items-center mb-2">
+                                        <div>
+                                            <div class="text-xs font-bold text-fuchsia-200">${template.label}</div>
+                                            <div class="text-[10px] text-gray-500">${template.purpose}</div>
+                                        </div>
+                                        <input class="md:col-span-1 beat-title bg-gray-950 border border-gray-700 rounded p-2 text-xs text-fuchsia-100" value="${escapePreviewValue(beat.title || '')}" placeholder="事件名">
+                                        <input class="md:col-span-1 beat-event-ref bg-gray-950 border border-gray-700 rounded p-2 text-xs text-gray-200" value="${escapePreviewValue(beat.event_ref || '')}" placeholder="关联事件/章节">
+                                        <select class="beat-status bg-gray-950 border border-gray-700 rounded p-2 text-xs text-gray-200">
+                                            <option value="draft" ${beat.status === 'draft' || !beat.status ? 'selected' : ''}>草稿</option>
+                                            <option value="approved" ${beat.status === 'approved' ? 'selected' : ''}>通过</option>
+                                            <option value="needs_fix" ${beat.status === 'needs_fix' ? 'selected' : ''}>需修复</option>
+                                        </select>
+                                    </div>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                        <textarea class="beat-content bg-gray-950 border border-gray-700 rounded p-2 text-xs text-gray-100 h-20 resize-none" placeholder="事件内容：发生了什么、谁做了什么选择。">${escapePreviewValue(beat.content || '')}</textarea>
+                                        <textarea class="beat-function bg-gray-950 border border-gray-700 rounded p-2 text-xs text-gray-100 h-20 resize-none" placeholder="叙事功能：如何推动主角弧线、反派计划、类型承诺和终局。">${escapePreviewValue(beat.function || '')}</textarea>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
     function renderCharacterCard(c = {}, bible = {}) {
         const eventCount = getCharacterEventCount(c, bible);
         const usage = getCharacterUsageStyle(eventCount);
@@ -103,12 +224,15 @@ window.OmniWorkspacePreview = (() => {
         const narrativeModeHTML = narrativeModes.map(m => `<option value="${m}" ${narrativeLogic.mode === m ? 'selected' : ''}>${m}</option>`).join('');
 
         let html = `
-            <div class="sticky -top-6 z-30 -mx-6 -mt-6 mb-4 px-6 pt-6 pb-3 bg-gray-950 backdrop-blur border-b border-gray-800 grid grid-cols-4 gap-2">
+            <div class="sticky -top-6 z-30 -mx-6 -mt-6 mb-4 px-6 pt-6 pb-3 bg-gray-950 backdrop-blur border-b border-gray-800 grid grid-cols-5 gap-2">
+                <button type="button" data-sandbox-module-button="workflow" onclick="switchSandboxModule('workflow')" class="sandbox-module-btn py-2 rounded-lg text-xs font-bold border border-purple-900/50 text-purple-300 bg-purple-950/30">流程骨架</button>
                 <button type="button" data-sandbox-module-button="events" onclick="switchSandboxModule('events')" class="sandbox-module-btn py-2 rounded-lg text-xs font-bold border border-purple-900/50 text-purple-300 bg-purple-950/30">事件讨论</button>
                 <button type="button" data-sandbox-module-button="characters" onclick="switchSandboxModule('characters')" class="sandbox-module-btn py-2 rounded-lg text-xs font-bold border border-gray-800 text-gray-400 bg-gray-900">人物设定</button>
                 <button type="button" data-sandbox-module-button="rules" onclick="switchSandboxModule('rules')" class="sandbox-module-btn py-2 rounded-lg text-xs font-bold border border-gray-800 text-gray-400 bg-gray-900">规则/专家</button>
                 <button type="button" data-sandbox-module-button="secrets" onclick="switchSandboxModule('secrets')" class="sandbox-module-btn py-2 rounded-lg text-xs font-bold border border-gray-800 text-gray-400 bg-gray-900">上帝视角</button>
             </div>
+
+            ${renderHollywoodWorkflow(bible)}
 
             <div class="sandbox-module" data-sandbox-module="rules">
             <div class="bg-gray-800/50 p-5 rounded-xl border border-cyan-800/70">
@@ -281,7 +405,7 @@ window.OmniWorkspacePreview = (() => {
             </div>
         `;
         container.innerHTML = html;
-        const activeModule = localStorage.getItem('omnistory_sandbox_module') || 'events';
+        const activeModule = localStorage.getItem('omnistory_sandbox_module') || 'workflow';
         window.switchSandboxModule(activeModule);
         if(window.lucide) lucide.createIcons();
     }

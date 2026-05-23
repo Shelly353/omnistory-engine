@@ -100,6 +100,10 @@ document.addEventListener('DOMContentLoaded', () => {
             getActiveSandboxModuleLabel(),
             currentBible?.worldview || '',
             currentBible?.rules || '',
+            JSON.stringify(currentBible?.workflow || {}),
+            JSON.stringify(currentBible?.protagonist_arc || {}),
+            JSON.stringify(currentBible?.antagonist_arc || {}),
+            JSON.stringify(currentBible?.hollywood_beats || []),
             formatGodViewContext(currentBible),
             (currentBible?.chapters || []).map(ch => `${ch.title || ''} ${ch.content || ''}`).join('\n'),
             genesisConversation.slice(-3).map(msg => applyManualCharacterRenamesToText(msg.content, manualEdits)).join('\n')
@@ -110,7 +114,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }));
         const priorityMessage = currentBible ? [{
             role: 'user',
-            content: `【最高优先级校准：以右侧实时面板为准】\n用户可能已经在右侧实时灵感面板手动修改了你之前提出的低质量设定。以下面板快照是最新有效设定，优先级高于旧聊天记录和你过去的方案。若旧内容冲突，必须废弃旧内容，并基于此快照继续推演。\n${currentBibleText}\n\n【上帝视角信息权限】\n${formatGodViewContext(currentBible)}\n\n规则：未揭露/部分揭露的秘密只供后台因果校验，不可让角色或观众提前知道；沙盒推理事件只能基于 audience_view 推进。状态为 revealed 后，才可把 god_view 作为公开事实调用。${manualWarnings ? `\n\n【手动设定变更警报】\n${manualWarnings}\n如果这些变更与旧事件冲突，必须主动指出冲突并给出整改方案。` : ''}`
+            content: `【最高优先级校准：以右侧实时面板为准】\n用户可能已经在右侧实时灵感面板手动修改了你之前提出的低质量设定。以下面板快照是最新有效设定，优先级高于旧聊天记录和你过去的方案。若旧内容冲突，必须废弃旧内容，并基于此快照继续推演。\n${currentBibleText}\n\n【当前权限模式】${getCurrentControlMode()}\n- auto 全自动：发现红/黄风险时，先自我修复并说明修复结果，只把真正需要作者做审美决定的 1-2 个问题抛出。\n- semi 半自动：发现风险时给 2-3 个修复方案，让作者选择，不要擅自覆盖核心设定。\n- manual 手动：只报警和解释，不自动修改。\n\n【沙盒主流程】救猫咪类型 -> 开始事件 -> 结束事件 -> 主角 -> 最终反派 -> 主角弧线 -> 反派弧线 -> 好莱坞六节点 -> 桥接事件 -> 时间线/人物卡/规则/观众视角/上帝视角 -> 沙盒验收。沙盒只做故事骨架，不做章节细化和正文。\n\n【上帝视角信息权限】\n${formatGodViewContext(currentBible)}\n\n规则：未揭露/部分揭露的秘密只供后台因果校验，不可让角色或观众提前知道；沙盒推理事件只能基于 audience_view 推进。状态为 revealed 后，才可把 god_view 作为公开事实调用。${manualWarnings ? `\n\n【手动设定变更警报】\n${manualWarnings}\n如果这些变更与旧事件冲突，必须主动指出冲突并给出整改方案。` : ''}`
         }] : [];
         return {
             ...buildChatPayload([...priorityMessage, ...renamedConversation]),
@@ -404,12 +408,36 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (refs.length > 0) warnings.push(`你删除了人物「${prevName}」，但他/她仍关联：\n${refs.slice(0, 8).join('\n')}`);
                 return;
             }
-            const changedFields = ['name', 'role', 'faction', 'description', 'personality', 'core_desire', 'goal', 'motivation', 'flaw', 'fear', 'skills', 'background', 'character_arc']
+            const changedFields = ['name', 'role', 'faction', 'description', 'personality', 'core_desire', 'goal', 'motivation', 'flaw', 'fear', 'skills', 'character_rules', 'background', 'character_arc']
                 .filter(field => String(prevChar[field] || '').trim() !== String(nextChar[field] || '').trim());
             if (changedFields.length > 0 && refs.length > 0) {
                 warnings.push(`你修改了人物「${prevName}」的 ${changedFields.join('、')}。\n这些已确定内容可能需要同步检查：\n${refs.slice(0, 8).join('\n')}`);
             }
         });
+
+        if (String(previousBible.rules || '').trim() !== String(nextBible.rules || '').trim()) {
+            warnings.push('你修改了世界规则/专家资料。系统需要重新检查六节点、桥接事件、人物能力边界、SOP 大纲和已写正文是否仍然成立。');
+        }
+        if (String(previousBible.worldview || '').trim() !== String(nextBible.worldview || '').trim()) {
+            warnings.push('你修改了世界观背景。系统需要重新检查事件发生条件、职业/历史/社会规则和人物行动边界。');
+        }
+        const previousBeats = new Map((previousBible.hollywood_beats || []).map(beat => [beat.beat || beat.key, beat]));
+        (nextBible.hollywood_beats || []).forEach(beat => {
+            const prev = previousBeats.get(beat.beat || beat.key);
+            if (!prev) return;
+            const changed = ['title', 'event_ref', 'status', 'content', 'function']
+                .some(field => String(prev[field] || '').trim() !== String(beat[field] || '').trim());
+            if (changed) warnings.push(`你修改了好莱坞六节点「${beat.title || beat.beat || '未命名'}」。系统需要重新检查桥接事件、主角/反派弧线和后续 SOP 是否对齐。`);
+        });
+        if (JSON.stringify(normalizeArc(previousBible.protagonist_arc || {})) !== JSON.stringify(normalizeArc(nextBible.protagonist_arc || {}))) {
+            warnings.push('你修改了主角弧线。系统需要重新检查主角在六节点、桥接事件、SOP 和正文中的选择是否仍然成立。');
+        }
+        if (JSON.stringify(normalizeArc(previousBible.antagonist_arc || {})) !== JSON.stringify(normalizeArc(nextBible.antagonist_arc || {}))) {
+            warnings.push('你修改了反派/核心阻力弧线。系统需要重新检查反派计划、反制升级、虚假胜利、至暗时刻和终局是否仍然成立。');
+        }
+        if (JSON.stringify(normalizeSecrets(previousBible.secrets || [])) !== JSON.stringify(normalizeSecrets(nextBible.secrets || []))) {
+            warnings.push('你修改了上帝视角/观众视角信息。系统需要重新检查信息权限、伏笔、误导和后续事件是否提前泄密或失去悬念。');
+        }
 
         const previousChapters = new Map((previousBible.chapters || []).map(ch => [String(ch.chapter_number || ''), ch]));
         (nextBible.chapters || []).forEach(ch => {
@@ -457,6 +485,7 @@ document.addEventListener('DOMContentLoaded', () => {
             warnings: warnings.slice(0, 12)
         }));
         if (warnings.every(warning => warning.startsWith('你修改了人物') && warning.includes('name'))) return;
+        updateRealtimeAlarmFromBible(nextBible, `设定变更传播提醒：\n${warnings.slice(0, 3).join('\n')}`);
         alert(`设定变更提醒：\n\n${warnings.slice(0, 4).join('\n\n')}\n\n后续 AI 已会按新设定继续，但建议你检查以上事件是否需要重写/调整。`);
     }
 
@@ -555,6 +584,10 @@ document.addEventListener('DOMContentLoaded', () => {
         normalized.timeline = uniqueStableArray((normalized.timeline || [])
             .filter(item => !edits.deletedTimeline[getTimelineManualKey(item)]), getTimelineMergeKey);
         normalized.secrets = normalizeSecrets(normalized.secrets || []);
+        normalized.workflow = normalizeWorkflow(normalized.workflow || {});
+        normalized.protagonist_arc = normalizeArc(normalized.protagonist_arc || {});
+        normalized.antagonist_arc = normalizeArc(normalized.antagonist_arc || {});
+        normalized.hollywood_beats = normalizeHollywoodBeats(normalized.hollywood_beats || []);
         normalized.chapters = uniqueStableArray(normalized.chapters || [], chapter => [
             String(chapter.chapter_number || '').trim(),
             normalizeStableKey(chapter.title)
@@ -586,6 +619,10 @@ document.addEventListener('DOMContentLoaded', () => {
             : editedNext.timeline;
         merged.timeline = mergeStableArray(editedPrevious.timeline, nextTimeline, getTimelineMergeKey);
         merged.secrets = mergeStableArray(normalizeSecrets(editedPrevious.secrets), normalizeSecrets(editedNext.secrets), getSecretMergeKey);
+        merged.workflow = normalizeWorkflow({ ...(editedPrevious.workflow || {}), ...(editedNext.workflow || {}) });
+        merged.protagonist_arc = mergeObjectMissingFields(normalizeArc(editedPrevious.protagonist_arc || {}), normalizeArc(editedNext.protagonist_arc || {}));
+        merged.antagonist_arc = mergeObjectMissingFields(normalizeArc(editedPrevious.antagonist_arc || {}), normalizeArc(editedNext.antagonist_arc || {}));
+        merged.hollywood_beats = normalizeHollywoodBeats(mergeStableArray(editedPrevious.hollywood_beats || [], editedNext.hollywood_beats || [], beat => beat.beat || beat.key));
         merged.chapters = mergeStableArray(editedPrevious.chapters, editedNext.chapters, chapter => [
             String(chapter.chapter_number || '').trim(),
             normalizeStableKey(chapter.title)
@@ -680,6 +717,10 @@ document.addEventListener('DOMContentLoaded', () => {
             Object.prototype.hasOwnProperty.call(value, 'genre') ||
             Object.prototype.hasOwnProperty.call(value, 'worldview') ||
             Object.prototype.hasOwnProperty.call(value, 'rules') ||
+            Object.prototype.hasOwnProperty.call(value, 'workflow') ||
+            Object.prototype.hasOwnProperty.call(value, 'protagonist_arc') ||
+            Object.prototype.hasOwnProperty.call(value, 'antagonist_arc') ||
+            Array.isArray(value.hollywood_beats) ||
             Array.isArray(value.characters) ||
             Array.isArray(value.timeline) ||
             Array.isArray(value.chapters)
@@ -739,6 +780,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!looksLikeBibleJson(bible)) return false;
         const mergedBible = saveLatestBible(bible) || bible;
         if (options.render !== false) renderHumanPreview(mergedBible);
+        updateRealtimeAlarmFromBible(mergedBible, 'AI 回复后已实时检查。');
         if (options.audit) window.runSandboxRuleAudit(mergedBible);
         if (options.cloud !== false) syncGenesisDraftToCloud();
         return true;
@@ -859,9 +901,9 @@ document.addEventListener('DOMContentLoaded', () => {
         extractAndSaveBibleFromConversation(conversationForExtraction, `上一轮 AI 回复没有提供合法 JSON。请根据当前面板数据、全量用户修正记录、最近对话和上一轮 AI 回复，提取并合并最新共识，输出完整世界圣经 JSON。
 要求：
 1. 必须记录用户在对话中否定、修正或新增的人物/事件/规则。
-2. characters 详细字段、人物规则 character_rules、relations 人物羁绊、timeline 细密时间轴、secrets 上帝视角信息是稳定资产；除非用户明确说删除，否则必须保留。
+2. workflow 流程状态、protagonist_arc 主角弧线、antagonist_arc 反派弧线、hollywood_beats 好莱坞六节点、characters 详细字段、人物规则 character_rules、relations 人物羁绊、timeline 细密时间轴、secrets 上帝视角信息是稳定资产；除非用户明确说删除，否则必须保留。
 3. 如果当前面板中的人物羁绊或细密时间轴为空，必须从全量用户修正记录和全量沙盒对话尾迹中重建，不要留空。
-4. 与人物有关的专家设定必须进入对应人物的 character_rules；全局专业规则进入 rules；观众不知道但作者必须知道的真相进入 secrets。
+4. 与人物有关的专家设定必须进入对应人物的 character_rules；全局专业规则进入 rules；观众不知道但作者必须知道的真相进入 secrets；沙盒推进阶段必须按 workflow.stage 和 hollywood_beats 补骨架，不要跳去写正文。
 5. 只输出 JSON，不要输出正文。`, { recoveryMode: true }).catch(error => {
             console.error('后台面板补同步失败:', error);
             setGenesisSyncBlocked(true, `上一轮设定没有确认写入实时面板：${error.message || '未知错误'}\n你可以先看 AI 的问题，也可以在输入框里草拟回答，但暂时不能发送。建议优先用上一条用户消息旁的撤回按钮重新回答；如果连续失败，再点“从对话刷新面板”兜底修复。`);
@@ -928,6 +970,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const sandboxChatPane = document.getElementById('sandbox-chat-pane');
     const sandboxPreviewPane = document.getElementById('sandbox-preview-pane');
     const btnToggleSandboxLayout = document.getElementById('btn-toggle-sandbox-layout');
+    const sandboxControlMode = document.getElementById('sandbox-control-mode');
+    const sandboxAlertCenter = document.getElementById('sandbox-alert-center');
+    const sandboxAlertLevel = document.getElementById('sandbox-alert-level');
+    const sandboxAlertSummary = document.getElementById('sandbox-alert-summary');
     const mainWorkspace = document.getElementById('main-workspace');
     const chatHistory = document.getElementById('chat-history');
     const chatInput = document.getElementById('chat-input');
@@ -1068,6 +1114,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     const bible = collectBibleFromPreview();
                     warnBibleEditConflicts(previousBible, bible);
                     const savedBible = saveLatestBible(bible, { preserveStableLists: false });
+                    syncSandboxModeControls(savedBible.workflow?.control_mode || bible.workflow?.control_mode || 'semi');
+                    updateRealtimeAlarmFromBible(savedBible || bible, '面板修改后已重新检查。');
                     if (shouldRenderAfterSave && savedBible) renderHumanPreview(savedBible);
                     syncGenesisDraftToCloud();
                 } catch (e) {
@@ -1086,6 +1134,66 @@ document.addEventListener('DOMContentLoaded', () => {
         window.OmniWorkspacePreview.renderHumanPreview(humanPreviewContainer, bible);
         renderLocalSourcePanel();
         attachPreviewAutosave();
+        syncSandboxModeControls(bible?.workflow?.control_mode || 'semi');
+        updateRealtimeAlarmFromBible(bible, '面板已加载。');
+    }
+
+    function syncSandboxModeControls(mode = 'semi') {
+        const safeMode = ['auto', 'semi', 'manual'].includes(mode) ? mode : 'semi';
+        if (sandboxControlMode && sandboxControlMode.value !== safeMode) sandboxControlMode.value = safeMode;
+        const workflowMode = document.getElementById('workflow-control-mode');
+        if (workflowMode && workflowMode.value !== safeMode) workflowMode.value = safeMode;
+    }
+
+    function getCurrentControlMode() {
+        return document.getElementById('workflow-control-mode')?.value || sandboxControlMode?.value || 'semi';
+    }
+
+    function setSandboxAlert(level = 'green', summary = '') {
+        if (!sandboxAlertCenter || !sandboxAlertLevel || !sandboxAlertSummary) return;
+        const config = {
+            green: { label: '绿色', box: 'border-emerald-800/60 text-emerald-200', badge: 'bg-emerald-900/40 text-emerald-200 border-emerald-700/60' },
+            yellow: { label: '黄色', box: 'border-yellow-800/60 text-yellow-100', badge: 'bg-yellow-900/40 text-yellow-200 border-yellow-700/60' },
+            red: { label: '红色', box: 'border-red-800/70 text-red-100', badge: 'bg-red-900/50 text-red-200 border-red-700/70' }
+        }[level] || {};
+        sandboxAlertCenter.className = `absolute bottom-4 right-4 z-[65] w-[360px] max-w-[calc(100vw-2rem)] bg-gray-950/95 rounded-xl shadow-2xl p-3 text-xs ${config.box}`;
+        sandboxAlertLevel.className = `text-[10px] px-2 py-0.5 rounded border ${config.badge}`;
+        sandboxAlertLevel.textContent = config.label || '绿色';
+        sandboxAlertSummary.textContent = summary || '当前未发现明显风险。';
+    }
+
+    function getBibleAlarmSnapshot(bible = {}) {
+        const warnings = [];
+        const reds = [];
+        const beats = normalizeHollywoodBeats(bible.hollywood_beats || []);
+        const filledBeats = beats.filter(beat => beat.title || beat.content || beat.function);
+        const chars = bible.characters || [];
+        const protagonist = chars.find(c => /主角|主人公|男主|女主|protagonist/i.test(`${c.role || ''} ${c.description || ''}`));
+        const antagonist = chars.find(c => /反派|对手|敌人|核心阻力|antagonist/i.test(`${c.role || ''} ${c.description || ''}`));
+        if (!bible.genre) warnings.push('救猫咪类型未确认。');
+        if (chars.length === 0) warnings.push('人物卡尚未建立。');
+        if (!protagonist) reds.push('主角尚未明确，无法建立主角弧线。');
+        if (!antagonist) warnings.push('最终反派/核心阻力尚未明确。');
+        if (filledBeats.length < 6) warnings.push(`好莱坞六节点只完成 ${filledBeats.length}/6。`);
+        if (beats.some(beat => beat.status === 'needs_fix')) reds.push('六节点中存在“需修复”的关键事件。');
+        if (!bible.protagonist_arc?.want || !bible.protagonist_arc?.need) warnings.push('主角弧线缺少外在目标或内在需求。');
+        if (!bible.antagonist_arc?.want && !bible.antagonist_arc?.start) warnings.push('反派/核心阻力弧线不足。');
+        if ((bible.timeline || []).length === 0 && (bible.chapters || []).length === 0) warnings.push('事件时间线尚未建立。');
+        if ((bible.secrets || []).some(secret => secret.god_view && !secret.audience_view)) reds.push('存在上帝视角秘密缺少观众视角，容易提前泄露。');
+        return { level: reds.length ? 'red' : (warnings.length ? 'yellow' : 'green'), items: [...reds, ...warnings] };
+    }
+
+    function updateRealtimeAlarmFromBible(bible = null, prefix = '') {
+        const targetBible = bible || getCurrentBibleSnapshot();
+        if (!targetBible) return setSandboxAlert('yellow', '等待沙盒设定。');
+        const snapshot = getBibleAlarmSnapshot(targetBible);
+        const modeLabel = ({ auto: '全自动', semi: '半自动', manual: '手动' })[getCurrentControlMode()] || '半自动';
+        const summary = [
+            prefix,
+            `权限模式：${modeLabel}。`,
+            snapshot.items.length ? snapshot.items.slice(0, 5).join('\n') : '当前骨架、人物、信息权限未发现明显阻断风险。'
+        ].filter(Boolean).join('\n');
+        setSandboxAlert(snapshot.level, summary);
     }
 
     function getSandboxLayoutMode() {
@@ -1125,6 +1233,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const next = modes[(modes.indexOf(current) + 1) % modes.length] || 'auto';
         localStorage.setItem('omnistory_sandbox_layout', next);
         applySandboxLayoutMode(next);
+    }
+
+    if (sandboxControlMode) {
+        sandboxControlMode.addEventListener('change', () => {
+            syncSandboxModeControls(sandboxControlMode.value);
+            if (document.getElementById('prev-genre')) {
+                const bible = collectBibleFromPreview();
+                bible.workflow = normalizeWorkflow({ ...(bible.workflow || {}), control_mode: sandboxControlMode.value });
+                const savedBible = saveLatestBible(bible, { preserveStableLists: false });
+                updateRealtimeAlarmFromBible(savedBible || bible, '权限模式已更新。');
+                syncGenesisDraftToCloud();
+            } else {
+                updateRealtimeAlarmFromBible(loadLatestBible(), '权限模式已更新。');
+            }
+        });
     }
 
     function closeGenesisSandbox() {
@@ -1185,6 +1308,43 @@ document.addEventListener('DOMContentLoaded', () => {
         return uniqueStableArray((Array.isArray(secrets) ? secrets : [])
             .map(normalizeSecretItem)
             .filter(secret => secret.title || secret.audience_view || secret.god_view), getSecretMergeKey);
+    }
+
+    function normalizeWorkflow(workflow = {}) {
+        return {
+            control_mode: ['auto', 'semi', 'manual'].includes(workflow.control_mode) ? workflow.control_mode : 'semi',
+            stage: workflow.stage || 'concept',
+            status: workflow.status || 'draft',
+            notes: String(workflow.notes || '').trim()
+        };
+    }
+
+    function normalizeArc(arc = {}) {
+        return {
+            want: String(arc.want || '').trim(),
+            need: String(arc.need || '').trim(),
+            lie: String(arc.lie || '').trim(),
+            fear: String(arc.fear || '').trim(),
+            start: String(arc.start || '').trim(),
+            end: String(arc.end || '').trim(),
+            turning_points: String(arc.turning_points || '').trim()
+        };
+    }
+
+    function normalizeHollywoodBeats(beats = []) {
+        const beatOrder = ['opening', 'first_turn', 'midpoint_false_victory', 'opposition_rises', 'dark_night', 'finale'];
+        const byKey = new Map((Array.isArray(beats) ? beats : []).map(beat => [beat.beat || beat.key, beat]));
+        return beatOrder.map(key => {
+            const beat = byKey.get(key) || {};
+            return {
+                beat: key,
+                title: String(beat.title || '').trim(),
+                event_ref: String(beat.event_ref || '').trim(),
+                status: ['draft', 'approved', 'needs_fix'].includes(beat.status) ? beat.status : 'draft',
+                content: String(beat.content || '').trim(),
+                function: String(beat.function || beat.purpose || '').trim()
+            };
+        });
     }
 
     function saveSecretToCurrentBible(secretPayload = {}) {
@@ -1504,6 +1664,38 @@ document.addEventListener('DOMContentLoaded', () => {
             genre: document.getElementById('prev-genre') ? document.getElementById('prev-genre').value.trim() : "",
             worldview: document.getElementById('prev-worldview') ? document.getElementById('prev-worldview').value.trim() : "",
             rules: buildRulesWithReferenceMaterials(rulesInput, sourceMaterials),
+            workflow: normalizeWorkflow({
+                control_mode: document.getElementById('workflow-control-mode')?.value || document.getElementById('sandbox-control-mode')?.value || "semi",
+                stage: document.getElementById('workflow-stage')?.value || "concept",
+                status: document.getElementById('workflow-status')?.value || "draft",
+                notes: document.getElementById('workflow-notes')?.value || ""
+            }),
+            protagonist_arc: normalizeArc({
+                want: document.querySelector('.arc-protagonist-want')?.value || "",
+                need: document.querySelector('.arc-protagonist-need')?.value || "",
+                lie: document.querySelector('.arc-protagonist-lie')?.value || "",
+                fear: document.querySelector('.arc-protagonist-fear')?.value || "",
+                start: document.querySelector('.arc-protagonist-start')?.value || "",
+                end: document.querySelector('.arc-protagonist-end')?.value || "",
+                turning_points: document.querySelector('.arc-protagonist-turning-points')?.value || ""
+            }),
+            antagonist_arc: normalizeArc({
+                want: document.querySelector('.arc-antagonist-want')?.value || "",
+                need: document.querySelector('.arc-antagonist-need')?.value || "",
+                lie: document.querySelector('.arc-antagonist-lie')?.value || "",
+                fear: document.querySelector('.arc-antagonist-fear')?.value || "",
+                start: document.querySelector('.arc-antagonist-start')?.value || "",
+                end: document.querySelector('.arc-antagonist-end')?.value || "",
+                turning_points: document.querySelector('.arc-antagonist-turning-points')?.value || ""
+            }),
+            hollywood_beats: normalizeHollywoodBeats(Array.from(document.querySelectorAll('.hollywood-beat-item')).map(el => ({
+                beat: el.dataset.beat || "",
+                title: el.querySelector('.beat-title')?.value || "",
+                event_ref: el.querySelector('.beat-event-ref')?.value || "",
+                status: el.querySelector('.beat-status')?.value || "draft",
+                content: el.querySelector('.beat-content')?.value || "",
+                function: el.querySelector('.beat-function')?.value || ""
+            }))),
             characters: Array.from(document.querySelectorAll('.prev-char-item')).map(el => {
                 const characterId = el.dataset.characterId && el.dataset.characterId !== 'char_' ? el.dataset.characterId : "";
                 return {
@@ -1731,8 +1923,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getActiveSandboxModuleLabel() {
-        const moduleName = localStorage.getItem('omnistory_sandbox_module') || 'events';
-        return ({ events: '事件讨论', characters: '人物设定', rules: '规则/专家', secrets: '上帝视角' })[moduleName] || '事件讨论';
+        const moduleName = localStorage.getItem('omnistory_sandbox_module') || 'workflow';
+        return ({ workflow: '流程骨架', events: '事件讨论', characters: '人物设定', rules: '规则/专家', secrets: '上帝视角' })[moduleName] || '流程骨架';
     }
 
     function getExpertKeywordHint(text = "") {
@@ -1757,6 +1949,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!targetBible || !alarmBox) return;
         const rules = [targetBible.worldview, targetBible.rules].filter(Boolean).join('\n\n');
         const events = [
+            ...(targetBible.hollywood_beats || []).map(beat => `六节点 ${beat.beat || '-'}《${beat.title || ''}》：${beat.content || ''}\n功能：${beat.function || ''}`),
             ...(targetBible.timeline || []).map(t => `时间轴事件 ${t.chapter_number || '-'}：${t.description || ''}`),
             ...(targetBible.chapters || []).map(ch => `章节/事件 ${ch.chapter_number || '-'}《${ch.title || ''}》：${ch.content || ''}`)
         ].join('\n');
@@ -1770,6 +1963,8 @@ document.addEventListener('DOMContentLoaded', () => {
 【规则/世界观/专家资料】\n${limitText(rules, 3500)}
 ${getBuiltInExpertBaseline()}
 【人物卡】\n${limitText(JSON.stringify(targetBible.characters || []), 2500)}
+【主角弧线】\n${limitText(JSON.stringify(targetBible.protagonist_arc || {}), 1500)}
+【反派/核心阻力弧线】\n${limitText(JSON.stringify(targetBible.antagonist_arc || {}), 1500)}
 【上帝视角信息权限】\n${limitText(formatGodViewContext(targetBible), 2500)}
 【事件/章节】\n${limitText(events, 4500)}
 
@@ -1786,9 +1981,13 @@ ${getBuiltInExpertBaseline()}
                 body: JSON.stringify(buildChatPayloadWithLocalSources([{ role: 'user', content: prompt }], 1, prompt))
             });
             const data = await res.json();
-            alarmBox.textContent = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `审查失败：${data.error || '未知错误'}`;
+            const reply = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `审查失败：${data.error || '未知错误'}`;
+            alarmBox.textContent = reply;
+            const level = /红色警报[\s\S]*?(严重|违反|冲突|不通过|泄露)|不通过|严重|红色/.test(reply) ? 'red' : (/黄色警报|风险|不足|建议/.test(reply) ? 'yellow' : 'green');
+            setSandboxAlert(level, `规则审查完成。\n${limitText(reply, 700)}`);
         } catch (e) {
             alarmBox.textContent = '规则审查请求失败，请稍后重试。';
+            setSandboxAlert('yellow', '规则审查请求失败，请稍后重试。');
         }
     };
 
@@ -1851,7 +2050,8 @@ ${getBuiltInExpertBaseline()}
 
     function buildLongformBasePrompt() {
         const eventContext = getAdjacentEventContext(currentLocalContext.chapterNumber);
-        return `【当前事件】\n${eventContext.startInfo}\n【下一事件锚点】\n${eventContext.endInfo}\n【当前大纲】\n${currentLocalContext.synopsis || editorSopConflict?.innerText || '暂无'}\n【正文草稿】\n${limitText(editorTextarea?.value || '', 2600)}\n【救猫咪类型监督】\n${getSaveTheCatGenreGuide(getCurrentStoryGenre())}\n【人物卡】\n${getCharacterDetailsForSop()}\n【统一规则/专家资料】\n${getWorldRulesText()}\n【上帝视角信息权限】\n${formatGodViewContext()}\n【已有长篇编辑状态】\n${getLongformEditorialContext()}`;
+        const currentBible = getCurrentBibleSnapshot() || {};
+        return `【当前事件】\n${eventContext.startInfo}\n【下一事件锚点】\n${eventContext.endInfo}\n【沙盒好莱坞六节点】\n${JSON.stringify(compactBibleForPrompt(currentBible.hollywood_beats || []))}\n【主角弧线】\n${JSON.stringify(compactBibleForPrompt(currentBible.protagonist_arc || {}))}\n【反派/核心阻力弧线】\n${JSON.stringify(compactBibleForPrompt(currentBible.antagonist_arc || {}))}\n【当前大纲】\n${currentLocalContext.synopsis || editorSopConflict?.innerText || '暂无'}\n【正文草稿】\n${limitText(editorTextarea?.value || '', 2600)}\n【救猫咪类型监督】\n${getSaveTheCatGenreGuide(getCurrentStoryGenre())}\n【人物卡】\n${getCharacterDetailsForSop()}\n【统一规则/专家资料】\n${getWorldRulesText()}\n【上帝视角信息权限】\n${formatGodViewContext()}\n【已有长篇编辑状态】\n${getLongformEditorialContext()}`;
     }
 
     async function runLongformEditorTask(taskType, extra = "") {
@@ -2603,7 +2803,7 @@ ${getRulesTextForPrompt()}`;
             if (!text) return;
             chatInput.value = '';
             const userMsgWithContext = text
-                + `\n\n(系统附加：当前沙盒模块是【${getActiveSandboxModuleLabel()}】。事件、人物、规则、上帝视角模块互相影响；规则/世界观/专家资料拥有最高权限。右侧数据面板已由用户实时更新，优先级高于旧聊天记录和你之前提出的方案。若旧设定与面板冲突，必须废弃旧设定，以面板为准继续推演。若当前输入新增人物，请将其绑定到相关事件，并提醒参与少于三个事件的人物需要后续复用或合并。人物相关专家设定必须沉淀到人物卡的【人物规则】。未揭露/部分揭露的上帝视角秘密只用于后台校验，沙盒推理只能基于观众视角推进；已揭露后才可公开调用上帝视角。沙盒回复禁止写正文式情节段落；请用【缺口诊断】【事件连接】【人物/关系影响】【规则或降智风险】【下一步选择】输出，完整保留关键因果、人物动机、关系变化、不可逆后果和待确认项。)`
+                + `\n\n(系统附加：当前沙盒模块是【${getActiveSandboxModuleLabel()}】，当前权限模式是【${getCurrentControlMode()}】。流程骨架、事件、人物、规则、上帝视角模块互相影响；规则/世界观/专家资料拥有最高权限。右侧数据面板已由用户实时更新，优先级高于旧聊天记录和你之前提出的方案。沙盒主流程必须遵守：类型 -> 起终点 -> 主角/最终反派 -> 双弧线 -> 好莱坞六节点 -> 桥接事件 -> 沙盒验收；沙盒只做故事骨架，不做章节细化或正文。若旧设定与面板冲突，必须废弃旧设定，以面板为准继续推演。若当前输入新增人物，请将其绑定到相关事件，并提醒参与少于三个事件的人物需要后续复用或合并。人物相关专家设定必须沉淀到人物卡的【人物规则】。未揭露/部分揭露的上帝视角秘密只用于后台校验，沙盒推理只能基于观众视角推进；已揭露后才可公开调用上帝视角。沙盒回复禁止写正文式情节段落；请用【缺口诊断】【事件连接】【人物/关系影响】【规则或降智风险】【下一步选择】输出，完整保留关键因果、人物动机、关系变化、不可逆后果和待确认项。)`
                 + getExpertKeywordHint(text);
             const newIndex = genesisConversation.length;
             genesisConversation.push({ role: 'user', content: userMsgWithContext });
@@ -2797,12 +2997,12 @@ ${getRulesTextForPrompt()}`;
                 await extractAndSaveBibleFromConversation(genesisConversation, `请根据当前面板数据、全量用户修正记录与最近对话，提取并合并最新共识，输出完整世界圣经 JSON。
 要求：
 1. 用户后续通过对话否定或修改过的低质量人物/事件必须被替换，不要保留旧版本。
-2. 沙盒有事件、人物、规则/专家、上帝视角四个模块，它们互相影响，不能各自孤立更新。
+2. 沙盒有流程骨架、事件、人物、规则/专家、上帝视角五个模块，它们互相影响，不能各自孤立更新。
 3. 规则/世界观/专家资料权限最高；不符合规则、专业流程或人物逻辑的事件必须在 rules 中记录警报或整改约束。
 4. 人物必须尽量绑定到 timeline/chapters 的具体事件；参与事件少于三个的人物要在 description 或 character_arc 中提示后续复用价值，避免一次性人物。
 5. 如果对话出现律师、医生、警察、金融、政治、文化、历史、古代、朝代、科举、官职、礼法、战争、技能等专业关键词：全局专家资料合并进 rules；与某个人物直接相关的疾病、职业权限、身份限制、能力代价、心理触发点必须写入该人物 character_rules。
 6. 历史专家为内置后台能力：遇到历史剧/古代背景时，必须检查朝代、官职、称谓、礼仪、服饰器物、交通通讯、军队调动、审案/科举/婚嫁/朝会流程，以及现代价值观误套问题。
-7. 当前面板数据中的 characters 详细字段、character_rules 人物规则、relations 人物羁绊、timeline 细密时间轴、secrets 上帝视角信息是稳定资产；除非最近对话明确要求删除某一项，否则必须完整保留，不允许用摘要版、空数组或字段缺失版覆盖。
+7. 当前面板数据中的 workflow 流程状态、protagonist_arc 主角弧线、antagonist_arc 反派弧线、hollywood_beats 好莱坞六节点、characters 详细字段、character_rules 人物规则、relations 人物羁绊、timeline 细密时间轴、secrets 上帝视角信息是稳定资产；除非最近对话明确要求删除某一项，否则必须完整保留，不允许用摘要版、空数组或字段缺失版覆盖。
 8. 如果当前面板中的人物羁绊或细密时间轴为空，必须从全量用户修正记录和全量沙盒对话尾迹中重建，不要留空。`, { recoveryMode: true });
                 alert('✅ 已根据当前对话刷新右侧面板。');
             } catch (e) {
