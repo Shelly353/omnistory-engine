@@ -872,10 +872,7 @@ document.addEventListener('DOMContentLoaded', () => {
             .map(line => line.trim())
             .filter(Boolean);
         const signalLines = lines.filter(line => !looksLikeDraftProseLine(line));
-        const visibleLines = (signalLines.length ? signalLines : lines)
-            .filter(line => line.length <= 220 || isSandboxSignalLine(line))
-            .slice(0, 22);
-        return limitText(visibleLines.join('\n'), 1800);
+        return (signalLines.length ? signalLines : lines).join('\n').trim();
     }
 
     // ==========================================
@@ -2479,7 +2476,7 @@ ${getRulesTextForPrompt()}`;
         msgDiv.innerHTML = `<div class="max-w-[85%] flex flex-col ${role === 'user' ? 'items-end' : 'items-start'}">
             <div class="${bubbleColor} p-4 rounded-2xl shadow-md text-sm leading-relaxed whitespace-pre-wrap relative group">
                 ${rollbackBtn}
-                ${text}
+                ${escapeHtml(text)}
             </div>
         </div>`;
         chatHistory.appendChild(msgDiv);
