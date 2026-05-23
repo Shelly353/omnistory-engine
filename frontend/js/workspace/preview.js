@@ -83,6 +83,7 @@ window.OmniWorkspacePreview = (() => {
                         <div class="col-span-3"><label class="text-[9px] text-gray-500">动机 (Motivation)</label><input type="text" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-motiv" value="${escapePreviewValue(c.motivation || '')}"></div>
                         <div class="col-span-3"><label class="text-[9px] text-gray-500">缺陷 (Flaw) & 恐惧 (Fear)</label><div class="flex space-x-2"><input type="text" class="w-1/2 bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-flaw" value="${escapePreviewValue(c.flaw || '')}"><input type="text" class="w-1/2 bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-fear" value="${escapePreviewValue(c.fear || '')}"></div></div>
                         <div class="col-span-3"><label class="text-[9px] text-gray-500">能力/技能</label><input type="text" class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white char-skills" value="${escapePreviewValue(c.skills || '')}"></div>
+                        <div class="col-span-3"><label class="text-[9px] text-cyan-400 font-bold">人物规则</label><textarea class="w-full bg-gray-950 border border-cyan-900/50 rounded p-1.5 text-xs text-cyan-100 h-14 resize-none char-rules" placeholder="疾病/职业/身份/能力/心理限制：这个人能做什么、不能做什么、触发条件、代价和不可写法。">${escapePreviewValue(c.character_rules || '')}</textarea></div>
                         <div class="col-span-3"><label class="text-[9px] text-gray-500">重要经历</label><textarea class="w-full bg-gray-950 border border-gray-700 rounded p-1.5 text-xs text-white h-12 resize-none char-bg">${escapePreviewValue(c.background || '')}</textarea></div>
                         <div class="col-span-3"><label class="text-[9px] text-gray-500 font-bold text-purple-400">角色成长弧光</label><textarea class="w-full bg-gray-950 border border-purple-900/50 rounded p-1.5 text-xs text-white h-12 resize-none char-arc">${escapePreviewValue(c.character_arc || '')}</textarea></div>
                     </div>
@@ -102,10 +103,11 @@ window.OmniWorkspacePreview = (() => {
         const narrativeModeHTML = narrativeModes.map(m => `<option value="${m}" ${narrativeLogic.mode === m ? 'selected' : ''}>${m}</option>`).join('');
 
         let html = `
-            <div class="sticky -top-6 z-30 -mx-6 -mt-6 mb-4 px-6 pt-6 pb-3 bg-gray-950 backdrop-blur border-b border-gray-800 grid grid-cols-3 gap-2">
+            <div class="sticky -top-6 z-30 -mx-6 -mt-6 mb-4 px-6 pt-6 pb-3 bg-gray-950 backdrop-blur border-b border-gray-800 grid grid-cols-4 gap-2">
                 <button type="button" data-sandbox-module-button="events" onclick="switchSandboxModule('events')" class="sandbox-module-btn py-2 rounded-lg text-xs font-bold border border-purple-900/50 text-purple-300 bg-purple-950/30">事件讨论</button>
                 <button type="button" data-sandbox-module-button="characters" onclick="switchSandboxModule('characters')" class="sandbox-module-btn py-2 rounded-lg text-xs font-bold border border-gray-800 text-gray-400 bg-gray-900">人物设定</button>
                 <button type="button" data-sandbox-module-button="rules" onclick="switchSandboxModule('rules')" class="sandbox-module-btn py-2 rounded-lg text-xs font-bold border border-gray-800 text-gray-400 bg-gray-900">规则/专家</button>
+                <button type="button" data-sandbox-module-button="secrets" onclick="switchSandboxModule('secrets')" class="sandbox-module-btn py-2 rounded-lg text-xs font-bold border border-gray-800 text-gray-400 bg-gray-900">上帝视角</button>
             </div>
 
             <div class="sandbox-module" data-sandbox-module="rules">
@@ -173,6 +175,40 @@ window.OmniWorkspacePreview = (() => {
                             <input type="text" class="w-1/3 bg-gray-950 border border-gray-600 rounded-md p-2 text-white text-xs text-center rel-to" value="${escapePreviewValue(r.to_name || '')}" placeholder="接收人">
                             <input type="text" class="w-1/3 bg-gray-950 border border-gray-600 rounded-md p-2 text-emerald-300 font-bold text-xs text-center rel-label" value="${escapePreviewValue(r.label || '')}" placeholder="羁绊关系">
                             <button type="button" onclick="removeSandboxPreviewItem(this)" class="text-red-300 hover:text-white hover:bg-red-700 border border-red-900/60 rounded px-2 self-stretch" title="删除羁绊"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+            </div>
+
+            <div class="sandbox-module hidden" data-sandbox-module="secrets">
+            <div class="bg-gray-800/50 p-5 rounded-xl border border-violet-800/70 mt-6">
+                <div class="flex items-center justify-between mb-3">
+                    <h4 class="text-violet-300 font-bold flex items-center"><i data-lucide="eye" class="w-4 h-4 mr-2"></i>上帝视角信息板</h4>
+                    <button type="button" onclick="addSandboxSecret()" class="text-xs px-3 py-1.5 bg-violet-700 hover:bg-violet-600 text-white rounded-lg font-bold flex items-center"><i data-lucide="plus" class="w-3 h-3 mr-1"></i>新增秘密</button>
+                </div>
+                <div class="text-[10px] text-gray-500 mb-3 italic">观众视角用于未揭露前的推理；上帝视角用于作者和 AI 后台校验真相。状态变为“已揭露”后，后续推理才可公开调用上帝视角。</div>
+                <div class="space-y-3" id="prev-secrets-list">
+                    ${(bible.secrets || []).map(secret => `
+                        <div class="prev-secret-item bg-gray-900 p-3 rounded-lg border ${secret.status === 'revealed' ? 'border-emerald-700/70' : 'border-violet-800/70'}" data-secret-id="${escapePreviewValue(secret.id || '')}">
+                            <div class="flex gap-2 mb-2">
+                                <input type="text" class="flex-1 bg-gray-950 border border-gray-700 rounded-md p-2 text-violet-100 text-xs secret-title" value="${escapePreviewValue(secret.title || '')}" placeholder="秘密标题，例如：真正的凶手">
+                                <select class="w-28 bg-gray-950 border border-gray-700 rounded-md p-2 text-xs secret-status ${secret.status === 'revealed' ? 'text-emerald-300' : 'text-violet-300'}">
+                                    <option value="hidden" ${secret.status === 'hidden' || !secret.status ? 'selected' : ''}>隐藏</option>
+                                    <option value="partial" ${secret.status === 'partial' ? 'selected' : ''}>部分揭露</option>
+                                    <option value="revealed" ${secret.status === 'revealed' ? 'selected' : ''}>已揭露</option>
+                                </select>
+                                <button type="button" onclick="removeSandboxPreviewItem(this)" class="text-red-300 hover:text-white hover:bg-red-700 border border-red-900/60 rounded px-2" title="删除秘密"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                <textarea class="bg-gray-950 border border-amber-800/50 rounded-md p-2 text-amber-100 text-xs h-24 resize-none secret-audience" placeholder="观众视角：真相揭露前观众/角色已知的信息。">${escapePreviewValue(secret.audience_view || '')}</textarea>
+                                <textarea class="bg-gray-950 border border-violet-700/60 rounded-md p-2 text-violet-100 text-xs h-24 resize-none secret-god" placeholder="上帝视角：作者和 AI 后台知道的真实情况。">${escapePreviewValue(secret.god_view || '')}</textarea>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mt-2">
+                                <input type="text" class="bg-gray-950 border border-gray-700 rounded-md p-2 text-gray-300 text-xs secret-reveal" value="${escapePreviewValue(secret.reveal_event || '')}" placeholder="揭露事件">
+                                <input type="text" class="bg-gray-950 border border-gray-700 rounded-md p-2 text-gray-300 text-xs secret-chars" value="${escapePreviewValue((secret.related_characters || []).join ? secret.related_characters.join('、') : secret.related_characters || '')}" placeholder="关联人物">
+                                <input type="text" class="bg-gray-950 border border-gray-700 rounded-md p-2 text-gray-300 text-xs secret-events" value="${escapePreviewValue((secret.related_events || []).join ? secret.related_events.join('、') : secret.related_events || '')}" placeholder="关联事件">
+                            </div>
                         </div>
                     `).join('')}
                 </div>
@@ -277,8 +313,36 @@ window.OmniWorkspacePreview = (() => {
         latest?.querySelector('.char-name')?.focus();
     };
 
+    window.addSandboxSecret = () => {
+        const list = document.getElementById('prev-secrets-list');
+        if (!list) return;
+        list.insertAdjacentHTML('beforeend', `
+            <div class="prev-secret-item bg-gray-900 p-3 rounded-lg border border-violet-800/70">
+                <div class="flex gap-2 mb-2">
+                    <input type="text" class="flex-1 bg-gray-950 border border-gray-700 rounded-md p-2 text-violet-100 text-xs secret-title" placeholder="秘密标题，例如：真正的凶手">
+                    <select class="w-28 bg-gray-950 border border-gray-700 rounded-md p-2 text-xs text-violet-300 secret-status">
+                        <option value="hidden">隐藏</option>
+                        <option value="partial">部分揭露</option>
+                        <option value="revealed">已揭露</option>
+                    </select>
+                    <button type="button" onclick="removeSandboxPreviewItem(this)" class="text-red-300 hover:text-white hover:bg-red-700 border border-red-900/60 rounded px-2" title="删除秘密"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <textarea class="bg-gray-950 border border-amber-800/50 rounded-md p-2 text-amber-100 text-xs h-24 resize-none secret-audience" placeholder="观众视角：真相揭露前观众/角色已知的信息。"></textarea>
+                    <textarea class="bg-gray-950 border border-violet-700/60 rounded-md p-2 text-violet-100 text-xs h-24 resize-none secret-god" placeholder="上帝视角：作者和 AI 后台知道的真实情况。"></textarea>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mt-2">
+                    <input type="text" class="bg-gray-950 border border-gray-700 rounded-md p-2 text-gray-300 text-xs secret-reveal" placeholder="揭露事件">
+                    <input type="text" class="bg-gray-950 border border-gray-700 rounded-md p-2 text-gray-300 text-xs secret-chars" placeholder="关联人物">
+                    <input type="text" class="bg-gray-950 border border-gray-700 rounded-md p-2 text-gray-300 text-xs secret-events" placeholder="关联事件">
+                </div>
+            </div>`);
+        if (window.lucide) lucide.createIcons();
+        list.lastElementChild?.querySelector('.secret-title')?.focus();
+    };
+
     window.removeSandboxPreviewItem = (button) => {
-        const item = button?.closest('.prev-char-item, .prev-rel-item, .prev-tl-item, .prev-chap-item, .prev-narrative-item');
+        const item = button?.closest('.prev-char-item, .prev-rel-item, .prev-tl-item, .prev-chap-item, .prev-narrative-item, .prev-secret-item');
         if (!item) return;
         if (item.classList.contains('prev-char-item') && window.getSandboxCharacterDeleteWarning) {
             const warning = window.getSandboxCharacterDeleteWarning(item);

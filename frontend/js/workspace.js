@@ -100,6 +100,7 @@ document.addEventListener('DOMContentLoaded', () => {
             getActiveSandboxModuleLabel(),
             currentBible?.worldview || '',
             currentBible?.rules || '',
+            formatGodViewContext(currentBible),
             (currentBible?.chapters || []).map(ch => `${ch.title || ''} ${ch.content || ''}`).join('\n'),
             genesisConversation.slice(-3).map(msg => applyManualCharacterRenamesToText(msg.content, manualEdits)).join('\n')
         ].join('\n');
@@ -109,7 +110,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }));
         const priorityMessage = currentBible ? [{
             role: 'user',
-            content: `【最高优先级校准：以右侧实时面板为准】\n用户可能已经在右侧实时灵感面板手动修改了你之前提出的低质量设定。以下面板快照是最新有效设定，优先级高于旧聊天记录和你过去的方案。若旧内容冲突，必须废弃旧内容，并基于此快照继续推演。\n${currentBibleText}${manualWarnings ? `\n\n【手动设定变更警报】\n${manualWarnings}\n如果这些变更与旧事件冲突，必须主动指出冲突并给出整改方案。` : ''}`
+            content: `【最高优先级校准：以右侧实时面板为准】\n用户可能已经在右侧实时灵感面板手动修改了你之前提出的低质量设定。以下面板快照是最新有效设定，优先级高于旧聊天记录和你过去的方案。若旧内容冲突，必须废弃旧内容，并基于此快照继续推演。\n${currentBibleText}\n\n【上帝视角信息权限】\n${formatGodViewContext(currentBible)}\n\n规则：未揭露/部分揭露的秘密只供后台因果校验，不可让角色或观众提前知道；沙盒推理事件只能基于 audience_view 推进。状态为 revealed 后，才可把 god_view 作为公开事实调用。${manualWarnings ? `\n\n【手动设定变更警报】\n${manualWarnings}\n如果这些变更与旧事件冲突，必须主动指出冲突并给出整改方案。` : ''}`
         }] : [];
         return {
             ...buildChatPayload([...priorityMessage, ...renamedConversation]),
@@ -553,6 +554,7 @@ document.addEventListener('DOMContentLoaded', () => {
             .filter(rel => rel.from_name && rel.to_name && !edits.deletedRelations[getRelationManualKey(rel)]), getRelationMergeKey);
         normalized.timeline = uniqueStableArray((normalized.timeline || [])
             .filter(item => !edits.deletedTimeline[getTimelineManualKey(item)]), getTimelineMergeKey);
+        normalized.secrets = normalizeSecrets(normalized.secrets || []);
         normalized.chapters = uniqueStableArray(normalized.chapters || [], chapter => [
             String(chapter.chapter_number || '').trim(),
             normalizeStableKey(chapter.title)
@@ -583,6 +585,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ? editedNext.timeline.filter(item => !manualEdits.deletedTimeline[getTimelineManualKey(item)])
             : editedNext.timeline;
         merged.timeline = mergeStableArray(editedPrevious.timeline, nextTimeline, getTimelineMergeKey);
+        merged.secrets = mergeStableArray(normalizeSecrets(editedPrevious.secrets), normalizeSecrets(editedNext.secrets), getSecretMergeKey);
         merged.chapters = mergeStableArray(editedPrevious.chapters, editedNext.chapters, chapter => [
             String(chapter.chapter_number || '').trim(),
             normalizeStableKey(chapter.title)
@@ -839,9 +842,10 @@ document.addEventListener('DOMContentLoaded', () => {
         extractAndSaveBibleFromConversation(conversationForExtraction, `上一轮 AI 回复没有提供合法 JSON。请根据当前面板数据、全量用户修正记录、最近对话和上一轮 AI 回复，提取并合并最新共识，输出完整世界圣经 JSON。
 要求：
 1. 必须记录用户在对话中否定、修正或新增的人物/事件/规则。
-2. characters 详细字段、relations 人物羁绊、timeline 细密时间轴是稳定资产；除非用户明确说删除，否则必须保留。
+2. characters 详细字段、人物规则 character_rules、relations 人物羁绊、timeline 细密时间轴、secrets 上帝视角信息是稳定资产；除非用户明确说删除，否则必须保留。
 3. 如果当前面板中的人物羁绊或细密时间轴为空，必须从全量用户修正记录和全量沙盒对话尾迹中重建，不要留空。
-4. 只输出 JSON，不要输出正文。`, { recoveryMode: true }).catch(error => {
+4. 与人物有关的专家设定必须进入对应人物的 character_rules；全局专业规则进入 rules；观众不知道但作者必须知道的真相进入 secrets。
+5. 只输出 JSON，不要输出正文。`, { recoveryMode: true }).catch(error => {
             console.error('后台面板补同步失败:', error);
             setGenesisSyncBlocked(true, `上一轮设定没有确认写入实时面板：${error.message || '未知错误'}\n你可以先看 AI 的问题，也可以在输入框里草拟回答，但暂时不能发送。建议优先用上一条用户消息旁的撤回按钮重新回答；如果连续失败，再点“从对话刷新面板”兜底修复。`);
         });
@@ -1101,6 +1105,43 @@ document.addEventListener('DOMContentLoaded', () => {
         const cleanRules = stripReferenceMaterials(rules);
         const cleanMaterials = String(materials || '').trim();
         return [cleanRules, cleanMaterials ? `【参考资料摘录】\n${cleanMaterials}` : ''].filter(Boolean).join('\n\n');
+    }
+
+    function splitListText(value = '') {
+        return String(value || '')
+            .split(/[、,，;；\n]/)
+            .map(item => item.trim())
+            .filter(Boolean);
+    }
+
+    function getSecretMergeKey(secret = {}) {
+        return [
+            normalizeStableKey(secret.id),
+            normalizeStableKey(secret.title),
+            normalizeStableKey(secret.reveal_event)
+        ].filter(Boolean).join('|') || normalizeStableKey(secret.god_view || secret.audience_view);
+    }
+
+    function normalizeSecretItem(secret = {}) {
+        const title = String(secret.title || '').trim();
+        const status = ['hidden', 'partial', 'revealed'].includes(secret.status) ? secret.status : 'hidden';
+        const seed = secret.id || title || secret.god_view || secret.audience_view || JSON.stringify(secret);
+        return {
+            id: secret.id || `secret_${stableHash(seed)}`,
+            title,
+            status,
+            audience_view: String(secret.audience_view || '').trim(),
+            god_view: String(secret.god_view || '').trim(),
+            reveal_event: String(secret.reveal_event || '').trim(),
+            related_characters: Array.isArray(secret.related_characters) ? secret.related_characters : splitListText(secret.related_characters),
+            related_events: Array.isArray(secret.related_events) ? secret.related_events : splitListText(secret.related_events)
+        };
+    }
+
+    function normalizeSecrets(secrets = []) {
+        return uniqueStableArray((Array.isArray(secrets) ? secrets : [])
+            .map(normalizeSecretItem)
+            .filter(secret => secret.title || secret.audience_view || secret.god_view), getSecretMergeKey);
     }
 
     function openLocalSourceDb() {
@@ -1430,6 +1471,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     flaw: el.querySelector('.char-flaw')?.value.trim() || "",
                     fear: el.querySelector('.char-fear')?.value.trim() || "",
                     skills: el.querySelector('.char-skills')?.value.trim() || "",
+                    character_rules: el.querySelector('.char-rules')?.value.trim() || "",
                     background: el.querySelector('.char-bg')?.value.trim() || "",
                     character_arc: el.querySelector('.char-arc')?.value.trim() || "",
                 };
@@ -1455,6 +1497,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     transition: el.querySelector('.nar-transition')?.value.trim() || ""
                 })).filter(item => item.title !== "" || item.source_chapter_number)
             },
+            secrets: Array.from(document.querySelectorAll('.prev-secret-item')).map(el => normalizeSecretItem({
+                id: el.dataset.secretId || "",
+                title: el.querySelector('.secret-title')?.value.trim() || "",
+                status: el.querySelector('.secret-status')?.value || "hidden",
+                audience_view: el.querySelector('.secret-audience')?.value.trim() || "",
+                god_view: el.querySelector('.secret-god')?.value.trim() || "",
+                reveal_event: el.querySelector('.secret-reveal')?.value.trim() || "",
+                related_characters: splitListText(el.querySelector('.secret-chars')?.value || ""),
+                related_events: splitListText(el.querySelector('.secret-events')?.value || "")
+            })).filter(secret => secret.title || secret.audience_view || secret.god_view),
             chapters: Array.from(document.querySelectorAll('.prev-chap-item')).map(el => ({
                 chapter_number: parseFloat(el.querySelector('.chap-num')?.value) || 1,
                 title: el.querySelector('.chap-title')?.value.trim() || "",
@@ -1499,12 +1551,38 @@ document.addEventListener('DOMContentLoaded', () => {
         return document.getElementById('world-rules-container') ? document.getElementById('world-rules-container').innerText.trim() : "无特殊限制";
     }
 
+    function extractCharacterRulesFromBackground(background = '') {
+        const match = String(background || '').match(/【人物规则】\s*([\s\S]*)$/);
+        return match ? match[1].trim() : '';
+    }
+
+    function formatGodViewContext(bible = getCurrentBibleSnapshot()) {
+        const secrets = normalizeSecrets(bible?.secrets || []);
+        if (secrets.length === 0) return '暂无上帝视角信息。';
+        return secrets.map(secret => {
+            const statusLabel = secret.status === 'revealed' ? '已揭露' : (secret.status === 'partial' ? '部分揭露' : '隐藏');
+            const scopeRule = secret.status === 'revealed'
+                ? '后续推理、SOP 与正文可把上帝视角作为公开事实调用。'
+                : '真相揭露前，角色和观众只能基于观众视角推理；上帝视角只供作者/AI 后台校验伏笔与因果，禁止提前泄露。';
+            return [
+                `【${statusLabel}秘密：${secret.title || '未命名'}】`,
+                `观众视角：${secret.audience_view || '暂无'}`,
+                `上帝视角：${secret.god_view || '暂无'}`,
+                secret.reveal_event ? `揭露事件：${secret.reveal_event}` : '',
+                secret.related_characters?.length ? `关联人物：${secret.related_characters.join('、')}` : '',
+                secret.related_events?.length ? `关联事件：${secret.related_events.join('、')}` : '',
+                `调用规则：${scopeRule}`
+            ].filter(Boolean).join('\n');
+        }).join('\n\n');
+    }
+
     function getCharacterDetailsForSop() {
         if (!currentLocalContext.characters || currentLocalContext.characters.length === 0 || !window.globalCharacters) return "无详细资产设定";
 
         return currentLocalContext.characters.map(lc => {
             const gc = applyManualBibleEditsToValue(window.globalCharacters.find(c => c.id === lc.id || c.name === lc.name) || {});
-            return `【角色：${lc.name}】定位:${gc.role || lc.role || '未知'} | 性格:${gc.personality || '未知'} | 欲望:${gc.core_desire || '未知'} | 目标:${gc.goal || '未知'} | 动机:${gc.motivation || '未知'} | 缺陷:${gc.flaw || '未知'} | 恐惧:${gc.fear || '未知'} | 弧光:${gc.character_arc || '未知'} | 简介:${gc.description || lc.description || '无'}`;
+            const characterRules = gc.character_rules || extractCharacterRulesFromBackground(gc.background) || extractCharacterRulesFromBackground(lc.background);
+            return `【角色：${lc.name}】定位:${gc.role || lc.role || '未知'} | 性格:${gc.personality || '未知'} | 欲望:${gc.core_desire || '未知'} | 目标:${gc.goal || '未知'} | 动机:${gc.motivation || '未知'} | 缺陷:${gc.flaw || '未知'} | 恐惧:${gc.fear || '未知'} | 人物规则:${characterRules || '暂无'} | 弧光:${gc.character_arc || '未知'} | 简介:${gc.description || lc.description || '无'}`;
         }).join('\n');
     }
 
@@ -1577,6 +1655,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ].join('\n'), 5);
         return [
             `【统一规则/专家资料】\n${getWorldRulesText()}`,
+            `【上帝视角信息权限】\n${formatGodViewContext()}`,
             localSnippets ? `【本地资料库相关片段】\n${localSnippets}` : '',
             getBuiltInExpertBaseline(),
             `【救猫咪类型监督】\n${getSaveTheCatGenreGuide(getCurrentStoryGenre())}`,
@@ -1589,17 +1668,18 @@ document.addEventListener('DOMContentLoaded', () => {
 4. MBTI/人物性格一致性：性格不是标签；人物的说话方式、风险偏好、回避策略、冲突处理和关键选择必须能从性格、欲望、目标、动机、缺陷、恐惧或成长弧线中找到来源。
 5. 世界规则：力量、资源、制度、技能必须有代价、限制和反制，不允许无敌解法。
 6. 伏笔闭环：本章需要回应的伏笔必须处理；新伏笔要有后续回收方向。
-7. 资料来源：涉及历史、法律、医疗、行业流程或现实事实时，应优先引用本地资料库片段；资料不足要标注不确定，不能伪造来源。
-8. 角色声音：主要角色的对白必须有不同词汇、节奏、潜台词和回避方式，不能所有人像同一个 AI。
-9. 场面导演：动作、谈判、审讯、法庭、战争、仪式等高张力场景必须有空间调度、目标阻力、身体/心理代价和视觉记忆点。
-10. 情感/主题：关系变化要由事件触发，主题母题要形成呼应但不能说教。
-11. 定稿标准：章节必须通过验收闸门，且不能破坏分卷结构、节奏曲线、连续性账本和人物/反派弧光表。`
+7. 上帝视角权限：未揭露或部分揭露的秘密只能用于后台因果校验，不能让角色或观众提前知道；推理事件只能基于观众视角推进，揭露后才可公开调用上帝视角。
+8. 资料来源：涉及历史、法律、医疗、行业流程或现实事实时，应优先引用本地资料库片段；资料不足要标注不确定，不能伪造来源。
+9. 角色声音：主要角色的对白必须有不同词汇、节奏、潜台词和回避方式，不能所有人像同一个 AI。
+10. 场面导演：动作、谈判、审讯、法庭、战争、仪式等高张力场景必须有空间调度、目标阻力、身体/心理代价和视觉记忆点。
+11. 情感/主题：关系变化要由事件触发，主题母题要形成呼应但不能说教。
+12. 定稿标准：章节必须通过验收闸门，且不能破坏分卷结构、节奏曲线、连续性账本和人物/反派弧光表。`
         ].filter(Boolean).join('\n\n');
     }
 
     function getActiveSandboxModuleLabel() {
         const moduleName = localStorage.getItem('omnistory_sandbox_module') || 'events';
-        return ({ events: '事件讨论', characters: '人物设定', rules: '规则/专家' })[moduleName] || '事件讨论';
+        return ({ events: '事件讨论', characters: '人物设定', rules: '规则/专家', secrets: '上帝视角' })[moduleName] || '事件讨论';
     }
 
     function getExpertKeywordHint(text = "") {
@@ -1637,11 +1717,13 @@ document.addEventListener('DOMContentLoaded', () => {
 【规则/世界观/专家资料】\n${limitText(rules, 3500)}
 ${getBuiltInExpertBaseline()}
 【人物卡】\n${limitText(JSON.stringify(targetBible.characters || []), 2500)}
+【上帝视角信息权限】\n${limitText(formatGodViewContext(targetBible), 2500)}
 【事件/章节】\n${limitText(events, 4500)}
 
 请输出：
 【红色警报】严重违反规则/专业常识/人物逻辑的问题；
 【黄色警报】可能降智、巧合、一次性人物、规则约束不足的问题；
+【信息权限警报】是否把观众未知的上帝视角信息提前泄露给角色/观众；
 【整改意见】最小修改方案；
 【专家资料缺口】需要补充哪些职业/行业/世界规则资料。
 如果没有明显问题，请明确说明。`;
@@ -1716,7 +1798,7 @@ ${getBuiltInExpertBaseline()}
 
     function buildLongformBasePrompt() {
         const eventContext = getAdjacentEventContext(currentLocalContext.chapterNumber);
-        return `【当前事件】\n${eventContext.startInfo}\n【下一事件锚点】\n${eventContext.endInfo}\n【当前大纲】\n${currentLocalContext.synopsis || editorSopConflict?.innerText || '暂无'}\n【正文草稿】\n${limitText(editorTextarea?.value || '', 2600)}\n【救猫咪类型监督】\n${getSaveTheCatGenreGuide(getCurrentStoryGenre())}\n【人物卡】\n${getCharacterDetailsForSop()}\n【统一规则/专家资料】\n${getWorldRulesText()}\n【已有长篇编辑状态】\n${getLongformEditorialContext()}`;
+        return `【当前事件】\n${eventContext.startInfo}\n【下一事件锚点】\n${eventContext.endInfo}\n【当前大纲】\n${currentLocalContext.synopsis || editorSopConflict?.innerText || '暂无'}\n【正文草稿】\n${limitText(editorTextarea?.value || '', 2600)}\n【救猫咪类型监督】\n${getSaveTheCatGenreGuide(getCurrentStoryGenre())}\n【人物卡】\n${getCharacterDetailsForSop()}\n【统一规则/专家资料】\n${getWorldRulesText()}\n【上帝视角信息权限】\n${formatGodViewContext()}\n【已有长篇编辑状态】\n${getLongformEditorialContext()}`;
     }
 
     async function runLongformEditorTask(taskType, extra = "") {
@@ -2062,7 +2144,7 @@ ${getUnifiedQualityGuardrails()}
             "姓名": "name", "定位": "role", "阵营": "faction", "年龄": "age", "外貌": "appearance",
             "职业": "profession", "性格": "personality", "核心欲望": "core_desire", "目标": "goal",
             "动机": "motivation", "缺陷": "flaw", "恐惧": "fear", "能力/技能": "skills",
-            "背景": "background", "成长弧光": "character_arc", "简介": "description"
+            "人物规则": "character_rules", "背景": "background", "成长弧光": "character_arc", "简介": "description"
         };
         const payload = {};
         let activeField = null;
@@ -2452,7 +2534,7 @@ ${getRulesTextForPrompt()}`;
             if (!text) return;
             chatInput.value = '';
             const userMsgWithContext = text
-                + `\n\n(系统附加：当前沙盒模块是【${getActiveSandboxModuleLabel()}】。事件、人物、规则三个模块互相影响；规则/世界观/专家资料拥有最高权限。右侧数据面板已由用户实时更新，优先级高于旧聊天记录和你之前提出的方案。若旧设定与面板冲突，必须废弃旧设定，以面板为准继续推演。若当前输入新增人物，请将其绑定到相关事件，并提醒参与少于三个事件的人物需要后续复用或合并。沙盒回复禁止写正文式情节段落；请用【缺口诊断】【事件连接】【人物/关系影响】【规则或降智风险】【下一步选择】输出，完整保留关键因果、人物动机、关系变化、不可逆后果和待确认项。)`
+                + `\n\n(系统附加：当前沙盒模块是【${getActiveSandboxModuleLabel()}】。事件、人物、规则、上帝视角模块互相影响；规则/世界观/专家资料拥有最高权限。右侧数据面板已由用户实时更新，优先级高于旧聊天记录和你之前提出的方案。若旧设定与面板冲突，必须废弃旧设定，以面板为准继续推演。若当前输入新增人物，请将其绑定到相关事件，并提醒参与少于三个事件的人物需要后续复用或合并。人物相关专家设定必须沉淀到人物卡的【人物规则】。未揭露/部分揭露的上帝视角秘密只用于后台校验，沙盒推理只能基于观众视角推进；已揭露后才可公开调用上帝视角。沙盒回复禁止写正文式情节段落；请用【缺口诊断】【事件连接】【人物/关系影响】【规则或降智风险】【下一步选择】输出，完整保留关键因果、人物动机、关系变化、不可逆后果和待确认项。)`
                 + getExpertKeywordHint(text);
             const newIndex = genesisConversation.length;
             genesisConversation.push({ role: 'user', content: userMsgWithContext });
@@ -2646,12 +2728,12 @@ ${getRulesTextForPrompt()}`;
                 await extractAndSaveBibleFromConversation(genesisConversation, `请根据当前面板数据、全量用户修正记录与最近对话，提取并合并最新共识，输出完整世界圣经 JSON。
 要求：
 1. 用户后续通过对话否定或修改过的低质量人物/事件必须被替换，不要保留旧版本。
-2. 沙盒有事件、人物、规则/专家三个模块，它们互相影响，不能各自孤立更新。
+2. 沙盒有事件、人物、规则/专家、上帝视角四个模块，它们互相影响，不能各自孤立更新。
 3. 规则/世界观/专家资料权限最高；不符合规则、专业流程或人物逻辑的事件必须在 rules 中记录警报或整改约束。
 4. 人物必须尽量绑定到 timeline/chapters 的具体事件；参与事件少于三个的人物要在 description 或 character_arc 中提示后续复用价值，避免一次性人物。
-5. 如果对话出现律师、医生、警察、金融、政治、文化、历史、古代、朝代、科举、官职、礼法、战争、技能等专业关键词，请把对应专家资料合并进 rules，而不是单独创建新系统。
+5. 如果对话出现律师、医生、警察、金融、政治、文化、历史、古代、朝代、科举、官职、礼法、战争、技能等专业关键词：全局专家资料合并进 rules；与某个人物直接相关的疾病、职业权限、身份限制、能力代价、心理触发点必须写入该人物 character_rules。
 6. 历史专家为内置后台能力：遇到历史剧/古代背景时，必须检查朝代、官职、称谓、礼仪、服饰器物、交通通讯、军队调动、审案/科举/婚嫁/朝会流程，以及现代价值观误套问题。
-7. 当前面板数据中的 characters 详细字段、relations 人物羁绊、timeline 细密时间轴是稳定资产；除非最近对话明确要求删除某一项，否则必须完整保留，不允许用摘要版、空数组或字段缺失版覆盖。
+7. 当前面板数据中的 characters 详细字段、character_rules 人物规则、relations 人物羁绊、timeline 细密时间轴、secrets 上帝视角信息是稳定资产；除非最近对话明确要求删除某一项，否则必须完整保留，不允许用摘要版、空数组或字段缺失版覆盖。
 8. 如果当前面板中的人物羁绊或细密时间轴为空，必须从全量用户修正记录和全量沙盒对话尾迹中重建，不要留空。`, { recoveryMode: true });
                 alert('✅ 已根据当前对话刷新右侧面板。');
             } catch (e) {
@@ -3022,7 +3104,7 @@ if (data.success) {
             try {
                 const convo = [{
                     role: 'user',
-                    content: `请根据以下人物简介生成一张可入库的人物卡。只输出以下格式，不要寒暄：\n【姓名】\n【定位】\n【阵营】\n【年龄】\n【外貌】\n【职业】\n【性格】\n【核心欲望】\n【目标】\n【动机】\n【缺陷】\n【恐惧】\n【能力/技能】\n【背景】\n【成长弧光】\n【简介】\n\n人物简介：${brief}`
+                    content: `请根据以下人物简介生成一张可入库的人物卡。只输出以下格式，不要寒暄：\n【姓名】\n【定位】\n【阵营】\n【年龄】\n【外貌】\n【职业】\n【性格】\n【核心欲望】\n【目标】\n【动机】\n【缺陷】\n【恐惧】\n【能力/技能】\n【人物规则】\n【背景】\n【成长弧光】\n【简介】\n\n人物规则用于疾病/职业/身份/能力/心理限制、触发条件、代价和不可写法。\n人物简介：${brief}`
                 }];
                 const res = await fetch('/api/chat/deduce', {
                     method: 'POST',
@@ -3360,6 +3442,7 @@ if (data.success) {
                     `【缺陷】${char.flaw || '-'}`,
                     `【恐惧】${char.fear || '-'}`,
                     `【能力/技能】${char.skills || '-'}`,
+                    `【人物规则】${char.character_rules || extractCharacterRulesFromBackground(char.background) || '-'}`,
                     `【背景】${char.background || '-'}`,
                     `【成长弧光】${char.character_arc || '-'}`,
                     `【简介】${char.description || '-'}`
@@ -3787,9 +3870,10 @@ if (data.success) {
             const dialoguePlan = await runLongformEditorTask('dialogue', '\n\n这是正文执笔前的对白专项打磨，请给出本章对白写作约束。');
             const setpiecePlan = await runLongformEditorTask('setpiece', '\n\n这是正文执笔前的动作/场面导演，请给出本章场面调度约束。');
             const key = getLongformChapterKey();
+            const godViewContext = formatGodViewContext();
 
             // 5. 💥 终极 Payload 融合：将文笔风格无缝缝合进最顶级的强约束提示词中！
-            const strictSynopsisText = `【文学主脑至高契约：请彻底废弃历史缓存旧大纲，必须严格基于以下摘要进行正文扩写，维持情节深度连贯，严禁人设漂移OOC！】\n\n${stylePrompt}\n\n【好莱坞大片蓝图】：\n${longformState.storyBlueprint || '暂无，请以当前救猫咪类型和本章大纲建立商业叙事张力。'}\n\n【角色声音系统】：\n${longformState.characterVoice || '暂无，请确保主要角色对白有身份、性格、节奏和潜台词差异。'}\n\n【情感/关系线系统】：\n${longformState.relationshipLine || '暂无，请让关系变化由事件选择触发。'}\n\n【主题与母题追踪】：\n${longformState.themeMotif || '暂无，请让主题自然藏在选择、意象和代价中，不要说教。'}\n\n【本事件反派/阻力升级】：\n${longformState.oppositionPlans?.[key] || '暂无，请确保正文中存在清晰阻力、升级和代价。'}\n\n【本章场景卡】：\n${sceneCard || longformState.sceneCards?.[key] || '暂无'}\n\n【本章对白专项打磨】：\n${dialoguePlan || longformState.dialoguePolish?.[key] || '暂无'}\n\n【本章动作/场面导演】：\n${setpiecePlan || longformState.setpieceDirector?.[key] || '暂无'}\n\n【本章剧情起承转合】：\n${latestSynopsis}\n\n【统一规则/专家资料】：\n${worldRules}\n\n【必须100%严密契合的登场角色人设】：\n${characterDetails}\n\n【正文质量监督标准】：\n${getUnifiedQualityGuardrails()}`;
+            const strictSynopsisText = `【文学主脑至高契约：请彻底废弃历史缓存旧大纲，必须严格基于以下摘要进行正文扩写，维持情节深度连贯，严禁人设漂移OOC！】\n\n${stylePrompt}\n\n【好莱坞大片蓝图】：\n${longformState.storyBlueprint || '暂无，请以当前救猫咪类型和本章大纲建立商业叙事张力。'}\n\n【角色声音系统】：\n${longformState.characterVoice || '暂无，请确保主要角色对白有身份、性格、节奏和潜台词差异。'}\n\n【情感/关系线系统】：\n${longformState.relationshipLine || '暂无，请让关系变化由事件选择触发。'}\n\n【主题与母题追踪】：\n${longformState.themeMotif || '暂无，请让主题自然藏在选择、意象和代价中，不要说教。'}\n\n【本事件反派/阻力升级】：\n${longformState.oppositionPlans?.[key] || '暂无，请确保正文中存在清晰阻力、升级和代价。'}\n\n【本章场景卡】：\n${sceneCard || longformState.sceneCards?.[key] || '暂无'}\n\n【本章对白专项打磨】：\n${dialoguePlan || longformState.dialoguePolish?.[key] || '暂无'}\n\n【本章动作/场面导演】：\n${setpiecePlan || longformState.setpieceDirector?.[key] || '暂无'}\n\n【本章剧情起承转合】：\n${latestSynopsis}\n\n【统一规则/专家资料】：\n${worldRules}\n\n【必须100%严密契合的登场角色人设】：\n${characterDetails}\n\n【上帝视角信息权限】：\n${godViewContext}\n\n【正文质量监督标准】：\n${getUnifiedQualityGuardrails()}`;
 
             const ultraPayload = {
                 ...currentLocalContext,
@@ -4106,6 +4190,7 @@ if (data.success) {
 
                 const characterDetails = getCharacterDetailsForSop();
                 const worldRules = getWorldRulesText();
+                const godViewContext = formatGodViewContext();
                 const eventContext = getAdjacentEventContext(currentLocalContext.chapterNumber);
 
                 // 【核心：AI 工作流指令】
@@ -4121,17 +4206,18 @@ if (data.success) {
 5. 主动检查大片蓝图：当前事件是否服务主题问题、三幕式/八序列推进、主角弧光、终局压力和读者情绪卖点。
 6. 主动设计反派/阻力升级：谁阻止主角、对方计划、主角胜利代价、对方下一步反制，避免轻松过关。
 7. 用统一规则/专家资料校验事件是否合理；如果涉及职业、行业或学科，要检查工作流程、术语、权限边界、常见误区和真实感细节，不合理时必须指出并给出修正方向。
-8. 主动提出【可种植伏笔】和【需要回收伏笔】：说明种下位置、回收位置、误导/信息差作用、回收方式，以及如果不回收会造成的逻辑断裂。
-9. 当作者说“推演差不多了”或“开始总结”时，先确认这段内容分成几章，再生成每章标题与详细摘要；每章必须列出救猫咪类型功能、人物行为来源、对抗/代价、可种植伏笔/需回收伏笔。
-10. 下一事件只作为结尾衔接目标，不能把 SOP 讨论变成两个事件的联合推演。
-11. 只能使用下方【可调用人物卡】中的角色来推导行为；不要查阅、调用或主动引入无关人物，除非作者明确要求新增角色。
-12. 每次回复最后必须给作者 2-4 个可直接选择或改写的输入方向，例如“选 A/B/C”“补充某角色动机”“指定一个必须发生的事件”。禁止只说“你觉得呢”。`;
+8. 用上帝视角信息权限校验信息释放：未揭露/部分揭露的秘密只能用观众视角推进推理，上帝视角只能后台校验伏笔，不能提前泄露；已揭露后才可公开调用。
+9. 主动提出【可种植伏笔】和【需要回收伏笔】：说明种下位置、回收位置、误导/信息差作用、回收方式，以及如果不回收会造成的逻辑断裂。
+10. 当作者说“推演差不多了”或“开始总结”时，先确认这段内容分成几章，再生成每章标题与详细摘要；每章必须列出救猫咪类型功能、人物行为来源、对抗/代价、可种植伏笔/需回收伏笔。
+11. 下一事件只作为结尾衔接目标，不能把 SOP 讨论变成两个事件的联合推演。
+12. 只能使用下方【可调用人物卡】中的角色来推导行为；不要查阅、调用或主动引入无关人物，除非作者明确要求新增角色。
+13. 每次回复最后必须给作者 2-4 个可直接选择或改写的输入方向，例如“选 A/B/C”“补充某角色动机”“指定一个必须发生的事件”。禁止只说“你觉得呢”。`;
 
                 // 3. 把私货、工作流、防 OOC 指令、伏笔全塞进最后一句话里发给 AI！
                 let lastUserMsg = payloadConvo[payloadConvo.length - 1];
                 if (lastUserMsg && lastUserMsg.role === 'user') {
                     // 如果有必须要回收的伏笔 (hookAlert)，它会变成红字警告随同发送！
-                    lastUserMsg.content += `\n\n${hiddenWorkflow}` + (currentLocalContext.hookAlert || "") + `\n\n[统一监督指令]：请严格遵循规则/专家资料、救猫咪类型、人物档案和长篇编辑状态推演，严禁专业乱写、逻辑跳步、人物降智或OOC。\n【救猫咪类型监督】：\n${getSaveTheCatGenreGuide(getCurrentStoryGenre())}\n【统一规则/专家资料】：\n${worldRules}\n【人物卡】：\n${characterDetails}\n【长篇编辑状态】：\n${getLongformEditorialContext()}`;
+                    lastUserMsg.content += `\n\n${hiddenWorkflow}` + (currentLocalContext.hookAlert || "") + `\n\n[统一监督指令]：请严格遵循规则/专家资料、救猫咪类型、人物档案、上帝视角信息权限和长篇编辑状态推演，严禁专业乱写、逻辑跳步、人物降智、OOC或提前泄露真相。\n【救猫咪类型监督】：\n${getSaveTheCatGenreGuide(getCurrentStoryGenre())}\n【统一规则/专家资料】：\n${worldRules}\n【人物卡】：\n${characterDetails}\n【上帝视角信息权限】：\n${godViewContext}\n【长篇编辑状态】：\n${getLongformEditorialContext()}`;
                 }
 
                 // 4. 发送给主脑

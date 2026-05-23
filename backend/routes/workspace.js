@@ -324,9 +324,12 @@ router.get('/characters/:projectId', async (req, res) => {
 
 // 7. 全局资产：保存角色
 router.post('/character', async (req, res) => {
-    const { projectId, id, name, role, faction, description, age, appearance, profession, personality, core_desire, goal, motivation, flaw, fear, skills, background, character_arc } = req.body;
+    const { projectId, id, name, role, faction, description, age, appearance, profession, personality, core_desire, goal, motivation, flaw, fear, skills, background, character_arc, character_rules } = req.body;
     try {
-        const payload = { name, role, faction, description, age, appearance, profession, personality, core_desire, goal, motivation, flaw, fear, skills, background, character_arc };
+        const cleanBackground = String(background || '').replace(/\n*【人物规则】[\s\S]*$/g, '').trim();
+        const cleanRules = String(character_rules || '').trim();
+        const mergedBackground = [cleanBackground, cleanRules ? `【人物规则】\n${cleanRules}` : ''].filter(Boolean).join('\n\n');
+        const payload = { name, role, faction, description, age, appearance, profession, personality, core_desire, goal, motivation, flaw, fear, skills, background: mergedBackground, character_arc };
         let error;
         if (id) {
             const { error: updateError } = await supabase.from('characters').update(payload).eq('id', id);
