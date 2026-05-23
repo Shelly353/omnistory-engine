@@ -114,6 +114,7 @@ window.OmniPrompts = {
   "rules": "战力等级/绝对法则...",
   "characters": [ 
     { 
+      "character_id": "已有角色必须沿用原 character_id；新增角色可留空",
       "name": "角色名", "role": "定位", "faction": "阵营", "description": "简述",
       "age": "年龄", "appearance": "外貌特征", "profession": "职业", "personality": "性格(MBTI)",
       "core_desire": "核心欲望", "goal": "目标", "motivation": "动机", "flaw": "缺陷", 

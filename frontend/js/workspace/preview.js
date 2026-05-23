@@ -61,7 +61,8 @@ window.OmniWorkspacePreview = (() => {
     function renderCharacterCard(c = {}, bible = {}) {
         const eventCount = getCharacterEventCount(c, bible);
         const usage = getCharacterUsageStyle(eventCount);
-        const characterId = c.character_id || c.id || `char_${String(c.original_name || c.name || '').trim()}`;
+        const nameSeed = String(c.original_name || c.name || '').trim();
+        const characterId = c.character_id || c.id || (nameSeed ? `char_${nameSeed}` : '');
         return `
             <div class="prev-char-item group relative bg-gray-900 rounded-lg border ${usage.border} hover:border-blue-500 transition-all duration-300" data-character-id="${escapePreviewValue(characterId)}" data-original-name="${escapePreviewValue(c.original_name || c.name || '')}">
                 <div class="flex space-x-2 p-2 relative z-10 bg-gray-900 rounded-lg">

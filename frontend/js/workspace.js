@@ -140,6 +140,44 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    function getCharacterIdentity(char = {}) {
+        return char.character_id || char.id || '';
+    }
+
+    function getCharacterNameKey(char = {}) {
+        return normalizeStableKey(char.name || char.original_name || '');
+    }
+
+    function indexCharactersByIdentity(characters = []) {
+        const byId = new Map();
+        const byName = new Map();
+        characters.forEach(char => {
+            const id = getCharacterIdentity(char);
+            const nameKey = getCharacterNameKey(char);
+            if (id) byId.set(id, char);
+            if (nameKey && !byName.has(nameKey)) byName.set(nameKey, char);
+        });
+        return { byId, byName };
+    }
+
+    function dedupeCharactersByIdentity(characters = []) {
+        const byId = new Map();
+        const byName = new Map();
+        characters.filter(char => char?.name).forEach(rawChar => {
+            const char = ensureCharacterIdentity(rawChar);
+            const id = getCharacterIdentity(char);
+            const nameKey = getCharacterNameKey(char);
+            const existing = (id && byId.get(id)) || (nameKey && byName.get(nameKey));
+            const merged = existing ? mergeObjectMissingFields(existing, char) : char;
+            const stableId = getCharacterIdentity(existing || char);
+            merged.character_id = stableId || merged.character_id;
+            if (existing?.id && !merged.id) merged.id = existing.id;
+            if (stableId) byId.set(stableId, merged);
+            if (nameKey) byName.set(nameKey, merged);
+        });
+        return Array.from(new Set([...byId.values(), ...byName.values()]));
+    }
+
     function mergeObjectMissingFields(previousItem = {}, nextItem = {}) {
         const merged = { ...previousItem, ...nextItem };
         Object.entries(previousItem || {}).forEach(([key, value]) => {
@@ -430,35 +468,43 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function mergeCharactersPreservingCards(previousCharacters = [], nextCharacters = []) {
         const edits = loadManualBibleEdits();
-        const previous = Array.isArray(previousCharacters) ? previousCharacters
+        const previous = dedupeCharactersByIdentity(Array.isArray(previousCharacters) ? previousCharacters
             .filter(c => c && c.name)
             .map(c => ensureCharacterIdentity({ ...c, name: canonicalCharacterName(c.name, edits) }))
-            .filter(c => !edits.deletedCharacters[normalizeStableKey(c.name)]) : [];
-        const next = Array.isArray(nextCharacters) ? nextCharacters
+            .filter(c => !edits.deletedCharacters[normalizeStableKey(c.name)]) : []);
+        const previousIndex = indexCharactersByIdentity(previous);
+        const next = dedupeCharactersByIdentity(Array.isArray(nextCharacters) ? nextCharacters
             .filter(c => c && c.name)
-            .map(c => ensureCharacterIdentity({ ...c, name: canonicalCharacterName(c.name, edits) }))
-            .filter(c => !edits.deletedCharacters[normalizeStableKey(c.name)]) : [];
+            .map(c => {
+                const canonicalName = canonicalCharacterName(c.name, edits);
+                const existing = previousIndex.byId.get(getCharacterIdentity(c))
+                    || previousIndex.byName.get(normalizeStableKey(canonicalName))
+                    || previousIndex.byName.get(normalizeStableKey(c.original_name));
+                return ensureCharacterIdentity({
+                    ...c,
+                    id: c.id || existing?.id,
+                    character_id: getCharacterIdentity(existing) || getCharacterIdentity(c),
+                    original_name: c.original_name || existing?.original_name || existing?.name,
+                    name: canonicalName
+                });
+            })
+            .filter(c => !edits.deletedCharacters[normalizeStableKey(c.name)]) : []);
         if (next.length === 0 && previous.length > 0) return previous;
 
-        const previousByIdentity = new Map(previous.map(char => [char.character_id || normalizeStableKey(char.name), char]));
+        const previousByIdentity = new Map(previous.map(char => [getCharacterIdentity(char) || normalizeStableKey(char.name), char]));
+        const previousByName = new Map(previous.map(char => [normalizeStableKey(char.name), char]));
         const seen = new Set();
         const merged = next.map(char => {
-            const key = char.character_id || normalizeStableKey(char.name);
+            const key = getCharacterIdentity(char) || normalizeStableKey(char.name);
             seen.add(key);
-            return mergeObjectMissingFields(previousByIdentity.get(key), char);
+            return mergeObjectMissingFields(previousByIdentity.get(key) || previousByName.get(normalizeStableKey(char.name)), char);
         });
 
         previous.forEach(char => {
-            const key = char.character_id || normalizeStableKey(char.name);
+            const key = getCharacterIdentity(char) || normalizeStableKey(char.name);
             if (!seen.has(key)) merged.push(char);
         });
-        const unique = new Map();
-        merged.forEach(char => {
-            const key = char.character_id || normalizeStableKey(char.name);
-            if (!key) return;
-            unique.set(key, unique.has(key) ? mergeObjectMissingFields(unique.get(key), char) : char);
-        });
-        return Array.from(unique.values());
+        return dedupeCharactersByIdentity(merged);
     }
 
     function mergeStableArray(previousItems = [], nextItems = [], getKey) {
@@ -494,10 +540,10 @@ document.addEventListener('DOMContentLoaded', () => {
     function normalizeManualBibleSnapshot(bible = {}) {
         const edits = loadManualBibleEdits();
         const normalized = applyManualBibleEditsToValue(bible, edits) || {};
-        normalized.characters = uniqueStableArray((normalized.characters || [])
+        normalized.characters = dedupeCharactersByIdentity((normalized.characters || [])
             .filter(char => char?.name)
             .map(char => ensureCharacterIdentity({ ...char, name: canonicalCharacterName(char.name, edits) }))
-            .filter(char => !edits.deletedCharacters[normalizeStableKey(char.name)]), char => char.character_id || normalizeStableKey(char.name));
+            .filter(char => !edits.deletedCharacters[normalizeStableKey(char.name)]));
         normalized.relations = uniqueStableArray((normalized.relations || [])
             .map(rel => ({
                 ...rel,
@@ -1322,27 +1368,30 @@ document.addEventListener('DOMContentLoaded', () => {
             genre: document.getElementById('prev-genre') ? document.getElementById('prev-genre').value.trim() : "",
             worldview: document.getElementById('prev-worldview') ? document.getElementById('prev-worldview').value.trim() : "",
             rules: buildRulesWithReferenceMaterials(rulesInput, sourceMaterials),
-            characters: Array.from(document.querySelectorAll('.prev-char-item')).map(el => ({
-                character_id: el.dataset.characterId || "",
-                id: el.dataset.characterId || "",
-                original_name: el.dataset.originalName || "",
-                name: cleanupMixedCharacterName(el.querySelector('.char-name')?.value.trim() || ""),
-                role: el.querySelector('.char-role')?.value.trim() || "",
-                faction: el.querySelector('.char-faction')?.value.trim() || "",
-                description: el.querySelector('.char-desc')?.value.trim() || "",
-                age: el.querySelector('.char-age')?.value.trim() || "",
-                appearance: el.querySelector('.char-app')?.value.trim() || "",
-                profession: el.querySelector('.char-prof')?.value.trim() || "",
-                personality: el.querySelector('.char-pers')?.value.trim() || "",
-                core_desire: el.querySelector('.char-desire')?.value.trim() || "",
-                goal: el.querySelector('.char-goal')?.value.trim() || "",
-                motivation: el.querySelector('.char-motiv')?.value.trim() || "",
-                flaw: el.querySelector('.char-flaw')?.value.trim() || "",
-                fear: el.querySelector('.char-fear')?.value.trim() || "",
-                skills: el.querySelector('.char-skills')?.value.trim() || "",
-                background: el.querySelector('.char-bg')?.value.trim() || "",
-                character_arc: el.querySelector('.char-arc')?.value.trim() || "",
-            })).filter(c => c.name !== ""),
+            characters: Array.from(document.querySelectorAll('.prev-char-item')).map(el => {
+                const characterId = el.dataset.characterId && el.dataset.characterId !== 'char_' ? el.dataset.characterId : "";
+                return {
+                    character_id: characterId,
+                    id: characterId,
+                    original_name: el.dataset.originalName || "",
+                    name: cleanupMixedCharacterName(el.querySelector('.char-name')?.value.trim() || ""),
+                    role: el.querySelector('.char-role')?.value.trim() || "",
+                    faction: el.querySelector('.char-faction')?.value.trim() || "",
+                    description: el.querySelector('.char-desc')?.value.trim() || "",
+                    age: el.querySelector('.char-age')?.value.trim() || "",
+                    appearance: el.querySelector('.char-app')?.value.trim() || "",
+                    profession: el.querySelector('.char-prof')?.value.trim() || "",
+                    personality: el.querySelector('.char-pers')?.value.trim() || "",
+                    core_desire: el.querySelector('.char-desire')?.value.trim() || "",
+                    goal: el.querySelector('.char-goal')?.value.trim() || "",
+                    motivation: el.querySelector('.char-motiv')?.value.trim() || "",
+                    flaw: el.querySelector('.char-flaw')?.value.trim() || "",
+                    fear: el.querySelector('.char-fear')?.value.trim() || "",
+                    skills: el.querySelector('.char-skills')?.value.trim() || "",
+                    background: el.querySelector('.char-bg')?.value.trim() || "",
+                    character_arc: el.querySelector('.char-arc')?.value.trim() || "",
+                };
+            }).filter(c => c.name !== ""),
             relations: Array.from(document.querySelectorAll('.prev-rel-item')).map(el => ({
                 from_name: el.querySelector('.rel-from')?.value.trim() || "",
                 to_name: el.querySelector('.rel-to')?.value.trim() || "",
