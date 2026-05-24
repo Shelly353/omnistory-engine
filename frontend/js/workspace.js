@@ -57,6 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let sandboxAutoRepairSignature = '';
     let sandboxRuleGate = { blocked: false, ignored: false, ignoredSignature: '', ignoredItems: [], reason: '', pendingText: '', items: [] };
     let activeRuleConflictItem = null;
+    let sandboxNextQuestionRetryCount = 0;
 
     const RECENT_CHAT_LIMIT = 10;
     const MEMORY_SUMMARY_LIMIT = 6000;
@@ -154,8 +155,48 @@ document.addEventListener('DOMContentLoaded', () => {
         return match ? `Q${match[1]}` : '';
     }
 
+    function collectQuestionCandidatesFromJson(value, results = [], allowString = false) {
+        if (!value || results.length >= 12) return results;
+        if (typeof value === 'string') {
+            const text = value.trim();
+            if (allowString && text && /[？?]|是否|什么|如何|哪|谁|要不要|选择|决定/.test(text)) results.push(text);
+            return results;
+        }
+        if (Array.isArray(value)) {
+            value.forEach(item => collectQuestionCandidatesFromJson(item, results, allowString));
+            return results;
+        }
+        if (typeof value === 'object') {
+            Object.entries(value).forEach(([key, entry]) => {
+                if (/question|questions|next_questions|nextQuestion|下一步|下一轮|待确认|选择/i.test(key)) {
+                    collectQuestionCandidatesFromJson(entry, results, true);
+                } else if (entry && typeof entry === 'object') {
+                    collectQuestionCandidatesFromJson(entry, results, false);
+                }
+            });
+        }
+        return results;
+    }
+
+    function extractQuestionsFromJsonPayload(text = '') {
+        const parsed = extractJsonObjectFromText(text);
+        if (!parsed) return [];
+        const seen = new Set();
+        return collectQuestionCandidatesFromJson(parsed)
+            .map((question, index) => {
+                const cleaned = String(question || '').replace(/^Q\s*\d+[\.、:：\s-]*/i, '').trim();
+                return cleaned ? { id: `Q${index + 1}`, question: cleaned } : null;
+            })
+            .filter(item => {
+                if (!item || seen.has(item.question)) return false;
+                seen.add(item.question);
+                return true;
+            });
+    }
+
     function extractNumberedQuestions(text = '') {
-        const clean = stripBibleJsonBlocks(stripFencedBlocks(text || ''));
+        const rawText = String(text || '');
+        const clean = stripBibleJsonBlocks(stripFencedBlocks(rawText));
         const questions = [];
         const seen = new Set();
         let currentSection = '';
@@ -173,7 +214,8 @@ document.addEventListener('DOMContentLoaded', () => {
             seen.add(id);
             questions.push({ id, question });
         });
-        return questions;
+        if (questions.length > 0) return questions;
+        return extractQuestionsFromJsonPayload(rawText);
     }
 
     function extractStatusQuestionIds(text = '', statusPattern) {
@@ -375,6 +417,37 @@ document.addEventListener('DOMContentLoaded', () => {
         const pendingCount = getPendingInteractionQuestions(scope).length;
         if ((answerProgress.before || 0) > 0) return pendingCount > 0;
         return pendingCount > 0;
+    }
+
+    function isSandboxAcceptanceReply(text = '') {
+        return /【沙盒验收】|沙盒验收通过|正式铸造|进入SOP|进入 SOP|验收条件已满足/.test(String(text || ''));
+    }
+
+    function buildNextSandboxQuestionRoundPrompt(aiReplyText = '') {
+        const bible = getCurrentBibleSnapshot() || {};
+        return `【内部续问请求：不要输出纯 JSON】
+上一轮回答已经吸收并刷新实时面板，但你的上一条回复没有给出新的逐条问题，或问题被 JSON 吃掉了。现在请继续沙盒下一轮提问。
+
+要求：
+1. 如果沙盒尚未达到【沙盒验收】，必须像第一轮一样输出【当前任务】和【下一步选择】。
+2. 【下一步选择】里必须列出 Q1、Q2、Q3...，只列这一轮真正需要作者回答的问题。
+3. 每个问题只能问一个清晰决定点，不要把多个问题揉成一段。
+4. 不要写正文，不要只输出 JSON；可在末尾附带世界圣经 JSON，但可见正文必须先出现 Q1。
+5. 如果已经满足沙盒验收，请明确输出【沙盒验收】并说明可以正式铸造。
+
+【当前面板阶段】${bible.workflow?.stage || '未知'}
+【当前面板摘要】
+${limitText(JSON.stringify(compactBibleForPrompt(bible)), 3500)}
+
+【上一条 AI 回复】
+${limitText(stripBibleJsonBlocks(aiReplyText), 1200) || '上一条回复主要是 JSON。'}`;
+    }
+
+    function shouldRequestNextSandboxQuestionRound(aiReplyText = '', completedLocalBatch = false) {
+        if (!completedLocalBatch) return false;
+        if (isSandboxAcceptanceReply(aiReplyText)) return false;
+        if (getPendingInteractionQuestions('sandbox').length > 0) return false;
+        return sandboxNextQuestionRetryCount < 1;
     }
 
     function buildInteractionFocusPrompt(scope = 'sandbox', userText = '') {
@@ -1179,7 +1252,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function stripBibleJsonBlocks(text = "") {
-        return String(text || '').replace(/```(?:json)?\s*([\s\S]*?)\s*```/gi, (block, inner) => {
+        const raw = String(text || '').trim();
+        try {
+            const parsed = JSON.parse(raw);
+            if (looksLikeBibleJson(parsed)) return '';
+        } catch (e) {}
+        return raw.replace(/```(?:json)?\s*([\s\S]*?)\s*```/gi, (block, inner) => {
             try {
                 const parsed = JSON.parse(inner.trim());
                 return looksLikeBibleJson(parsed) ? '' : block;
@@ -3753,6 +3831,7 @@ ${getRulesTextForPrompt()}`;
 
         genesisConversation.forEach((msg, index) => {
             let text = msg.content;
+            if (msg.role === 'user' && /^【内部续问请求/.test(String(text || '').trim())) return;
             if (msg.role === 'assistant') {
                 const parsed = extractBibleJsonFromText(text);
                 if (parsed) latestParsedBible = parsed;
@@ -3836,9 +3915,23 @@ ${getRulesTextForPrompt()}`;
                 }
                 const newIndex = genesisConversation.length;
                 genesisConversation.push({ role: 'assistant', content: aiReplyText || '已更新设定数据。' });
-                if(aiReplyText.length > 0) appendMessage('assistant', aiReplyText, newIndex);
+                const visibleReply = stripBibleJsonBlocks(aiReplyText).trim();
+                if (visibleReply.length > 0 || getPendingInteractionQuestions('sandbox').length > 0) {
+                    appendMessage('assistant', visibleReply || '【当前任务】\n实时面板已更新，正在准备下一轮问题。', newIndex);
+                }
                 localStorage.setItem(GENESIS_CHAT_KEY, JSON.stringify(genesisConversation));
                 syncGenesisDraftToCloud().catch(error => console.warn('聊天记录云端同步失败:', error));
+                if (shouldRequestNextSandboxQuestionRound(aiReplyText, completedLocalBatch)) {
+                    sandboxNextQuestionRetryCount += 1;
+                    genesisConversation.push({ role: 'user', content: buildNextSandboxQuestionRoundPrompt(aiReplyText) });
+                    localStorage.setItem(GENESIS_CHAT_KEY, JSON.stringify(genesisConversation));
+                    appendMessage('assistant', '【当前任务】\n上一轮已吸收，但没有拿到新的逐条问题。系统正在自动请求下一轮 Q1/Q2。', genesisConversation.length);
+                    setTimeout(() => fetchChatResponse(), 0);
+                    return;
+                }
+                if (getPendingInteractionQuestions('sandbox').length > 0 || isSandboxAcceptanceReply(aiReplyText)) {
+                    sandboxNextQuestionRetryCount = 0;
+                }
             }
         } catch (error) {
             console.error('沙盒推演失败:', error);
@@ -3884,6 +3977,7 @@ ${getRulesTextForPrompt()}`;
                 appendMessage('assistant', `【当前任务】\n本轮问题已全部回答，正在交给 AI 统一吸收并刷新实时面板。\n\n【下一步选择】\nQ1. 等待 AI 总结后进入下一轮问题。`);
                 localStorage.setItem(GENESIS_CHAT_KEY, JSON.stringify(genesisConversation));
                 window.__lastSandboxAnswerProgress = { before: localAnswer.answeredIds.length, after: 0, completedBatch: true };
+                sandboxNextQuestionRetryCount = 0;
                 fetchChatResponse();
                 return;
             }
