@@ -89,6 +89,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }[char]));
     }
 
+    async function readApiJson(res, fallbackLabel = '请求失败') {
+        let data = null;
+        try {
+            data = await res.json();
+        } catch (e) {}
+        if (!res.ok) {
+            throw new Error(data?.error || `${fallbackLabel}：HTTP ${res.status}`);
+        }
+        if (data && data.success === false) {
+            throw new Error(data.error || fallbackLabel);
+        }
+        return data || {};
+    }
+
     function loadInteractionState() {
         try {
             const state = JSON.parse(localStorage.getItem(INTERACTION_STATE_KEY) || '{}');
@@ -225,12 +239,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const pending = (state.queue || []).filter(item => !['answered', 'skipped'].includes(item.status));
         const inbox = (state.inbox || []).filter(item => item.status === '待确认' || item.status === '暂存');
         const queueText = pending.length
-            ? pending.slice(0, 10).map(item => `${item.id}【${item.status || 'pending'}】${item.question}`).join('\n')
+            ? pending.slice(0, 6).map(item => `${item.id}【${item.status || 'pending'}】${item.question}`).join('\n')
             : '暂无未解决问题。';
         const inboxText = inbox.length
-            ? inbox.slice(0, 10).map(item => `${item.id}【${item.status}】${item.content}${item.destination ? ` -> ${item.destination}` : ''}`).join('\n')
+            ? inbox.slice(0, 6).map(item => `${item.id}【${item.status}】${limitText(item.content, 240)}${item.destination ? ` -> ${item.destination}` : ''}`).join('\n')
             : '暂无待处理新增设定。';
-        return `\n\n【问题队列与设定收件箱协议】\n当前未解决问题：\n${queueText}\n\n当前设定收件箱：\n${inboxText}\n\n用户本轮原文：\n${limitText(userText, 1600)}\n\n请先判断用户本轮是否回答了当前问题、后续问题或没有被问到但重要的新设定。规则：\n1. 所有问题必须编号为 Q1、Q2、Q3...；界面会默认只显示当前优先问题，但不能删掉其他问题。\n2. 如果用户一段话已经回答了后续问题，必须在【已吸收】中写明“Qx 已回答：摘要”，后续不要重复问。\n3. 如果用户提供了 AI 没问但重要的设定，必须在【新增重要设定】中写成 S1、S2...，并标注建议写入：人物卡/人物规则/事件/规则/上帝视角/伏笔/暂存。\n4. 如果新增设定影响人物卡、事件、规则或后续时间线，必须在【监督提醒】里说明影响；有冲突时给 A/B/C 处理选项。\n5. 【下一步选择】里只放仍未解决的问题，并把当前最该回答的问题放第一位。`;
+        return `\n\n【问题队列与设定收件箱协议】\n当前未解决问题：\n${queueText}\n\n当前设定收件箱：\n${inboxText}\n\n用户本轮原文：\n${limitText(userText, 1200)}\n\n请先判断用户本轮是否回答了当前问题、后续问题或没有被问到但重要的新设定。规则：\n1. 所有问题必须编号为 Q1、Q2、Q3...；界面会默认只显示当前优先问题，但不能删掉其他问题。\n2. 如果用户一段话已经回答了后续问题，必须在【已吸收】中写明“Qx 已回答：摘要”，后续不要重复问。\n3. 如果用户提供了 AI 没问但重要的设定，必须在【新增重要设定】中写成 S1、S2...，并标注建议写入：人物卡/人物规则/事件/规则/上帝视角/伏笔/暂存。\n4. 有冲突时给 A/B/C 处理选项。【下一步选择】只放仍未解决的问题。`;
     }
 
     function renderInteractionQueueHtml(scope = 'sandbox') {
@@ -3216,7 +3230,7 @@ ${getRulesTextForPrompt()}`;
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(buildGenesisChatPayload())
             });
-            const data = await res.json();
+            const data = await readApiJson(res, '沙盒 AI 回复失败');
             document.getElementById(loadingId)?.remove();
             
             if (data.success) {
@@ -3232,6 +3246,7 @@ ${getRulesTextForPrompt()}`;
             }
         } catch (error) {
             console.error('沙盒推演失败:', error);
+            appendMessage('assistant', `【当前任务】\n本轮 AI 回复失败。\n\n【监督提醒】\n${error.message || '未知错误'}\n\n【下一步选择】\nQ1. 可以稍后重试。\nQ2. 如果连续失败，请减少本轮输入内容，或先点击“从对话刷新面板”压缩上下文。`, genesisConversation.length);
             alert(`本轮 AI 回复失败：${error.message || '未知错误'}`);
         } finally {
             document.getElementById(loadingId)?.remove();
@@ -5182,9 +5197,9 @@ if (data.success) {
                 // 4. 发送给主脑
                 const res = await fetch('/api/chat/deduce', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(buildChatPayloadWithLocalSources(payloadConvo, 12, lastUserMsg?.content || ''))
+                    body: JSON.stringify(buildChatPayloadWithLocalSources(payloadConvo, 8, lastUserMsg?.content || ''))
                 });
-                const data = await res.json();
+                const data = await readApiJson(res, 'SOP AI 回复失败');
                 const loader = document.getElementById(loadingId);
                 if (loader) loader.remove();
                 if (data.success) {
@@ -5195,7 +5210,14 @@ if (data.success) {
                     localStorage.setItem(`sop_v3_${PROJECT_ID}_${currentLocalContext.chapterId}`, JSON.stringify(currentChapterChatHistory));
                     runSopRealtimeSupervision('SOP 新回复后自动检查');
                 }
-            } catch (e) { document.getElementById(loadingId)?.remove(); }
+            } catch (e) {
+                document.getElementById(loadingId)?.remove();
+                const errorReply = `【当前任务】\nSOP 本轮 AI 回复失败。\n\n【监督提醒】\n${e.message || '未知错误'}\n\n【下一步选择】\nQ1. 可以直接重试发送。\nQ2. 如果连续失败，请缩短本轮输入，或先切回沙盒刷新/压缩面板。`;
+                currentChapterChatHistory.push({ role: 'assistant', content: errorReply });
+                appendChapMsg('assistant', errorReply);
+                localStorage.setItem(`sop_v3_${PROJECT_ID}_${currentLocalContext.chapterId}`, JSON.stringify(currentChapterChatHistory));
+                alert(`SOP AI 回复失败：${e.message || '未知错误'}`);
+            }
         };
     }
 

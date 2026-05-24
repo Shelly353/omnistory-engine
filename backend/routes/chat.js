@@ -7,6 +7,9 @@ const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY;
 
 router.post('/deduce', async (req, res) => {
     const { conversation = [], memorySummary = '', currentBible = null, requirePanelJson = false, localReferenceSnippets = '' } = req.body;
+    if (!DEEPSEEK_KEY) {
+        return res.status(500).json({ success: false, error: 'DEEPSEEK_API_KEY 未配置，后端无法调用 AI。' });
+    }
     
     // 我们给 AI 的超级系统指令 (System Prompt)
     const systemPrompt = `你是一位顶级的网文主编和世界观架构师。用户正在使用一个名为 OmniStory 的推演沙盒。
@@ -60,19 +63,24 @@ router.post('/deduce', async (req, res) => {
             })
         });
 
-        if (!dsResponse.ok) throw new Error(`DeepSeek 报错: ${dsResponse.status}`);
-        const result = await dsResponse.json();
+        const responseText = await dsResponse.text();
+        if (!dsResponse.ok) {
+            throw new Error(`DeepSeek 报错 ${dsResponse.status}: ${responseText.slice(0, 800) || '无错误详情'}`);
+        }
+        const result = JSON.parse(responseText);
+        const reply = result.choices?.[0]?.message?.content;
+        if (!reply) throw new Error('DeepSeek 没有返回有效回复内容。');
         
         // 简单返回 AI 的对话，暂时模拟提取
         res.json({ 
             success: true, 
-            reply: result.choices[0].message.content,
+            reply,
             extractedInfo: { characters: ["检测中...待结晶化提取"] } 
         });
 
     } catch (error) {
         console.error("推演失败:", error);
-        res.status(500).json({ success: false, error: error.message });
+        res.status(502).json({ success: false, error: error.message });
     }
 });
 
