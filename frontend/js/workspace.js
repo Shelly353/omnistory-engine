@@ -155,13 +155,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const clean = stripBibleJsonBlocks(stripFencedBlocks(text || ''));
         const questions = [];
         const seen = new Set();
+        let currentSection = '';
         clean.split('\n').forEach(line => {
             const trimmed = line.trim().replace(/^[-*]\s*/, '');
+            const sectionMatch = trimmed.match(/^【(.+?)】/);
+            if (sectionMatch) currentSection = sectionMatch[1];
+            if (/已吸收|新增重要设定|监督提醒|可展开|推演依据/.test(currentSection)) return;
+            if (/已回答|已吸收|已解决|部分回答|冲突|不再追问/.test(trimmed)) return;
             const match = trimmed.match(/^(Q\s*\d+)[\.、:：\s-]+(.+)/i);
             if (!match) return;
             const id = normalizeQuestionId(match[1]);
             const question = match[2].trim();
-            if (/已回答|已吸收|已解决|部分回答|冲突|不再追问/.test(question)) return;
             if (!id || !question || seen.has(id)) return;
             seen.add(id);
             questions.push({ id, question });
@@ -216,11 +220,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (conflict.has(item.id)) item.status = 'conflict';
         });
 
-        extractNumberedQuestions(reply).forEach(item => {
+        const activeQuestions = extractNumberedQuestions(reply).filter(item => !answered.has(item.id) && !conflict.has(item.id));
+        activeQuestions.forEach(item => {
             const existing = queue.find(q => q.id === item.id);
             if (existing) {
                 existing.question = item.question;
-                if (!existing.status || existing.status === 'answered') existing.status = 'pending';
+                if (!existing.status || !['answered', 'skipped'].includes(existing.status)) existing.status = 'pending';
             } else {
                 queue.push({ ...item, status: 'pending' });
             }
@@ -3154,6 +3159,8 @@ ${getRulesTextForPrompt()}`;
         if (!confirm("警告：回滚将删除此节点之后的所有记忆，并重新在此节点向 AI 发送请求。是否继续？")) return;
         const targetMessage = genesisConversation[index].content.replace(/\n\n\(系统附加：.*?\)/g, '');
         genesisConversation = genesisConversation.slice(0, index); 
+        setGenesisSyncBlocked(false);
+        setGenesisChatLocked(false);
         renderChatHistory(); // 重新渲染历史记录
         if(chatInput) { chatInput.value = targetMessage; btnSend.click(); }
     };
@@ -3468,6 +3475,7 @@ ${getRulesTextForPrompt()}`;
 6. 历史专家为内置后台能力：遇到历史剧/古代背景时，必须检查朝代、官职、称谓、礼仪、服饰器物、交通通讯、军队调动、审案/科举/婚嫁/朝会流程，以及现代价值观误套问题。
 7. 当前面板数据中的 workflow 流程状态、protagonist_arc 主角弧线、antagonist_arc 反派弧线、hollywood_beats 好莱坞六节点、characters 详细字段、character_rules 人物规则、relations 人物羁绊、timeline 细密时间轴、secrets 上帝视角信息是稳定资产；除非最近对话明确要求删除某一项，否则必须完整保留，不允许用摘要版、空数组或字段缺失版覆盖。
 8. 如果当前面板中的人物羁绊或细密时间轴为空，必须从全量用户修正记录和全量沙盒对话尾迹中重建，不要留空。`, { recoveryMode: true });
+                setGenesisSyncBlocked(false);
                 alert('✅ 已根据当前对话刷新右侧面板。');
             } catch (e) {
                 console.error('手动刷新面板失败:', e);
