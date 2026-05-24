@@ -1747,6 +1747,20 @@ ${limitText(stripBibleJsonBlocks(aiReplyText), 1200) || '上一条回复主要�
     const sandboxChatPane = document.getElementById('sandbox-chat-pane');
     const sandboxPreviewPane = document.getElementById('sandbox-preview-pane');
     const btnToggleSandboxLayout = document.getElementById('btn-toggle-sandbox-layout');
+    const sandboxMobileTask = document.getElementById('sandbox-mobile-task');
+    const sandboxMobileAssets = document.getElementById('sandbox-mobile-assets');
+    const sandboxMobileNav = document.getElementById('sandbox-mobile-nav');
+    const mobileTaskStage = document.getElementById('mobile-task-stage');
+    const mobileTaskFocus = document.getElementById('mobile-task-focus');
+    const mobileTaskQuestion = document.getElementById('mobile-task-question');
+    const mobileTaskAlert = document.getElementById('mobile-task-alert');
+    const mobileTaskGoChat = document.getElementById('mobile-task-go-chat');
+    const mobileTaskGoPanel = document.getElementById('mobile-task-go-panel');
+    const mobileTaskGoWarning = document.getElementById('mobile-task-go-warning');
+    const mobileTaskGoAssets = document.getElementById('mobile-task-go-assets');
+    const mobileOpenAssetModal = document.getElementById('mobile-open-asset-modal');
+    const mobileOpenTimeline = document.getElementById('mobile-open-timeline');
+    const mobileOpenRelation = document.getElementById('mobile-open-relation');
     const sandboxControlMode = document.getElementById('sandbox-control-mode');
     const sandboxAlertCenter = document.getElementById('sandbox-alert-center');
     const sandboxAlertLevel = document.getElementById('sandbox-alert-level');
@@ -1955,6 +1969,7 @@ ${limitText(stripBibleJsonBlocks(aiReplyText), 1200) || '上一条回复主要�
         sandboxAlertSummary.textContent = summary || '当前未发现明显风险。';
         if (sandboxAlertActions) sandboxAlertActions.classList.toggle('hidden', level === 'green' || sandboxRuleGate.blocked);
         if (sandboxRuleGateActions) sandboxRuleGateActions.classList.toggle('hidden', !sandboxRuleGate.blocked);
+        refreshSandboxMobileTask();
     }
 
     function hasEnoughSandboxContentForAutoRepair(bible = {}) {
@@ -2039,6 +2054,72 @@ ${limitText(stripBibleJsonBlocks(aiReplyText), 1200) || '上一条回复主要�
         const next = modes[(modes.indexOf(current) + 1) % modes.length] || 'auto';
         localStorage.setItem('omnistory_sandbox_layout', next);
         applySandboxLayoutMode(next);
+    }
+
+    function isSandboxMobileLayout() {
+        return window.matchMedia('(max-width: 768px), (pointer: coarse) and (max-width: 1024px)').matches;
+    }
+
+    function getSandboxMobileTab() {
+        const saved = localStorage.getItem('omnistory_sandbox_mobile_tab') || 'task';
+        return ['task', 'chat', 'panel', 'warning', 'assets'].includes(saved) ? saved : 'task';
+    }
+
+    function syncSandboxMobileNav(tab = getSandboxMobileTab()) {
+        if (!sandboxMobileNav) return;
+        sandboxMobileNav.querySelectorAll('[data-sandbox-mobile-tab]').forEach(button => {
+            button.dataset.active = button.dataset.sandboxMobileTab === tab ? 'true' : 'false';
+        });
+    }
+
+    function setSandboxMobileTab(tab = 'task', { persist = true } = {}) {
+        if (!sandbox) return;
+        const safeTab = ['task', 'chat', 'panel', 'warning', 'assets'].includes(tab) ? tab : 'task';
+        sandbox.dataset.mobileTab = safeTab;
+        if (persist) localStorage.setItem('omnistory_sandbox_mobile_tab', safeTab);
+        syncSandboxMobileNav(safeTab);
+        refreshSandboxMobileTask();
+        if (safeTab === 'chat' && isSandboxMobileLayout()) setTimeout(() => chatInput?.focus(), 80);
+    }
+
+    function getLatestSandboxAssistantFocus() {
+        const latest = [...genesisConversation].reverse().find(msg => msg?.role === 'assistant' && String(msg.content || '').trim());
+        if (!latest) return '';
+        const visible = stripBibleJsonBlocks(latest.content || '').trim();
+        if (!visible) return '';
+        const parts = splitSandboxAssistantReply(visible);
+        return limitText(parts.focus || visible, 260);
+    }
+
+    function refreshSandboxMobileTask() {
+        if (!sandboxMobileTask && !sandboxMobileNav) return;
+        const bible = typeof getCurrentBibleSnapshot === 'function' ? getCurrentBibleSnapshot() : null;
+        const gate = typeof getSandboxWorkflowGate === 'function' ? getSandboxWorkflowGate(bible) : null;
+        const pending = typeof getPendingInteractionQuestions === 'function' ? getPendingInteractionQuestions('sandbox') : [];
+        const stageLabels = {
+            genre: '锁定类型',
+            arcs: '人物弧线',
+            six_beats: '六节点骨架',
+            six_beats_review: '确认六节点',
+            bridges: '桥接事件'
+        };
+        if (mobileTaskStage) mobileTaskStage.textContent = stageLabels[gate?.stage] || '沙盒推演';
+        if (mobileTaskFocus) {
+            mobileTaskFocus.textContent = gate?.focus || getLatestSandboxAssistantFocus() || '当前没有明确阶段，请先进入对话继续推演。';
+        }
+        if (mobileTaskQuestion) {
+            if (pending.length > 0) {
+                const current = pending[0];
+                mobileTaskQuestion.textContent = `${current.id || 'Q1'}. ${current.question || '请继续补充这个问题。'}`;
+            } else {
+                mobileTaskQuestion.textContent = getLatestSandboxAssistantFocus() || '暂无待回答问题。';
+            }
+        }
+        if (mobileTaskAlert) {
+            const level = sandboxAlertLevel?.textContent ? `【${sandboxAlertLevel.textContent}】` : '';
+            mobileTaskAlert.textContent = `${level}${level ? '\n' : ''}${sandboxAlertSummary?.textContent || '等待规则检测。'}`;
+        }
+        syncSandboxMobileNav(sandbox?.dataset?.mobileTab || getSandboxMobileTab());
     }
 
     if (sandboxControlMode) {
@@ -4055,6 +4136,7 @@ ${getRulesTextForPrompt()}`;
         if (latestParsedBible) latestParsedBible = saveLatestBible(latestParsedBible) || latestParsedBible;
         const bibleForPreview = latestParsedBible || loadLatestBible();
         if (bibleForPreview) renderHumanPreview(bibleForPreview);
+        refreshSandboxMobileTask();
     }
 
     function appendMessage(role, text, index) {
@@ -4091,6 +4173,7 @@ ${getRulesTextForPrompt()}`;
         chatHistory.appendChild(msgDiv);
         chatHistory.scrollTop = chatHistory.scrollHeight;
         if(window.lucide) lucide.createIcons();
+        refreshSandboxMobileTask();
     }
 
     async function fetchChatResponse() {
@@ -6030,7 +6113,10 @@ if (data.success) {
             const initialConcept = localStorage.getItem(`genesis_initial_concept_${PROJECT_ID}`);
             if (initialConcept) {
                 // 如果是刚从大厅带来的新点子，打开遮罩进入创世推演
-                if(sandbox) sandbox.classList.remove('hidden');
+                if(sandbox) {
+                    sandbox.classList.remove('hidden');
+                    if (isSandboxMobileLayout()) setSandboxMobileTab('task');
+                }
                 if(mainWorkspace) mainWorkspace.classList.add('opacity-30', 'blur-sm');
                 const systemBootPrompt = window.OmniPrompts ? window.OmniPrompts.genesisSystem(initialConcept) : "开始推演";
                 genesisConversation.push({ role: 'user', content: systemBootPrompt });
@@ -6042,10 +6128,33 @@ if (data.success) {
         }
     }
 
-    if (btnForceGenesis) btnForceGenesis.onclick = () => { if(sandbox) { sandbox.classList.toggle('hidden'); applySandboxLayoutMode(); } if(mainWorkspace) mainWorkspace.classList.toggle('opacity-30'); };
+    if (btnForceGenesis) btnForceGenesis.onclick = () => {
+        if(sandbox) {
+            sandbox.classList.toggle('hidden');
+            applySandboxLayoutMode();
+            if (!sandbox.classList.contains('hidden') && isSandboxMobileLayout()) setSandboxMobileTab(getSandboxMobileTab());
+        }
+        if(mainWorkspace) mainWorkspace.classList.toggle('opacity-30');
+    };
     if (btnCloseSandbox) btnCloseSandbox.onclick = closeGenesisSandbox;
     if (btnToggleSandboxLayout) btnToggleSandboxLayout.onclick = cycleSandboxLayoutMode;
-    window.addEventListener('resize', () => applySandboxLayoutMode());
+    if (sandboxMobileNav) {
+        sandboxMobileNav.querySelectorAll('[data-sandbox-mobile-tab]').forEach(button => {
+            button.addEventListener('click', () => setSandboxMobileTab(button.dataset.sandboxMobileTab || 'task'));
+        });
+    }
+    if (mobileTaskGoChat) mobileTaskGoChat.onclick = () => setSandboxMobileTab('chat');
+    if (mobileTaskGoPanel) mobileTaskGoPanel.onclick = () => setSandboxMobileTab('panel');
+    if (mobileTaskGoWarning) mobileTaskGoWarning.onclick = () => setSandboxMobileTab('warning');
+    if (mobileTaskGoAssets) mobileTaskGoAssets.onclick = () => setSandboxMobileTab('assets');
+    if (mobileOpenAssetModal) mobileOpenAssetModal.onclick = () => btnOpenAssetModal?.click();
+    if (mobileOpenTimeline) mobileOpenTimeline.onclick = () => btnOpenTimeline?.click();
+    if (mobileOpenRelation) mobileOpenRelation.onclick = () => btnOpenRelation?.click();
+    window.addEventListener('resize', () => {
+        applySandboxLayoutMode();
+        if (isSandboxMobileLayout()) setSandboxMobileTab(getSandboxMobileTab(), { persist: false });
+    });
+    setSandboxMobileTab(getSandboxMobileTab(), { persist: false });
     applySandboxLayoutMode();
 
     // 💥 终极修复：章节 SOP 推演发送按钮逻辑 (附带自动伏笔回收与防OOC指令)
