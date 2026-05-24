@@ -207,16 +207,49 @@ document.addEventListener('DOMContentLoaded', () => {
             if (sectionMatch) currentSection = sectionMatch[1];
             if (/已吸收|新增重要设定|监督提醒|可展开|推演依据/.test(currentSection)) return;
             if (/已回答|已吸收|已解决|部分回答|冲突|不再追问/.test(trimmed)) return;
-            const match = trimmed.match(/^(Q\s*\d+)[\.、:：\s-]+(.+)/i);
-            if (!match) return;
-            const id = normalizeQuestionId(match[1]);
-            const question = match[2].trim();
+            const qMatch = trimmed.match(/^(Q\s*\d+)[\.、:：\s-]+(.+)/i);
+            const numberMatch = !qMatch && /下一步|待确认|问题|选择|需要你|请你/.test(currentSection)
+                ? trimmed.match(/^(\d+)[\.、:：\s-]+(.+)/)
+                : null;
+            const id = qMatch ? normalizeQuestionId(qMatch[1]) : (numberMatch ? `Q${numberMatch[1]}` : '');
+            const question = (qMatch ? qMatch[2] : numberMatch?.[2] || '').trim();
             if (!id || !question || seen.has(id)) return;
             seen.add(id);
             questions.push({ id, question });
         });
         if (questions.length > 0) return questions;
         return extractQuestionsFromJsonPayload(rawText);
+    }
+
+    function normalizeQuestionTextForMatch(text = '') {
+        return String(text || '')
+            .replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '')
+            .replace(/是否|什么|如何|哪一|哪个|哪种|谁|要不要|需要|请你|决定|选择|此时|本轮|当前/g, '');
+    }
+
+    function extractQuestionSignals(question = '') {
+        const clean = normalizeQuestionTextForMatch(question);
+        const signals = new Set();
+        (clean.match(/[a-zA-Z0-9]{3,}/g) || []).forEach(token => signals.add(token.toLowerCase()));
+        const chinese = clean.replace(/[a-zA-Z0-9]/g, '');
+        for (let index = 0; index < chinese.length - 1; index += 1) {
+            const gram = chinese.slice(index, index + 2);
+            if (gram.length === 2) signals.add(gram);
+        }
+        for (let index = 0; index < chinese.length - 2; index += 1) {
+            const gram = chinese.slice(index, index + 3);
+            if (gram.length === 3) signals.add(gram);
+        }
+        return [...signals].filter(signal => !/^(事件|人物|设定|一个|这个|那个)$/.test(signal));
+    }
+
+    function isLikelyAnsweringQuestion(question = '', userText = '') {
+        const answer = normalizeQuestionTextForMatch(userText).toLowerCase();
+        if (!answer) return false;
+        const signals = extractQuestionSignals(question);
+        if (signals.length === 0) return false;
+        const hits = signals.filter(signal => answer.includes(signal.toLowerCase()));
+        return hits.length >= 2 || hits.some(signal => signal.length >= 3);
     }
 
     function extractStatusQuestionIds(text = '', statusPattern) {
@@ -303,8 +336,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const pending = queue.filter(item => !['answered', 'answered_local', 'skipped'].includes(item.status));
         if (pending.length === 0) return { handled: false, done: false, summary: '' };
 
-        const explicitIds = [...new Set((String(userText || '').match(/Q\s*\d+/gi) || []).map(normalizeQuestionId).filter(Boolean))];
-        const targetIds = explicitIds.length > 0 ? explicitIds : [pending[0].id];
+        const pendingIds = new Set(pending.map(item => item.id));
+        const explicitIds = [...new Set((String(userText || '').match(/Q\s*\d+/gi) || []).map(normalizeQuestionId).filter(id => pendingIds.has(id)))];
+        const inferredIds = explicitIds.length > 0
+            ? []
+            : pending.slice(1).filter(item => isLikelyAnsweringQuestion(item.question, userText)).map(item => item.id);
+        const targetIds = explicitIds.length > 0 ? explicitIds : [pending[0].id, ...inferredIds];
         queue.forEach(item => {
             if (!targetIds.includes(item.id)) return;
             item.status = 'answered_local';
@@ -394,8 +431,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const pending = queue.filter(item => !['answered', 'answered_local', 'skipped'].includes(item.status));
         if (pending.length === 0) return { before: 0, after: 0, answeredIds: [] };
 
-        const explicitIds = [...new Set((String(userText || '').match(/Q\s*\d+/gi) || []).map(normalizeQuestionId).filter(Boolean))];
-        const answeredIds = explicitIds.length > 0 ? explicitIds : [pending[0].id];
+        const pendingIds = new Set(pending.map(item => item.id));
+        const explicitIds = [...new Set((String(userText || '').match(/Q\s*\d+/gi) || []).map(normalizeQuestionId).filter(id => pendingIds.has(id)))];
+        const inferredIds = explicitIds.length > 0
+            ? []
+            : pending.slice(1).filter(item => isLikelyAnsweringQuestion(item.question, userText)).map(item => item.id);
+        const answeredIds = explicitIds.length > 0 ? explicitIds : [pending[0].id, ...inferredIds];
         queue.forEach(item => {
             if (answeredIds.includes(item.id) && !['skipped'].includes(item.status)) item.status = 'answered';
         });
