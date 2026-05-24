@@ -241,13 +241,62 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getPendingInteractionQuestions(scope = 'sandbox') {
         const state = getScopedInteractionState(scope);
-        return (state.queue || []).filter(item => !['answered', 'skipped'].includes(item.status));
+        return (state.queue || []).filter(item => !['answered', 'answered_local', 'skipped'].includes(item.status));
+    }
+
+    function formatQuestionAnswerSummary(scope = 'sandbox') {
+        const state = getScopedInteractionState(scope);
+        const answered = (state.queue || []).filter(item => item.answer && ['answered', 'answered_local'].includes(item.status));
+        if (answered.length === 0) return '';
+        return answered.map(item => `${item.id}：${item.question}\nA${item.id.replace('Q', '')}：${item.answer}`).join('\n\n');
+    }
+
+    function recordLocalQuestionAnswer(scope = 'sandbox', userText = '') {
+        const state = getScopedInteractionState(scope);
+        const queue = Array.isArray(state.queue) ? [...state.queue] : [];
+        const pending = queue.filter(item => !['answered', 'answered_local', 'skipped'].includes(item.status));
+        if (pending.length === 0) return { handled: false, done: false, summary: '' };
+
+        const explicitIds = [...new Set((String(userText || '').match(/Q\s*\d+/gi) || []).map(normalizeQuestionId).filter(Boolean))];
+        const targetIds = explicitIds.length > 0 ? explicitIds : [pending[0].id];
+        queue.forEach(item => {
+            if (!targetIds.includes(item.id)) return;
+            item.status = 'answered_local';
+            item.answer = userText;
+            item.answered_at = new Date().toISOString();
+        });
+        const remaining = queue.filter(item => !['answered', 'answered_local', 'skipped'].includes(item.status));
+        saveScopedInteractionState(scope, { queue, inbox: state.inbox || [] });
+        return {
+            handled: true,
+            done: remaining.length === 0,
+            answeredIds: targetIds,
+            next: remaining[0] || null,
+            summary: formatQuestionAnswerSummary(scope)
+        };
+    }
+
+    function clearAnsweredLocalQuestions(scope = 'sandbox') {
+        const state = getScopedInteractionState(scope);
+        const queue = (state.queue || []).filter(item => !['answered', 'answered_local', 'skipped'].includes(item.status));
+        saveScopedInteractionState(scope, { queue, inbox: state.inbox || [] });
+    }
+
+    function buildLocalQuestionPromptText(scope = 'sandbox') {
+        const pending = getPendingInteractionQuestions(scope);
+        if (pending.length === 0) return '';
+        const current = pending[0];
+        return `【当前任务】\n本轮问题本地推进中，不请求 AI。\n\n【下一步选择】\n${current.id}. ${current.question}`;
+    }
+
+    function buildQuestionBatchSummaryMessage(summary = '') {
+        return `【本轮问题与回答汇总】\n${summary}\n\n请现在统一吸收以上回答：\n1. 更新事件、人物、规则、上帝视角和伏笔设定。\n2. 检查是否存在冲突、降智或与人物卡不一致。\n3. 输出合法实时面板 JSON。\n4. 完成更新后，再提出下一组需要作者回答的问题。`;
     }
 
     function markAnsweredQuestionsBeforeSend(scope = 'sandbox', userText = '') {
         const state = getScopedInteractionState(scope);
         const queue = Array.isArray(state.queue) ? [...state.queue] : [];
-        const pending = queue.filter(item => !['answered', 'skipped'].includes(item.status));
+        const pending = queue.filter(item => !['answered', 'answered_local', 'skipped'].includes(item.status));
         if (pending.length === 0) return { before: 0, after: 0, answeredIds: [] };
 
         const explicitIds = [...new Set((String(userText || '').match(/Q\s*\d+/gi) || []).map(normalizeQuestionId).filter(Boolean))];
@@ -258,7 +307,7 @@ document.addEventListener('DOMContentLoaded', () => {
         saveScopedInteractionState(scope, { queue, inbox: state.inbox || [] });
         return {
             before: pending.length,
-            after: queue.filter(item => !['answered', 'skipped'].includes(item.status)).length,
+            after: queue.filter(item => !['answered', 'answered_local', 'skipped'].includes(item.status)).length,
             answeredIds
         };
     }
@@ -270,6 +319,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function shouldDeferPanelSyncAfterReply(scope = 'sandbox', answerProgress = {}) {
         if (scope !== 'sandbox') return false;
+        if (answerProgress.completedBatch) return false;
         const pendingCount = getPendingInteractionQuestions(scope).length;
         if ((answerProgress.before || 0) > 0) return pendingCount > 0;
         return pendingCount > 0;
@@ -277,7 +327,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function buildInteractionFocusPrompt(scope = 'sandbox', userText = '') {
         const state = getScopedInteractionState(scope);
-        const pending = (state.queue || []).filter(item => !['answered', 'skipped'].includes(item.status));
+        const pending = (state.queue || []).filter(item => !['answered', 'answered_local', 'skipped'].includes(item.status));
         const inbox = (state.inbox || []).filter(item => item.status === '待确认' || item.status === '暂存');
         const queueText = pending.length
             ? pending.slice(0, 6).map(item => `${item.id}【${item.status || 'pending'}】${item.question}`).join('\n')
@@ -290,7 +340,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderInteractionQueueHtml(scope = 'sandbox') {
         const state = getScopedInteractionState(scope);
-        const active = (state.queue || []).filter(item => !['answered', 'skipped'].includes(item.status));
+        const active = (state.queue || []).filter(item => !['answered', 'answered_local', 'skipped'].includes(item.status));
         const inbox = (state.inbox || []).filter(item => ['待确认', '暂存'].includes(item.status)).slice(0, 5);
         if (active.length === 0 && inbox.length === 0) return '';
         const current = active[0];
@@ -3288,6 +3338,7 @@ ${getRulesTextForPrompt()}`;
                 let aiReplyText = data.reply;
                 const conversationForExtraction = [...genesisConversation, { role: 'assistant', content: aiReplyText }];
                 mergeInteractionStateFromReply('sandbox', aiReplyText);
+                if (window.__lastSandboxAnswerProgress?.completedBatch) clearAnsweredLocalQuestions('sandbox');
                 syncPanelFromReplyInBackground(aiReplyText, conversationForExtraction, {
                     defer: shouldDeferPanelSyncAfterReply('sandbox', window.__lastSandboxAnswerProgress || {})
                 });
@@ -3318,6 +3369,27 @@ ${getRulesTextForPrompt()}`;
             const text = chatInput.value.trim();
             if (!text) return;
             chatInput.value = '';
+            const localAnswer = recordLocalQuestionAnswer('sandbox', text);
+            if (localAnswer.handled) {
+                const answerIndex = genesisConversation.length;
+                genesisConversation.push({ role: 'user', content: `【本地问题回答 ${localAnswer.answeredIds.join(', ')}】\n${text}` });
+                appendMessage('user', text, answerIndex);
+                localStorage.setItem(GENESIS_CHAT_KEY, JSON.stringify(genesisConversation));
+                syncGenesisDraftToCloud().catch(error => console.warn('聊天记录云端同步失败:', error));
+
+                if (!localAnswer.done) {
+                    appendMessage('assistant', buildLocalQuestionPromptText('sandbox'));
+                    return;
+                }
+
+                const summaryMessage = buildQuestionBatchSummaryMessage(localAnswer.summary);
+                genesisConversation.push({ role: 'user', content: summaryMessage });
+                appendMessage('assistant', `【当前任务】\n本轮问题已全部回答，正在交给 AI 统一吸收并刷新实时面板。\n\n【下一步选择】\nQ1. 等待 AI 总结后进入下一轮问题。`);
+                localStorage.setItem(GENESIS_CHAT_KEY, JSON.stringify(genesisConversation));
+                window.__lastSandboxAnswerProgress = { before: localAnswer.answeredIds.length, after: 0, completedBatch: true };
+                fetchChatResponse();
+                return;
+            }
             window.__lastSandboxAnswerProgress = markAnsweredQuestionsBeforeSend('sandbox', text);
             const userMsgWithContext = text
                 + `\n\n(系统附加：当前沙盒模块是【${getActiveSandboxModuleLabel()}】，当前权限模式是【${getCurrentControlMode()}】。流程骨架、事件、人物、规则、上帝视角模块互相影响；规则/世界观/专家资料拥有最高权限。右侧数据面板已由用户实时更新，优先级高于旧聊天记录和你之前提出的方案。沙盒主流程必须遵守：类型 -> 起终点 -> 主角/最终反派 -> 双弧线 -> 好莱坞六节点 -> 桥接事件 -> 沙盒验收；沙盒只做故事骨架，不做章节细化或正文。若旧设定与面板冲突，必须废弃旧设定，以面板为准继续推演。若当前输入新增人物，请将其绑定到相关事件，并提醒参与少于三个事件的人物需要后续复用或合并。人物相关专家设定必须沉淀到人物卡的【人物规则】。未揭露/部分揭露的上帝视角秘密只用于后台校验，沙盒推理只能基于观众视角推进；已揭露后才可公开调用上帝视角。沙盒回复禁止写正文式情节段落；第一段必须是【当前任务】，写清阶段、本轮只处理什么、你需要我决定什么。随后用【缺口诊断】【事件连接】【人物/关系影响】【规则或降智风险】【下一步选择】输出；长分析放进【可展开：推演依据】，完整保留关键因果、人物动机、关系变化、不可逆后果和待确认项。)`
