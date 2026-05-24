@@ -2493,6 +2493,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function getBuiltInExpertBaseline() {
         return `【内置专家系统基线】
 专家系统不需要作者手动粘贴模板。作者只需说明题材、时代、职业、行业或关键词；AI 必须自动调用对应专家审查标准。
+专家系统只负责专业知识设定、事实边界、流程、术语、资料缺口和风险提醒；不得进行剧情推演，不得替作者设计事件走向、反转、人物选择或章节桥段。剧情推演只在沙盒/SOP 中发生，并引用这里沉淀的专业知识完成设定。
+专家输出应沉淀为可复用规则：适用范围、真实流程、关键术语、权限边界、常见误区、戏剧化可压缩部分、不可突破红线、资料不足问题清单。
 
 【历史专家】
 触发词：历史剧、古代、朝代、皇帝、皇后、太子、宰相、县令、官府、科举、宗族、礼法、朝堂、边军、粮草、诏令、唐朝、宋朝、明朝、清朝、民国等。
@@ -2562,7 +2564,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function getExpertKeywordHint(text = "") {
         const matched = getExpertCatalog().filter(item => item.keys.some(key => text.includes(key))).map(item => item.label);
         if (matched.length === 0) return '';
-        return `\n\n【专家系统自动介入】检测到关键词，启用：${matched.join('、')}。请先检查规则/专家资料中是否已有相关约束；资料不足时向作者提出需要补充的专业问题，禁止装懂或编造确定专业流程。`;
+        return `\n\n【专家系统自动介入】检测到关键词，启用：${matched.join('、')}。专家只提供专业知识设定、流程、术语、边界、资料缺口和风险提醒；不得推进剧情。请先检查规则/专家资料中是否已有相关约束；资料不足时向作者提出需要补充的专业问题，禁止装懂或编造确定专业流程。`;
     }
 
     window.runSandboxRuleAudit = async (bible = null) => {
@@ -3338,7 +3340,7 @@ ${getUnifiedQualityGuardrails()}
         const modal = ensureRulesDiscussionModal();
         rulesDiscussion = [{
             role: 'assistant',
-            content: `我们可以专门打磨这套世界规则和专业顾问资料。比如律师、医生、警察等职业故事，都把工作流程、专业术语、常见误区、真实感细节、行业禁忌写进这里。重点会检查：经济、政治、文化、种族、技能/力量体系的优势与代价，避免无敌设定，并确保所有能力都有制约。`
+            content: `我们可以专门打磨这套世界规则和专业顾问资料。这里不做剧情推演，只沉淀可被沙盒引用的知识设定：工作流程、专业术语、权限边界、常见误区、真实感细节、行业禁忌、资料缺口，以及经济、政治、文化、种族、技能/力量体系的优势、代价和反制。输入 @ 可以指定专家。`
         }];
         const box = document.getElementById('rules-discussion-history');
         if (box) box.innerHTML = '';
@@ -3357,11 +3359,21 @@ ${getUnifiedQualityGuardrails()}
         hideRulesExpertMentionPicker();
         const mentionedExperts = getMentionedRuleExperts(text);
         const explicitExpertInstruction = mentionedExperts.length
-            ? `【本轮@指定专家】${mentionedExperts.join('、')}。你必须明确以这些专家身份优先工作：先说明该专家本轮要检查什么，再给出专业流程、术语、边界、常见误区、资料缺口和最小可执行修改建议。不要泛泛创作，不要越过该专家权限乱编。`
+            ? `【本轮@指定专家】${mentionedExperts.join('、')}。你必须明确以这些专家身份优先工作：先说明该专家本轮要检查什么，再给出专业流程、术语、边界、常见误区、资料缺口和最小可执行规则建议。禁止剧情推演，禁止设计事件走向、反转、人物选择或章节桥段；不要越过该专家权限乱编。`
             : '【本轮@指定专家】未手动指定；可根据关键词自动调用相关专家，但必须说明调用理由。';
-        const prompt = `请基于当前规则继续讨论，并把“专家系统”并入规则体系：如果涉及职业/行业/学科，请补充工作流程、专业术语、常见误区、真实感细节、不能乱写的边界。
+        const prompt = `请基于当前规则继续讨论，并把“专家系统”并入规则体系。重要边界：专家系统只做专业知识设定，不做剧情推演；不得生成新剧情、事件桥段、人物行动、反转设计或章节方案。沙盒/SOP 会在之后引用这些知识完成剧情设定。
+如果涉及职业/行业/学科，请补充工作流程、专业术语、常见误区、真实感细节、不能乱写的边界。
 如果涉及历史剧或古代/朝代背景，自动启用历史专家，检查朝代、官职、称谓、礼法、交通通讯、军队调动、审案/科举/婚嫁/朝会等流程，以及现代价值观误套问题。
 所有设定都要明确优势、劣势、成本、限制、反制方式，避免无敌设定。
+请按以下结构输出：
+【专家角色】
+【专业知识设定】
+【流程/术语/权限边界】
+【常见误区与红线】
+【可戏剧化但不能破坏真实感的部分】
+【资料缺口问题】
+【可入库规则条目】
+不要输出【剧情建议】、【事件方案】、【人物该怎么做】。
 ${explicitExpertInstruction}
 ${getBuiltInExpertBaseline()}
 ${getRulesTextForPrompt()}`;
