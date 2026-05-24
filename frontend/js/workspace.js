@@ -340,7 +340,8 @@ document.addEventListener('DOMContentLoaded', () => {
             `【已有人物卡摘要】\n${limitText(JSON.stringify((bible.characters || []).map(c => ({ name: c.name, role: c.role, description: c.description, motivation: c.motivation, character_rules: c.character_rules }))), 1800)}`,
             `【已有时间线/事件】\n${limitText(JSON.stringify(bible.timeline || bible.chapters || []), 1800)}`
         ].join('\n\n');
-        return `【本轮问题与回答汇总】\n${summary}\n\n${knownContext}\n\n请现在统一吸收以上回答：\n1. 先检查【已有上帝视角/隐藏剧情】【已有人物关系】【已有人物卡摘要】【已有时间线/事件】，不要重复询问这些已存在的信息；如果需要使用，只能说“已读取/沿用”。\n2. 更新事件、人物、规则、上帝视角和伏笔设定。\n3. 检查是否存在冲突、降智或与人物卡不一致。\n4. 必须输出合法实时面板 JSON。\n5. 实时面板更新内容完成后，再提出下一组需要作者回答的问题；下一组问题只能询问仍缺失的信息。`;
+        return `【本轮问题与回答汇总】\n${summary}\n\n${knownContext}\n\n请现在统一吸收以上回答：\n1. 先检查【已有上帝视角/隐藏剧情】【已有人物关系】【已有人物卡摘要】【已有时间线/事件】，不要重复询问这些已存在的信息；如果需要使用，只能说“已读取/沿用”。\n2. 更新事件、人物、规则、上帝视角和伏笔设定。\n3. 检查是否存在冲突、降智或与人物卡不一致。\n4. 必须输出合法实时面板 JSON。\n5. 实时面板更新内容完成后，再提出下一组需要作者回答的问题；下一组问题只能询问仍缺失的信息。
+6. 如果沙盒尚未结束，下一组问题必须像第一轮一样使用 Q1、Q2、Q3... 编号列出，且只输出这一轮真正需要作者回答的问题；不要只说“继续讨论”或“等待作者补充”。如果已经达到沙盒验收条件，请明确输出【沙盒验收】而不是新问题。`;
     }
 
     function markAnsweredQuestionsBeforeSend(scope = 'sandbox', userText = '') {
@@ -3631,12 +3632,13 @@ ${getRulesTextForPrompt()}`;
             if (data.success) {
                 let aiReplyText = data.reply;
                 const conversationForExtraction = [...genesisConversation, { role: 'assistant', content: aiReplyText }];
+                const completedLocalBatch = !!window.__lastSandboxAnswerProgress?.completedBatch;
+                if (completedLocalBatch) clearAnsweredLocalQuestions('sandbox');
                 mergeInteractionStateFromReply('sandbox', aiReplyText);
-                if (window.__lastSandboxAnswerProgress?.completedBatch) clearAnsweredLocalQuestions('sandbox');
                 const panelSync = syncPanelFromReplyInBackground(aiReplyText, conversationForExtraction, {
                     defer: shouldDeferPanelSyncAfterReply('sandbox', window.__lastSandboxAnswerProgress || {})
                 });
-                if (window.__lastSandboxAnswerProgress?.completedBatch) {
+                if (completedLocalBatch) {
                     setSandboxAlert('yellow', '本轮问题已完成，正在先刷新实时面板，再显示下一轮问题。');
                     await panelSync;
                     setSandboxAlert('green', '实时面板已根据本轮回答完成更新。');
