@@ -284,6 +284,47 @@ document.addEventListener('DOMContentLoaded', () => {
         saveScopedInteractionState(scope, { queue, inbox: state.inbox || [] });
     }
 
+    function extractLocalAnswerIdsFromText(text = '') {
+        const headerMatch = String(text || '').match(/【本地问题回答\s+([^】]+)】/);
+        if (!headerMatch) return [];
+        return [...new Set((headerMatch[1].match(/Q\s*\d+/gi) || []).map(normalizeQuestionId).filter(Boolean))];
+    }
+
+    function restoreLocalQuestionsFromRollback(scope = 'sandbox', removedMessages = []) {
+        const rollbackIds = [...new Set(removedMessages
+            .filter(msg => msg?.role === 'user')
+            .flatMap(msg => extractLocalAnswerIdsFromText(msg.content)))];
+        if (rollbackIds.length === 0) return;
+        const state = getScopedInteractionState(scope);
+        const queue = Array.isArray(state.queue) ? [...state.queue] : [];
+        const knownQuestions = new Map();
+        [...genesisConversation, ...removedMessages].forEach(msg => {
+            extractNumberedQuestions(msg?.content || '').forEach(item => {
+                if (!knownQuestions.has(item.id)) knownQuestions.set(item.id, item.question);
+            });
+        });
+        queue.forEach(item => {
+            if (!rollbackIds.includes(item.id)) return;
+            item.status = 'pending';
+            delete item.answer;
+            delete item.answered_at;
+        });
+        rollbackIds.forEach(id => {
+            if (queue.some(item => item.id === id)) return;
+            queue.push({
+                id,
+                question: knownQuestions.get(id) || '请重新回答这个问题。',
+                status: 'pending'
+            });
+        });
+        queue.sort((a, b) => {
+            const aNum = Number(String(a.id || '').replace(/\D/g, '')) || 0;
+            const bNum = Number(String(b.id || '').replace(/\D/g, '')) || 0;
+            return aNum - bNum;
+        });
+        saveScopedInteractionState(scope, { queue, inbox: state.inbox || [] });
+    }
+
     function buildLocalQuestionPromptText(scope = 'sandbox') {
         const pending = getPendingInteractionQuestions(scope);
         if (pending.length === 0) return '';
@@ -3486,14 +3527,30 @@ ${getRulesTextForPrompt()}`;
   // ==========================================
     // 💥 沙盒聊天与回滚系统 💥
     // ==========================================
-    window.rollbackChat = (index) => {
-        if (!confirm("警告：回滚将删除此节点之后的所有记忆，并重新在此节点向 AI 发送请求。是否继续？")) return;
-        const targetMessage = genesisConversation[index].content.replace(/\n\n\(系统附加：.*?\)/g, '');
-        genesisConversation = genesisConversation.slice(0, index); 
+    window.rollbackChat = async (index) => {
+        if (!confirm("回滚将删除这条回答及其后续内容，并同步删除云端草稿中的对应聊天记录。是否继续？")) return;
+        const removedMessages = genesisConversation.slice(index);
+        const targetMessage = (genesisConversation[index]?.content || '')
+            .replace(/【本地问题回答\s+[^】]+】\n?/, '')
+            .replace(/\n\n\(系统附加：.*?\)/g, '')
+            .trim();
+        genesisConversation = genesisConversation.slice(0, index);
+        restoreLocalQuestionsFromRollback('sandbox', removedMessages);
+        window.__lastSandboxAnswerProgress = null;
+        localStorage.setItem(GENESIS_CHAT_KEY, JSON.stringify(genesisConversation));
         setGenesisSyncBlocked(false);
         setGenesisChatLocked(false);
         renderChatHistory(); // 重新渲染历史记录
-        if(chatInput) { chatInput.value = targetMessage; btnSend.click(); }
+        if (chatInput) {
+            chatInput.value = targetMessage;
+            chatInput.focus();
+        }
+        try {
+            await syncGenesisDraftToCloud({ force: true });
+        } catch (error) {
+            console.warn('回滚后云端同步失败:', error);
+            alert('前端已回滚，但云端同步失败，请稍后再试或重新点击回滚。');
+        }
     };
 
     function renderChatHistory() {
@@ -3753,8 +3810,8 @@ ${getRulesTextForPrompt()}`;
         return window.OmniWorkspaceCloud.syncToCloud(PROJECT_ID, dataType, payload, options);
     };
 
-    async function syncGenesisDraftToCloud() {
-        if (genesisConversation.length === 0 && !getCurrentBibleSnapshot()) return;
+    async function syncGenesisDraftToCloud(options = {}) {
+        if (!options.force && genesisConversation.length === 0 && !getCurrentBibleSnapshot()) return;
         const manualEdits = loadManualBibleEdits();
         await window.syncToCloud(GENESIS_CLOUD_TYPE, {
             bible: applyManualBibleEditsToValue(getCurrentBibleSnapshot(), manualEdits),
