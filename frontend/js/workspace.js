@@ -239,6 +239,42 @@ document.addEventListener('DOMContentLoaded', () => {
         return saveScopedInteractionState(scope, { queue, inbox });
     }
 
+    function getPendingInteractionQuestions(scope = 'sandbox') {
+        const state = getScopedInteractionState(scope);
+        return (state.queue || []).filter(item => !['answered', 'skipped'].includes(item.status));
+    }
+
+    function markAnsweredQuestionsBeforeSend(scope = 'sandbox', userText = '') {
+        const state = getScopedInteractionState(scope);
+        const queue = Array.isArray(state.queue) ? [...state.queue] : [];
+        const pending = queue.filter(item => !['answered', 'skipped'].includes(item.status));
+        if (pending.length === 0) return { before: 0, after: 0, answeredIds: [] };
+
+        const explicitIds = [...new Set((String(userText || '').match(/Q\s*\d+/gi) || []).map(normalizeQuestionId).filter(Boolean))];
+        const answeredIds = explicitIds.length > 0 ? explicitIds : [pending[0].id];
+        queue.forEach(item => {
+            if (answeredIds.includes(item.id) && !['skipped'].includes(item.status)) item.status = 'answered';
+        });
+        saveScopedInteractionState(scope, { queue, inbox: state.inbox || [] });
+        return {
+            before: pending.length,
+            after: queue.filter(item => !['answered', 'skipped'].includes(item.status)).length,
+            answeredIds
+        };
+    }
+
+    function shouldSyncPanelAfterReply(scope = 'sandbox', answerProgress = {}) {
+        if (scope !== 'sandbox') return false;
+        return (answerProgress.before || 0) > 0 && getPendingInteractionQuestions(scope).length === 0;
+    }
+
+    function shouldDeferPanelSyncAfterReply(scope = 'sandbox', answerProgress = {}) {
+        if (scope !== 'sandbox') return false;
+        const pendingCount = getPendingInteractionQuestions(scope).length;
+        if ((answerProgress.before || 0) > 0) return pendingCount > 0;
+        return pendingCount > 0;
+    }
+
     function buildInteractionFocusPrompt(scope = 'sandbox', userText = '') {
         const state = getScopedInteractionState(scope);
         const pending = (state.queue || []).filter(item => !['answered', 'skipped'].includes(item.status));
@@ -249,7 +285,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const inboxText = inbox.length
             ? inbox.slice(0, 6).map(item => `${item.id}【${item.status}】${limitText(item.content, 240)}${item.destination ? ` -> ${item.destination}` : ''}`).join('\n')
             : '暂无待处理新增设定。';
-        return `\n\n【问题队列与设定收件箱协议】\n当前未解决问题：\n${queueText}\n\n当前设定收件箱：\n${inboxText}\n\n用户本轮原文：\n${limitText(userText, 1200)}\n\n请先判断用户本轮是否回答了当前问题、后续问题或没有被问到但重要的新设定。规则：\n1. 所有问题必须编号为 Q1、Q2、Q3...；界面会默认只显示当前优先问题，但不能删掉其他问题。\n2. 如果用户一段话已经回答了后续问题，必须在【已吸收】中写明“Qx 已回答：摘要”，后续不要重复问。\n3. 如果用户提供了 AI 没问但重要的设定，必须在【新增重要设定】中写成 S1、S2...，并标注建议写入：人物卡/人物规则/事件/规则/上帝视角/伏笔/暂存。\n4. 有冲突时给 A/B/C 处理选项。【下一步选择】只放仍未解决的问题。`;
+        return `\n\n【问题队列与设定收件箱协议】\n当前未解决问题：\n${queueText}\n\n当前设定收件箱：\n${inboxText}\n\n用户本轮原文：\n${limitText(userText, 1200)}\n\n请先判断用户本轮是否回答了当前问题、后续问题或没有被问到但重要的新设定。规则：\n1. 当前未解决问题列表已经扣除了用户本轮默认回答的问题；如果还有 Q2/Q3，请优先继续显示下一个未解决问题，不要复述已回答的 Q。\n2. 如果用户一段话已经回答了后续问题，必须在【已吸收】中写明“Qx 已回答：摘要”，后续不要重复问。\n3. 如果用户提供了 AI 没问但重要的设定，必须在【新增重要设定】中写成 S1、S2...，并标注建议写入：人物卡/人物规则/事件/规则/上帝视角/伏笔/暂存。\n4. 有冲突时给 A/B/C 处理选项。【下一步选择】只放仍未解决的问题；如果没有未解决问题，请写【本轮问题完成】，不要开启新一轮问题，等待系统刷新实时面板。`;
     }
 
     function renderInteractionQueueHtml(scope = 'sandbox') {
@@ -302,7 +338,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ...buildChatPayload([...priorityMessage, ...renamedConversation]),
             currentBible: compactBibleForPrompt(currentBible),
             localReferenceSnippets: getRelevantLocalSourceSnippets(queryText),
-            requirePanelJson: true
+            requirePanelJson: getPendingInteractionQuestions('sandbox').length === 0
         };
     }
 
@@ -1161,7 +1197,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return mergedBible;
     }
 
-    function syncPanelFromReplyInBackground(aiReplyText, conversationForExtraction) {
+    function syncPanelFromReplyInBackground(aiReplyText, conversationForExtraction, options = {}) {
+        if (options.defer) {
+            setGenesisSyncBlocked(false);
+            setSandboxAlert('green', '本轮问题尚未答完，实时面板将在本轮问题完成后统一更新。');
+            syncGenesisDraftToCloud().catch(error => {
+                console.warn('沙盒云端同步失败:', error);
+            });
+            return;
+        }
         const parsedBible = extractBibleJsonFromText(aiReplyText);
         if (parsedBible) {
             applyRealtimeBibleUpdate(parsedBible, { audit: true, cloud: false });
@@ -3243,8 +3287,10 @@ ${getRulesTextForPrompt()}`;
             if (data.success) {
                 let aiReplyText = data.reply;
                 const conversationForExtraction = [...genesisConversation, { role: 'assistant', content: aiReplyText }];
-                syncPanelFromReplyInBackground(aiReplyText, conversationForExtraction);
                 mergeInteractionStateFromReply('sandbox', aiReplyText);
+                syncPanelFromReplyInBackground(aiReplyText, conversationForExtraction, {
+                    defer: shouldDeferPanelSyncAfterReply('sandbox', window.__lastSandboxAnswerProgress || {})
+                });
                 const newIndex = genesisConversation.length;
                 genesisConversation.push({ role: 'assistant', content: aiReplyText || '已更新设定数据。' });
                 if(aiReplyText.length > 0) appendMessage('assistant', aiReplyText, newIndex);
@@ -3272,6 +3318,7 @@ ${getRulesTextForPrompt()}`;
             const text = chatInput.value.trim();
             if (!text) return;
             chatInput.value = '';
+            window.__lastSandboxAnswerProgress = markAnsweredQuestionsBeforeSend('sandbox', text);
             const userMsgWithContext = text
                 + `\n\n(系统附加：当前沙盒模块是【${getActiveSandboxModuleLabel()}】，当前权限模式是【${getCurrentControlMode()}】。流程骨架、事件、人物、规则、上帝视角模块互相影响；规则/世界观/专家资料拥有最高权限。右侧数据面板已由用户实时更新，优先级高于旧聊天记录和你之前提出的方案。沙盒主流程必须遵守：类型 -> 起终点 -> 主角/最终反派 -> 双弧线 -> 好莱坞六节点 -> 桥接事件 -> 沙盒验收；沙盒只做故事骨架，不做章节细化或正文。若旧设定与面板冲突，必须废弃旧设定，以面板为准继续推演。若当前输入新增人物，请将其绑定到相关事件，并提醒参与少于三个事件的人物需要后续复用或合并。人物相关专家设定必须沉淀到人物卡的【人物规则】。未揭露/部分揭露的上帝视角秘密只用于后台校验，沙盒推理只能基于观众视角推进；已揭露后才可公开调用上帝视角。沙盒回复禁止写正文式情节段落；第一段必须是【当前任务】，写清阶段、本轮只处理什么、你需要我决定什么。随后用【缺口诊断】【事件连接】【人物/关系影响】【规则或降智风险】【下一步选择】输出；长分析放进【可展开：推演依据】，完整保留关键因果、人物动机、关系变化、不可逆后果和待确认项。)`
                 + buildInteractionFocusPrompt('sandbox', text)
