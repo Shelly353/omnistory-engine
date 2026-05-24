@@ -290,7 +290,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function buildQuestionBatchSummaryMessage(summary = '') {
-        return `【本轮问题与回答汇总】\n${summary}\n\n请现在统一吸收以上回答：\n1. 更新事件、人物、规则、上帝视角和伏笔设定。\n2. 检查是否存在冲突、降智或与人物卡不一致。\n3. 输出合法实时面板 JSON。\n4. 完成更新后，再提出下一组需要作者回答的问题。`;
+        const bible = getCurrentBibleSnapshot() || {};
+        const knownContext = [
+            `【已有上帝视角/隐藏剧情】\n${limitText(formatGodViewContext(bible), 1800)}`,
+            `【已有人物关系】\n${limitText(JSON.stringify(bible.relations || []), 1200)}`,
+            `【已有人物卡摘要】\n${limitText(JSON.stringify((bible.characters || []).map(c => ({ name: c.name, role: c.role, description: c.description, motivation: c.motivation, character_rules: c.character_rules }))), 1800)}`,
+            `【已有时间线/事件】\n${limitText(JSON.stringify(bible.timeline || bible.chapters || []), 1800)}`
+        ].join('\n\n');
+        return `【本轮问题与回答汇总】\n${summary}\n\n${knownContext}\n\n请现在统一吸收以上回答：\n1. 先检查【已有上帝视角/隐藏剧情】【已有人物关系】【已有人物卡摘要】【已有时间线/事件】，不要重复询问这些已存在的信息；如果需要使用，只能说“已读取/沿用”。\n2. 更新事件、人物、规则、上帝视角和伏笔设定。\n3. 检查是否存在冲突、降智或与人物卡不一致。\n4. 必须输出合法实时面板 JSON。\n5. 实时面板更新内容完成后，再提出下一组需要作者回答的问题；下一组问题只能询问仍缺失的信息。`;
     }
 
     function markAnsweredQuestionsBeforeSend(scope = 'sandbox', userText = '') {
@@ -1254,7 +1261,7 @@ document.addEventListener('DOMContentLoaded', () => {
             syncGenesisDraftToCloud().catch(error => {
                 console.warn('沙盒云端同步失败:', error);
             });
-            return;
+            return Promise.resolve(null);
         }
         const parsedBible = extractBibleJsonFromText(aiReplyText);
         if (parsedBible) {
@@ -1263,11 +1270,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.warn('沙盒云端同步失败:', error);
             });
             setGenesisSyncBlocked(false);
-            return;
+            return Promise.resolve(parsedBible);
         }
 
         setGenesisSyncBlocked(true);
-        extractAndSaveBibleFromConversation(conversationForExtraction, `上一轮 AI 回复没有提供合法 JSON。请根据当前面板数据、全量用户修正记录、最近对话和上一轮 AI 回复，提取并合并最新共识，输出完整世界圣经 JSON。
+        return extractAndSaveBibleFromConversation(conversationForExtraction, `上一轮 AI 回复没有提供合法 JSON。请根据当前面板数据、全量用户修正记录、最近对话和上一轮 AI 回复，提取并合并最新共识，输出完整世界圣经 JSON。
 要求：
 1. 必须记录用户在对话中否定、修正或新增的人物/事件/规则。
 2. workflow 流程状态、protagonist_arc 主角弧线、antagonist_arc 反派弧线、hollywood_beats 好莱坞六节点、characters 详细字段、人物规则 character_rules、relations 人物羁绊、timeline 细密时间轴、secrets 上帝视角信息是稳定资产；除非用户明确说删除，否则必须保留。
@@ -1276,6 +1283,7 @@ document.addEventListener('DOMContentLoaded', () => {
 5. 只输出 JSON，不要输出正文。`, { recoveryMode: true }).catch(error => {
             console.error('后台面板补同步失败:', error);
             setGenesisSyncBlocked(true, `上一轮设定没有确认写入实时面板：${error.message || '未知错误'}\n你可以先看 AI 的问题，也可以在输入框里草拟回答，但暂时不能发送。建议优先用上一条用户消息旁的撤回按钮重新回答；如果连续失败，再点“从对话刷新面板”兜底修复。`);
+            throw error;
         });
     }
 
@@ -3339,9 +3347,14 @@ ${getRulesTextForPrompt()}`;
                 const conversationForExtraction = [...genesisConversation, { role: 'assistant', content: aiReplyText }];
                 mergeInteractionStateFromReply('sandbox', aiReplyText);
                 if (window.__lastSandboxAnswerProgress?.completedBatch) clearAnsweredLocalQuestions('sandbox');
-                syncPanelFromReplyInBackground(aiReplyText, conversationForExtraction, {
+                const panelSync = syncPanelFromReplyInBackground(aiReplyText, conversationForExtraction, {
                     defer: shouldDeferPanelSyncAfterReply('sandbox', window.__lastSandboxAnswerProgress || {})
                 });
+                if (window.__lastSandboxAnswerProgress?.completedBatch) {
+                    setSandboxAlert('yellow', '本轮问题已完成，正在先刷新实时面板，再显示下一轮问题。');
+                    await panelSync;
+                    setSandboxAlert('green', '实时面板已根据本轮回答完成更新。');
+                }
                 const newIndex = genesisConversation.length;
                 genesisConversation.push({ role: 'assistant', content: aiReplyText || '已更新设定数据。' });
                 if(aiReplyText.length > 0) appendMessage('assistant', aiReplyText, newIndex);
