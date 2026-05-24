@@ -3420,6 +3420,7 @@ ${getUnifiedQualityGuardrails()}
                         <div id="rules-expert-mention-picker" class="hidden absolute left-0 bottom-full mb-2 w-full max-h-72 overflow-y-auto bg-gray-950 border border-cyan-800/70 rounded-xl shadow-2xl p-2 z-10"></div>
                         <button id="btn-send-rules-discussion" class="px-4 bg-cyan-700 hover:bg-cyan-600 text-white rounded-xl font-bold">发送</button>
                     </div>
+                    <div id="rules-apply-status" class="hidden mt-3 text-xs rounded-xl border border-gray-800 bg-gray-950 p-3 text-gray-300 whitespace-pre-wrap"></div>
                     <button id="btn-apply-rules-discussion" class="mt-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl font-bold">应用为规则补丁</button>
                 </div>
             </div>
@@ -3429,18 +3430,38 @@ ${getUnifiedQualityGuardrails()}
         document.getElementById('btn-send-rules-discussion').onclick = sendRulesDiscussion;
         setupRulesExpertMentionPicker();
         document.getElementById('btn-apply-rules-discussion').onclick = async () => {
+            const applyBtn = document.getElementById('btn-apply-rules-discussion');
             const messages = Array.from(document.querySelectorAll('#rules-discussion-history [data-role="assistant"]'));
             const latest = messages[messages.length - 1]?.innerText.trim();
             if (!latest) return alert("还没有 AI 回复可应用");
-            applyRulesDiscussionPatch(latest);
-            if (activeRuleConflictItem) {
-                const ignored = new Set(sandboxRuleGate.ignoredItems || []);
-                ignored.add(activeRuleConflictItem.signature);
-                sandboxRuleGate = { ...sandboxRuleGate, ignoredItems: [...ignored] };
-                renderRuleConflictItems();
+            const patchInfo = buildRulesDiscussionPatchInfo(latest);
+            const preview = limitText(patchInfo.patch, 900);
+            if (!confirm(`将写入到：${patchInfo.targetLabel}\n\n提取到的规则补丁：\n${preview}\n\n确认应用并重新检测吗？`)) return;
+            try {
+                setRulesApplyStatus('写入规则补丁中...', 'yellow');
+                if (applyBtn) {
+                    applyBtn.disabled = true;
+                    applyBtn.textContent = '应用中...';
+                }
+                const applied = applyRulesDiscussionPatch(latest, patchInfo);
+                setRulesApplyStatus(`已写入到：${applied.targetLabel}\n\n${limitText(applied.patch, 900)}\n\n正在重新检测规则冲突...`, 'green');
+                if (activeRuleConflictItem) {
+                    const ignored = new Set(sandboxRuleGate.ignoredItems || []);
+                    ignored.add(activeRuleConflictItem.signature);
+                    sandboxRuleGate = { ...sandboxRuleGate, ignoredItems: [...ignored] };
+                    renderRuleConflictItems();
+                }
+                await window.runSandboxRuleAudit(getCurrentBibleSnapshot());
+                setRulesApplyStatus(`规则补丁已提交并完成重新检测。\n写入位置：${applied.targetLabel}\n\n如果仍出现红色警告，请继续逐条处理剩余冲突。`, 'green');
+            } catch (error) {
+                setRulesApplyStatus(`应用失败：${error.message || '未知错误'}\n当前对话未关闭，你可以继续讨论或重试。`, 'red');
+                alert(`应用规则补丁失败：${error.message || '未知错误'}`);
+            } finally {
+                if (applyBtn) {
+                    applyBtn.disabled = false;
+                    applyBtn.textContent = '应用为规则补丁';
+                }
             }
-            await window.runSandboxRuleAudit(getCurrentBibleSnapshot());
-            modal.classList.add('hidden');
         };
         if (window.lucide) lucide.createIcons();
         return modal;
@@ -3548,6 +3569,19 @@ ${getUnifiedQualityGuardrails()}
         return document.getElementById('prev-rules') || document.getElementById('asset-rules');
     }
 
+    function setRulesApplyStatus(message = '', level = 'green') {
+        const box = document.getElementById('rules-apply-status');
+        if (!box) return;
+        const color = level === 'red'
+            ? 'border-red-800 bg-red-950/30 text-red-100'
+            : level === 'yellow'
+            ? 'border-amber-800 bg-amber-950/30 text-amber-100'
+            : 'border-emerald-800 bg-emerald-950/30 text-emerald-100';
+        box.className = `mt-3 text-xs rounded-xl border p-3 whitespace-pre-wrap ${color}`;
+        box.textContent = message;
+        box.classList.toggle('hidden', !message);
+    }
+
     function extractSectionText(text = '', sectionNames = []) {
         const source = String(text || '').trim();
         for (const name of sectionNames) {
@@ -3567,15 +3601,43 @@ ${getUnifiedQualityGuardrails()}
     }
 
     function extractApplicableRulesPatch(latest = '') {
-        return extractSectionText(latest, ['可入库规则条目', '最小修正规则', '专业知识设定'])
+        const extracted = extractSectionText(latest, ['可入库规则条目', '最小修正规则', '专业知识设定'])
             || String(latest || '').trim();
+        const lines = extracted
+            .split('\n')
+            .map(line => line.trim())
+            .filter(Boolean)
+            .filter(line => !/^【/.test(line))
+            .filter(line => !/^(冲突本质|建议修改到哪里|需要作者确认|应用后需要重新检测)/.test(line));
+        const normalized = lines.length ? lines.join('\n') : extracted;
+        return limitText(normalized, 1400);
     }
 
-    function applyRulesDiscussionPatch(latest = '') {
+    function getRulePatchTargetLabel(target) {
+        if (!target) return '未知位置';
+        if (/worldview/.test(target.id || '')) return '世界观';
+        if (/rules/.test(target.id || '')) return '规则/专家资料';
+        return target.id || '规则区';
+    }
+
+    function buildRulesDiscussionPatchInfo(latest = '') {
         const target = getRulePatchDestination(latest);
-        if (!target) return alert('没有找到规则/专家资料输入区，请先打开规则面板。');
+        if (!target) throw new Error('没有找到规则/专家资料输入区，请先打开规则面板。');
         const title = activeRuleConflictItem ? `【规则冲突修正：${activeRuleConflictItem.title}】` : '【规则/专家讨论补丁】';
-        const patch = `${title}\n${extractApplicableRulesPatch(latest)}`;
+        const body = extractApplicableRulesPatch(latest);
+        if (!body.trim()) throw new Error('没有提取到可写入的规则补丁，请先让 AI 输出【可入库规则条目】或继续讨论。');
+        const patch = `${title}\n${body}`;
+        return {
+            target,
+            targetLabel: getRulePatchTargetLabel(target),
+            patch
+        };
+    }
+
+    function applyRulesDiscussionPatch(latest = '', patchInfo = null) {
+        const info = patchInfo || buildRulesDiscussionPatchInfo(latest);
+        const target = info.target;
+        const patch = info.patch;
         target.value = [target.value.trim(), patch].filter(Boolean).join('\n\n');
         target.dispatchEvent(new Event('input', { bubbles: true }));
         const isRulesTarget = /rules/.test(target.id || '');
@@ -3592,6 +3654,7 @@ ${getUnifiedQualityGuardrails()}
         if (isWorldviewTarget && document.getElementById('prev-worldview') && target.id !== 'prev-worldview') {
             document.getElementById('prev-worldview').value = target.value;
         }
+        return info;
     }
 
     async function openRuleConflictDiscussion(index = 0) {
@@ -3607,6 +3670,7 @@ ${getUnifiedQualityGuardrails()}
         }];
         const box = document.getElementById('rules-discussion-history');
         if (box) box.innerHTML = '';
+        setRulesApplyStatus('', 'green');
         appendRulesDiscussion('assistant', rulesDiscussion[0].content);
         const input = document.getElementById('rules-discussion-input');
         if (input) input.value = '';
@@ -3628,7 +3692,8 @@ ${getRulesTextForPrompt()}
 【建议修改到哪里】只能从：世界观、规则/专家资料、人物规则、事件设定 中选择，可多选。
 【最小修正规则】
 【需要作者确认的问题】
-【应用后需要重新检测的风险】`;
+【应用后需要重新检测的风险】
+【可入库规则条目】只输出最终要写入规则/世界观的 1-5 条短规则，不要包含分析过程。`;
         try {
             const res = await fetch('/api/chat/deduce', {
                 method: 'POST',
@@ -3655,6 +3720,7 @@ ${getRulesTextForPrompt()}
         }];
         const box = document.getElementById('rules-discussion-history');
         if (box) box.innerHTML = '';
+        setRulesApplyStatus('', 'green');
         appendRulesDiscussion('assistant', rulesDiscussion[0].content);
         document.getElementById('rules-discussion-input').value = '';
         modal.classList.remove('hidden');
