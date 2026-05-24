@@ -230,7 +230,11 @@
             <div class="grid md:grid-cols-[1.7fr_1fr] gap-0 flex-1 min-h-0">
                 <div class="p-5 overflow-y-auto">
                     <div class="text-xs text-gray-400 mb-2 font-bold">完整冲突报告</div>
-                    <pre id="rule-conflict-report" class="whitespace-pre-wrap text-sm leading-relaxed text-red-50 bg-black/40 border border-red-900/40 rounded-xl p-4 min-h-[280px]"></pre>
+                    <div id="rule-conflict-list" class="space-y-3 mb-4"></div>
+                    <details class="text-xs text-gray-400">
+                        <summary class="cursor-pointer hover:text-white mb-2">查看完整原始报告</summary>
+                        <pre id="rule-conflict-report" class="whitespace-pre-wrap text-sm leading-relaxed text-red-50 bg-black/40 border border-red-900/40 rounded-xl p-4 min-h-[180px]"></pre>
+                    </details>
                 </div>
                 <div class="p-5 border-t md:border-t-0 md:border-l border-gray-800 bg-gray-950/80 flex flex-col">
                     <div class="text-xs text-gray-400 mb-3 font-bold">处理流程</div>

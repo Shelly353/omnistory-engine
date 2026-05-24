@@ -55,7 +55,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let longformState = loadLongformState();
     let sandboxAutoRepairInFlight = false;
     let sandboxAutoRepairSignature = '';
-    let sandboxRuleGate = { blocked: false, ignored: false, ignoredSignature: '', reason: '', pendingText: '' };
+    let sandboxRuleGate = { blocked: false, ignored: false, ignoredSignature: '', ignoredItems: [], reason: '', pendingText: '', items: [] };
+    let activeRuleConflictItem = null;
 
     const RECENT_CHAT_LIMIT = 10;
     const MEMORY_SUMMARY_LIMIT = 6000;
@@ -1278,9 +1279,73 @@ document.addEventListener('DOMContentLoaded', () => {
         return String(text || '').replace(/\s+/g, ' ').trim().slice(0, 900);
     }
 
+    function extractRuleConflictItems(report = '') {
+        const text = String(report || '').trim();
+        if (!text) return [];
+        const redMatch = text.match(/【红色警报】([\s\S]*?)(?=【黄色警报】|【信息权限警报】|【整改意见】|【专家资料缺口】|$)/);
+        const source = (redMatch ? redMatch[1] : text).trim();
+        const lines = source.split('\n').map(line => line.trim()).filter(Boolean);
+        const items = [];
+        let current = '';
+        lines.forEach(line => {
+            const startsItem = /^(\d+[\.、:：]|[-*•]|Q\d+[\.、:：]|红色警报\s*\d*)/.test(line);
+            if (startsItem && current) {
+                items.push(current.trim());
+                current = line.replace(/^(\d+[\.、:：]|[-*•]\s*|Q\d+[\.、:：]\s*)/, '').trim();
+            } else {
+                current = current ? `${current}\n${line}` : line.replace(/^(\d+[\.、:：]|[-*•]\s*)/, '').trim();
+            }
+        });
+        if (current) items.push(current.trim());
+        const cleanItems = items
+            .map(content => content.replace(/^无[。.]?$/, '').trim())
+            .filter(content => content && !/没有明显|暂无|无明显/.test(content));
+        return cleanItems.length ? cleanItems.map((content, index) => ({
+            id: `rule-conflict-${index + 1}`,
+            title: `冲突 ${index + 1}`,
+            content,
+            signature: getRuleGateSignature(content)
+        })) : [{
+            id: 'rule-conflict-1',
+            title: '冲突 1',
+            content: text,
+            signature: getRuleGateSignature(text)
+        }];
+    }
+
+    function renderRuleConflictItems() {
+        if (!ruleConflictList) return;
+        const items = sandboxRuleGate.items?.length ? sandboxRuleGate.items : extractRuleConflictItems(sandboxRuleGate.reason);
+        const ignored = new Set(sandboxRuleGate.ignoredItems || []);
+        ruleConflictList.innerHTML = items.map((item, index) => {
+            const isIgnored = ignored.has(item.signature);
+            return `
+                <div class="bg-gray-950 border ${isIgnored ? 'border-gray-700 opacity-70' : 'border-red-800/70'} rounded-xl p-4">
+                    <div class="flex items-start justify-between gap-3 mb-2">
+                        <div class="text-sm font-bold ${isIgnored ? 'text-gray-300' : 'text-red-100'}">${escapeHtml(item.title || `冲突 ${index + 1}`)}</div>
+                        <span class="text-[10px] px-2 py-0.5 rounded border ${isIgnored ? 'bg-gray-800 text-gray-300 border-gray-600' : 'bg-red-950 text-red-200 border-red-700'}">${isIgnored ? '已暂时忽略' : '待处理'}</span>
+                    </div>
+                    <div class="text-xs leading-relaxed whitespace-pre-wrap text-gray-200 bg-black/30 border border-gray-800 rounded-lg p-3">${escapeHtml(item.content)}</div>
+                    <div class="grid grid-cols-2 gap-2 mt-3">
+                        <button type="button" data-rule-conflict-index="${index}" class="btn-rule-conflict-edit py-2 bg-red-700 hover:bg-red-600 text-white rounded-lg text-xs font-bold">修改这条</button>
+                        <button type="button" data-rule-conflict-index="${index}" class="btn-rule-conflict-ignore py-2 bg-gray-800 hover:bg-gray-700 text-gray-100 rounded-lg text-xs font-bold">${isIgnored ? '取消忽略' : '暂时忽略'}</button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        ruleConflictList.querySelectorAll('.btn-rule-conflict-edit').forEach(button => {
+            button.addEventListener('click', () => openRuleConflictDiscussion(Number(button.dataset.ruleConflictIndex || 0)));
+        });
+        ruleConflictList.querySelectorAll('.btn-rule-conflict-ignore').forEach(button => {
+            button.addEventListener('click', () => toggleRuleConflictIgnore(Number(button.dataset.ruleConflictIndex || 0)));
+        });
+    }
+
     function showSandboxRuleConflictModal(reason = '') {
         if (!sandboxRuleConflictModal) return;
         if (ruleConflictReport) ruleConflictReport.textContent = reason || '规则专家发现红色冲突，请修改设定后重新检测。';
+        if (reason) sandboxRuleGate.items = extractRuleConflictItems(reason);
+        renderRuleConflictItems();
         sandboxRuleConflictModal.classList.remove('hidden');
         if (window.lucide) lucide.createIcons();
     }
@@ -1296,7 +1361,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         stashSandboxRuleGateDraft();
-        sandboxRuleGate = { ...sandboxRuleGate, blocked: true, ignored: false, ignoredSignature: '', reason: reason || sandboxRuleGate.reason };
+        sandboxRuleGate = { ...sandboxRuleGate, blocked: true, ignored: false, ignoredSignature: '', ignoredItems: [], items: extractRuleConflictItems(reason), reason: reason || sandboxRuleGate.reason };
         setSandboxAlert('red', `规则冲突已中断沙盒推演。请先点击“修改设定”处理冲突，或“暂时忽略”继续当前轮。\n${limitText(reason, 650)}`);
         openSandboxRuleFixEntrance();
         showSandboxRuleConflictModal(reason);
@@ -1305,7 +1370,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function releaseSandboxRuleGate(message = '规则冲突已解除，可以继续沙盒推演。') {
         const wasBlocked = sandboxRuleGate.blocked;
-        sandboxRuleGate = { blocked: false, ignored: false, ignoredSignature: '', reason: '', pendingText: sandboxRuleGate.pendingText };
+        sandboxRuleGate = { blocked: false, ignored: false, ignoredSignature: '', ignoredItems: [], reason: '', pendingText: sandboxRuleGate.pendingText, items: [] };
         restoreSandboxRuleGateDraft();
         hideSandboxRuleConflictModal();
         updateSandboxRuleGateControls();
@@ -1319,6 +1384,22 @@ document.addEventListener('DOMContentLoaded', () => {
         hideSandboxRuleConflictModal();
         updateSandboxRuleGateControls();
         setSandboxAlert('yellow', '已暂时忽略本次红色规则警告，可以继续当前推演。请在后续对话中补齐或修正，否则下一次规则检测仍可能再次中断。');
+    }
+
+    function toggleRuleConflictIgnore(index = 0) {
+        const item = sandboxRuleGate.items?.[index];
+        if (!item) return;
+        const ignored = new Set(sandboxRuleGate.ignoredItems || []);
+        if (ignored.has(item.signature)) ignored.delete(item.signature);
+        else ignored.add(item.signature);
+        sandboxRuleGate = { ...sandboxRuleGate, ignoredItems: [...ignored] };
+        renderRuleConflictItems();
+        const remaining = (sandboxRuleGate.items || []).filter(entry => !ignored.has(entry.signature));
+        if (remaining.length === 0) {
+            ignoreSandboxRuleGate();
+        } else {
+            setSandboxAlert('red', `还有 ${remaining.length} 条规则冲突未处理。请逐条修改或暂时忽略。`);
+        }
     }
 
     function buildRecoveryLedger(conversation = []) {
@@ -1537,6 +1618,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnRuleGateRecheck = document.getElementById('btn-rule-gate-recheck');
     const btnRuleGateIgnore = document.getElementById('btn-rule-gate-ignore');
     const sandboxRuleConflictModal = document.getElementById('sandbox-rule-conflict-modal');
+    const ruleConflictList = document.getElementById('rule-conflict-list');
     const ruleConflictReport = document.getElementById('rule-conflict-report');
     const btnCloseRuleConflictModal = document.getElementById('btn-close-rule-conflict-modal');
     const btnModalRuleGateEdit = document.getElementById('btn-modal-rule-gate-edit');
@@ -1907,7 +1989,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnRuleGateRecheck) btnRuleGateRecheck.addEventListener('click', () => window.runSandboxRuleAudit(getCurrentBibleSnapshot()));
     if (btnRuleGateIgnore) btnRuleGateIgnore.addEventListener('click', ignoreSandboxRuleGate);
     if (btnCloseRuleConflictModal) btnCloseRuleConflictModal.addEventListener('click', hideSandboxRuleConflictModal);
-    if (btnModalRuleGateEdit) btnModalRuleGateEdit.addEventListener('click', openSandboxRuleFixEntrance);
+    if (btnModalRuleGateEdit) btnModalRuleGateEdit.addEventListener('click', () => openRuleConflictDiscussion(0));
     if (btnModalRuleGateRecheck) btnModalRuleGateRecheck.addEventListener('click', () => window.runSandboxRuleAudit(getCurrentBibleSnapshot()));
     if (btnModalRuleGateIgnore) btnModalRuleGateIgnore.addEventListener('click', ignoreSandboxRuleGate);
 
@@ -2635,8 +2717,8 @@ ${getBuiltInExpertBaseline()}
 【事件/章节】\n${limitText(events, 4500)}
 
 请输出：
-【红色警报】严重违反规则/专业常识/人物逻辑的问题；
-【黄色警报】可能降智、巧合、一次性人物、规则约束不足的问题；
+【红色警报】严重违反规则/专业常识/人物逻辑的问题；如果有多条，必须逐条编号为 1、2、3，不要合并成一段；
+【黄色警报】可能降智、巧合、一次性人物、规则约束不足的问题；如果有多条，必须逐条编号；
 【信息权限警报】是否把观众未知的上帝视角信息提前泄露给角色/观众；
 【整改意见】最小修改方案；
 【专家资料缺口】需要补充哪些职业/行业/世界规则资料。
@@ -3239,8 +3321,8 @@ ${getUnifiedQualityGuardrails()}
     };
 
     function getRulesTextForPrompt() {
-        const worldview = document.getElementById('asset-worldview')?.value.trim() || '';
-        const rules = document.getElementById('asset-rules')?.value.trim() || '';
+        const worldview = document.getElementById('prev-worldview')?.value.trim() || document.getElementById('asset-worldview')?.value.trim() || '';
+        const rules = document.getElementById('prev-rules')?.value.trim() || document.getElementById('asset-rules')?.value.trim() || '';
         return [`【世界观】\n${worldview || '暂无'}`, `【规则限制与专业顾问资料】\n${rules || '暂无'}`].join('\n\n');
     }
 
@@ -3260,7 +3342,7 @@ ${getUnifiedQualityGuardrails()}
                         <div id="rules-expert-mention-picker" class="hidden absolute left-0 bottom-full mb-2 w-full max-h-72 overflow-y-auto bg-gray-950 border border-cyan-800/70 rounded-xl shadow-2xl p-2 z-10"></div>
                         <button id="btn-send-rules-discussion" class="px-4 bg-cyan-700 hover:bg-cyan-600 text-white rounded-xl font-bold">发送</button>
                     </div>
-                    <button id="btn-apply-rules-discussion" class="mt-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl font-bold">将最新 AI 回复应用为新规则</button>
+                    <button id="btn-apply-rules-discussion" class="mt-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl font-bold">应用为规则补丁</button>
                 </div>
             </div>
         `);
@@ -3272,8 +3354,14 @@ ${getUnifiedQualityGuardrails()}
             const messages = Array.from(document.querySelectorAll('#rules-discussion-history [data-role="assistant"]'));
             const latest = messages[messages.length - 1]?.innerText.trim();
             if (!latest) return alert("还没有 AI 回复可应用");
-            document.getElementById('asset-rules').value = latest;
-            await runRuleConflictCheck("刚刚应用的新规则");
+            applyRulesDiscussionPatch(latest);
+            if (activeRuleConflictItem) {
+                const ignored = new Set(sandboxRuleGate.ignoredItems || []);
+                ignored.add(activeRuleConflictItem.signature);
+                sandboxRuleGate = { ...sandboxRuleGate, ignoredItems: [...ignored] };
+                renderRuleConflictItems();
+            }
+            await window.runSandboxRuleAudit(getCurrentBibleSnapshot());
             modal.classList.add('hidden');
         };
         if (window.lucide) lucide.createIcons();
@@ -3378,8 +3466,111 @@ ${getUnifiedQualityGuardrails()}
         box.scrollTop = box.scrollHeight;
     }
 
+    function getRulesPatchTarget() {
+        return document.getElementById('prev-rules') || document.getElementById('asset-rules');
+    }
+
+    function extractSectionText(text = '', sectionNames = []) {
+        const source = String(text || '').trim();
+        for (const name of sectionNames) {
+            const pattern = new RegExp(`【${name}】([\\s\\S]*?)(?=\\n?【|$)`);
+            const match = source.match(pattern);
+            if (match?.[1]?.trim()) return match[1].trim();
+        }
+        return '';
+    }
+
+    function getRulePatchDestination(latest = '') {
+        const destination = extractSectionText(latest, ['建议修改到哪里']);
+        if (/世界观/.test(destination) && !/规则|专家资料/.test(destination)) {
+            return document.getElementById('prev-worldview') || document.getElementById('asset-worldview') || getRulesPatchTarget();
+        }
+        return getRulesPatchTarget();
+    }
+
+    function extractApplicableRulesPatch(latest = '') {
+        return extractSectionText(latest, ['可入库规则条目', '最小修正规则', '专业知识设定'])
+            || String(latest || '').trim();
+    }
+
+    function applyRulesDiscussionPatch(latest = '') {
+        const target = getRulePatchDestination(latest);
+        if (!target) return alert('没有找到规则/专家资料输入区，请先打开规则面板。');
+        const title = activeRuleConflictItem ? `【规则冲突修正：${activeRuleConflictItem.title}】` : '【规则/专家讨论补丁】';
+        const patch = `${title}\n${extractApplicableRulesPatch(latest)}`;
+        target.value = [target.value.trim(), patch].filter(Boolean).join('\n\n');
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        const isRulesTarget = /rules/.test(target.id || '');
+        const isWorldviewTarget = /worldview/.test(target.id || '');
+        if (isRulesTarget && document.getElementById('asset-rules') && target.id !== 'asset-rules') {
+            document.getElementById('asset-rules').value = target.value;
+        }
+        if (isRulesTarget && document.getElementById('prev-rules') && target.id !== 'prev-rules') {
+            document.getElementById('prev-rules').value = target.value;
+        }
+        if (isWorldviewTarget && document.getElementById('asset-worldview') && target.id !== 'asset-worldview') {
+            document.getElementById('asset-worldview').value = target.value;
+        }
+        if (isWorldviewTarget && document.getElementById('prev-worldview') && target.id !== 'prev-worldview') {
+            document.getElementById('prev-worldview').value = target.value;
+        }
+    }
+
+    async function openRuleConflictDiscussion(index = 0) {
+        const item = sandboxRuleGate.items?.[index];
+        if (!item) return openSandboxRuleFixEntrance();
+        activeRuleConflictItem = item;
+        hideSandboxRuleConflictModal();
+        if (window.switchSandboxModule) window.switchSandboxModule('rules');
+        const modal = ensureRulesDiscussionModal();
+        rulesDiscussion = [{
+            role: 'assistant',
+            content: `我先只处理这一条规则冲突，不做剧情推演。\n\n【待处理冲突】\n${item.content}\n\n我会先给出合理修正建议；你可以继续告诉我想怎么改。讨论结束后点击“应用为规则补丁”，我会把关键规则更新到规则/专家资料里，再重新检测。`
+        }];
+        const box = document.getElementById('rules-discussion-history');
+        if (box) box.innerHTML = '';
+        appendRulesDiscussion('assistant', rulesDiscussion[0].content);
+        const input = document.getElementById('rules-discussion-input');
+        if (input) input.value = '';
+        modal.classList.remove('hidden');
+
+        const loadingText = '正在生成这条冲突的合理修正建议...';
+        appendRulesDiscussion('assistant', loadingText);
+        const loadingNode = box?.lastElementChild;
+        const prompt = `你是规则冲突修复顾问。只处理下面这一条冲突，不做剧情推演，不设计事件桥段，不替人物做选择。
+
+【待处理冲突】
+${item.content}
+
+【当前规则/世界观/专家资料】
+${getRulesTextForPrompt()}
+
+请先给出可讨论的合理修正建议，格式：
+【冲突本质】
+【建议修改到哪里】只能从：世界观、规则/专家资料、人物规则、事件设定 中选择，可多选。
+【最小修正规则】
+【需要作者确认的问题】
+【应用后需要重新检测的风险】`;
+        try {
+            const res = await fetch('/api/chat/deduce', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(buildChatPayloadWithLocalSources([{ role: 'user', content: prompt }], 4, prompt))
+            });
+            const data = await res.json();
+            const reply = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `建议生成失败：${data.error || '未知错误'}`;
+            if (loadingNode) loadingNode.remove();
+            rulesDiscussion.push({ role: 'assistant', content: reply });
+            appendRulesDiscussion('assistant', reply);
+        } catch (error) {
+            if (loadingNode) loadingNode.remove();
+            appendRulesDiscussion('assistant', `建议生成失败：${error.message || '未知错误'}`);
+        }
+    }
+
     async function openRulesDiscussion() {
         const modal = ensureRulesDiscussionModal();
+        activeRuleConflictItem = null;
         rulesDiscussion = [{
             role: 'assistant',
             content: `我们可以专门打磨这套世界规则和专业顾问资料。这里不做剧情推演，只沉淀可被沙盒引用的知识设定：工作流程、专业术语、权限边界、常见误区、真实感细节、行业禁忌、资料缺口，以及经济、政治、文化、种族、技能/力量体系的优势、代价和反制。输入 @ 可以指定专家。`
