@@ -4,6 +4,47 @@ const router = express.Router();
 
 // 我们暂时使用环境变量里的 KEY，如果你没在 .env 写，就暂时填明文
 const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY;
+const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function cleanUpstreamError(status, responseText = '') {
+    const text = String(responseText || '');
+    const title = text.match(/<TITLE>([\s\S]*?)<\/TITLE>/i)?.[1]?.trim();
+    const h1 = text.match(/<H1>([\s\S]*?)<\/H1>/i)?.[1]?.trim();
+    const compact = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    const message = h1 || title || compact || '无错误详情';
+    if ([502, 503, 504].includes(status)) {
+        return `DeepSeek 上游暂时不可用或超时（${status}）：${message.slice(0, 220)}。请稍后重试；系统已减少上下文并尝试恢复。`;
+    }
+    return `DeepSeek 报错 ${status}: ${message.slice(0, 500)}`;
+}
+
+async function callDeepSeek(messages, options = {}) {
+    const maxTokens = options.maxTokens || 3000;
+    const dsResponse = await fetch(DEEPSEEK_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${DEEPSEEK_KEY}`
+        },
+        body: JSON.stringify({
+            model: "deepseek-v4-flash",
+            messages,
+            temperature: 0.7,
+            max_tokens: maxTokens
+        })
+    });
+    const responseText = await dsResponse.text();
+    if (!dsResponse.ok) {
+        const error = new Error(cleanUpstreamError(dsResponse.status, responseText));
+        error.status = dsResponse.status;
+        throw error;
+    }
+    return JSON.parse(responseText);
+}
 
 router.post('/deduce', async (req, res) => {
     const { conversation = [], memorySummary = '', currentBible = null, requirePanelJson = false, localReferenceSnippets = '' } = req.body;
@@ -49,25 +90,19 @@ router.post('/deduce', async (req, res) => {
     ].filter(Boolean);
 
     try {
-        const dsResponse = await fetch('https://api.deepseek.com/chat/completions', {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json', 
-                'Authorization': `Bearer ${DEEPSEEK_KEY}` 
-            },
-            body: JSON.stringify({
-                model: "deepseek-v4-flash",
-                messages: messages,
-                temperature: 0.7,
-                max_tokens: 3500
-            })
-        });
-
-        const responseText = await dsResponse.text();
-        if (!dsResponse.ok) {
-            throw new Error(`DeepSeek 报错 ${dsResponse.status}: ${responseText.slice(0, 800) || '无错误详情'}`);
+        let result;
+        try {
+            result = await callDeepSeek(messages, { maxTokens: 3000 });
+        } catch (firstError) {
+            if (![502, 503, 504].includes(firstError.status)) throw firstError;
+            console.warn('DeepSeek 上游临时失败，准备轻量重试:', firstError.message);
+            await sleep(900);
+            result = await callDeepSeek([
+                ...messages.slice(0, -1),
+                { role: 'system', content: '上一次请求遇到上游超时。请用更紧凑的方式回复，优先保留【当前任务】【已吸收】【新增重要设定】【下一步选择】；详细分析从简。' },
+                messages[messages.length - 1]
+            ], { maxTokens: 2200 });
         }
-        const result = JSON.parse(responseText);
         const reply = result.choices?.[0]?.message?.content;
         if (!reply) throw new Error('DeepSeek 没有返回有效回复内容。');
         
