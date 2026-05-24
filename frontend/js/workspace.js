@@ -30,6 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const MANUAL_BIBLE_EDITS_KEY = `manual_bible_edits_${PROJECT_ID}`;
     const MANUAL_BIBLE_WARNINGS_KEY = `manual_bible_warnings_${PROJECT_ID}`;
     const MANUAL_BIBLE_WARNING_SIGNATURE_KEY = `manual_bible_warning_signature_${PROJECT_ID}`;
+    const SANDBOX_RULE_GATE_DRAFT_KEY = `sandbox_rule_gate_draft_${PROJECT_ID}`;
     const GENESIS_CLOUD_TYPE = "上帝沙盒 · 创世圣经";
     const LONGFORM_STATE_KEY = `longform_editor_state_${PROJECT_ID}`;
     const LONGFORM_CLOUD_TYPE = "长篇连载编辑系统";
@@ -54,6 +55,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let longformState = loadLongformState();
     let sandboxAutoRepairInFlight = false;
     let sandboxAutoRepairSignature = '';
+    let sandboxRuleGate = { blocked: false, ignored: false, ignoredSignature: '', reason: '', pendingText: '' };
 
     const RECENT_CHAT_LIMIT = 10;
     const MEMORY_SUMMARY_LIMIT = 6000;
@@ -1158,11 +1160,13 @@ document.addEventListener('DOMContentLoaded', () => {
         genesisRequestInFlight = locked;
         if (chatInput) chatInput.disabled = locked;
         if (btnSend) {
-            btnSend.disabled = locked || genesisPanelSyncBlocked;
+            btnSend.disabled = locked || genesisPanelSyncBlocked || sandboxRuleGate.blocked;
             btnSend.dataset.originalText = btnSend.dataset.originalText || btnSend.innerHTML;
             if (locked && label) btnSend.innerHTML = label;
             if (!locked) {
-                btnSend.innerHTML = genesisPanelSyncBlocked
+                btnSend.innerHTML = sandboxRuleGate.blocked
+                    ? `<i data-lucide="shield-alert" class="w-4 h-4 mr-1.5"></i>处理规则冲突`
+                    : genesisPanelSyncBlocked
                     ? `<i data-lucide="shield-alert" class="w-4 h-4 mr-1.5"></i>等待面板同步`
                     : btnSend.dataset.originalText;
             }
@@ -1174,16 +1178,90 @@ document.addEventListener('DOMContentLoaded', () => {
         genesisPanelSyncBlocked = blocked;
         if (chatInput) chatInput.disabled = genesisRequestInFlight;
         if (btnSend) {
-            btnSend.disabled = blocked || genesisRequestInFlight;
+            btnSend.disabled = blocked || genesisRequestInFlight || sandboxRuleGate.blocked;
             btnSend.dataset.originalText = btnSend.dataset.originalText || btnSend.innerHTML;
             if (!genesisRequestInFlight) {
-                btnSend.innerHTML = blocked
+                btnSend.innerHTML = sandboxRuleGate.blocked
+                    ? `<i data-lucide="shield-alert" class="w-4 h-4 mr-1.5"></i>处理规则冲突`
+                    : blocked
                     ? `<i data-lucide="shield-alert" class="w-4 h-4 mr-1.5"></i>等待面板同步`
                     : btnSend.dataset.originalText;
             }
         }
         if (blocked && message) alert(message);
         if (window.lucide) lucide.createIcons();
+    }
+
+    function stashSandboxRuleGateDraft() {
+        const draft = chatInput?.value?.trim() || sandboxRuleGate.pendingText || '';
+        if (!draft) return;
+        sandboxRuleGate.pendingText = draft;
+        localStorage.setItem(SANDBOX_RULE_GATE_DRAFT_KEY, draft);
+    }
+
+    function restoreSandboxRuleGateDraft() {
+        const draft = sandboxRuleGate.pendingText || localStorage.getItem(SANDBOX_RULE_GATE_DRAFT_KEY) || '';
+        if (draft && chatInput && !chatInput.value.trim()) chatInput.value = draft;
+        localStorage.removeItem(SANDBOX_RULE_GATE_DRAFT_KEY);
+        sandboxRuleGate.pendingText = '';
+    }
+
+    function updateSandboxRuleGateControls() {
+        if (sandboxRuleGateActions) sandboxRuleGateActions.classList.toggle('hidden', !sandboxRuleGate.blocked);
+        if (sandboxAlertActions) sandboxAlertActions.classList.toggle('hidden', sandboxRuleGate.blocked);
+        if (btnSend && !genesisRequestInFlight) {
+            btnSend.disabled = genesisPanelSyncBlocked || sandboxRuleGate.blocked;
+            btnSend.dataset.originalText = btnSend.dataset.originalText || btnSend.innerHTML;
+            btnSend.innerHTML = sandboxRuleGate.blocked
+                ? `<i data-lucide="shield-alert" class="w-4 h-4 mr-1.5"></i>处理规则冲突`
+                : genesisPanelSyncBlocked
+                ? `<i data-lucide="shield-alert" class="w-4 h-4 mr-1.5"></i>等待面板同步`
+                : btnSend.dataset.originalText;
+        }
+        if (window.lucide) lucide.createIcons();
+    }
+
+    function openSandboxRuleFixEntrance() {
+        if (window.switchSandboxModule) window.switchSandboxModule('rules');
+        const alarm = document.getElementById('sandbox-rule-alarm');
+        const rulesBox = document.getElementById('prev-rules') || document.getElementById('prev-worldview');
+        setTimeout(() => {
+            alarm?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            rulesBox?.focus();
+        }, 80);
+    }
+
+    function getRuleGateSignature(text = '') {
+        return String(text || '').replace(/\s+/g, ' ').trim().slice(0, 900);
+    }
+
+    function activateSandboxRuleGate(reason = '') {
+        const signature = getRuleGateSignature(reason);
+        if (sandboxRuleGate.ignored && sandboxRuleGate.ignoredSignature === signature) {
+            setSandboxAlert('yellow', `本次红色规则警告已被暂时忽略，沙盒可继续推进。\n${limitText(reason, 650)}`);
+            return;
+        }
+        stashSandboxRuleGateDraft();
+        sandboxRuleGate = { ...sandboxRuleGate, blocked: true, ignored: false, ignoredSignature: '', reason: reason || sandboxRuleGate.reason };
+        setSandboxAlert('red', `规则冲突已中断沙盒推演。请先点击“修改设定”处理冲突，或“暂时忽略”继续当前轮。\n${limitText(reason, 650)}`);
+        openSandboxRuleFixEntrance();
+        updateSandboxRuleGateControls();
+    }
+
+    function releaseSandboxRuleGate(message = '规则冲突已解除，可以继续沙盒推演。') {
+        const wasBlocked = sandboxRuleGate.blocked;
+        sandboxRuleGate = { blocked: false, ignored: false, ignoredSignature: '', reason: '', pendingText: sandboxRuleGate.pendingText };
+        restoreSandboxRuleGateDraft();
+        updateSandboxRuleGateControls();
+        if (wasBlocked) setSandboxAlert('green', message);
+    }
+
+    function ignoreSandboxRuleGate() {
+        stashSandboxRuleGateDraft();
+        sandboxRuleGate = { ...sandboxRuleGate, blocked: false, ignored: true, ignoredSignature: getRuleGateSignature(sandboxRuleGate.reason) };
+        restoreSandboxRuleGateDraft();
+        updateSandboxRuleGateControls();
+        setSandboxAlert('yellow', '已暂时忽略本次红色规则警告，可以继续当前推演。请在后续对话中补齐或修正，否则下一次规则检测仍可能再次中断。');
     }
 
     function buildRecoveryLedger(conversation = []) {
@@ -1397,6 +1475,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnSandboxAutoRepair = document.getElementById('btn-sandbox-auto-repair');
     const btnSandboxFixOptions = document.getElementById('btn-sandbox-fix-options');
     const btnSandboxRiskReport = document.getElementById('btn-sandbox-risk-report');
+    const sandboxRuleGateActions = document.getElementById('sandbox-rule-gate-actions');
+    const btnRuleGateEdit = document.getElementById('btn-rule-gate-edit');
+    const btnRuleGateRecheck = document.getElementById('btn-rule-gate-recheck');
+    const btnRuleGateIgnore = document.getElementById('btn-rule-gate-ignore');
     const mainWorkspace = document.getElementById('main-workspace');
     const chatHistory = document.getElementById('chat-history');
     const chatInput = document.getElementById('chat-input');
@@ -1584,7 +1666,8 @@ document.addEventListener('DOMContentLoaded', () => {
         sandboxAlertLevel.className = `text-[10px] px-2 py-0.5 rounded border ${config.badge}`;
         sandboxAlertLevel.textContent = config.label || '绿色';
         sandboxAlertSummary.textContent = summary || '当前未发现明显风险。';
-        if (sandboxAlertActions) sandboxAlertActions.classList.toggle('hidden', level === 'green');
+        if (sandboxAlertActions) sandboxAlertActions.classList.toggle('hidden', level === 'green' || sandboxRuleGate.blocked);
+        if (sandboxRuleGateActions) sandboxRuleGateActions.classList.toggle('hidden', !sandboxRuleGate.blocked);
     }
 
     function hasEnoughSandboxContentForAutoRepair(bible = {}) {
@@ -1757,6 +1840,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnSandboxAutoRepair) btnSandboxAutoRepair.addEventListener('click', () => runSandboxSupervisionAction('auto'));
     if (btnSandboxFixOptions) btnSandboxFixOptions.addEventListener('click', () => runSandboxSupervisionAction('options'));
     if (btnSandboxRiskReport) btnSandboxRiskReport.addEventListener('click', () => runSandboxSupervisionAction('report'));
+    if (btnRuleGateEdit) btnRuleGateEdit.addEventListener('click', openSandboxRuleFixEntrance);
+    if (btnRuleGateRecheck) btnRuleGateRecheck.addEventListener('click', () => window.runSandboxRuleAudit(getCurrentBibleSnapshot()));
+    if (btnRuleGateIgnore) btnRuleGateIgnore.addEventListener('click', ignoreSandboxRuleGate);
 
     function closeGenesisSandbox() {
         if (sandbox) sandbox.classList.add('hidden');
@@ -2492,7 +2578,12 @@ ${getBuiltInExpertBaseline()}
             const reply = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `审查失败：${data.error || '未知错误'}`;
             alarmBox.textContent = reply;
             const level = /红色警报[\s\S]*?(严重|违反|冲突|不通过|泄露)|不通过|严重|红色/.test(reply) ? 'red' : (/黄色警报|风险|不足|建议/.test(reply) ? 'yellow' : 'green');
-            setSandboxAlert(level, `规则审查完成。\n${limitText(reply, 700)}`);
+            if (level === 'red') {
+                activateSandboxRuleGate(reply);
+            } else {
+                releaseSandboxRuleGate(`规则审查完成，未发现阻断级冲突。\n${limitText(reply, 700)}`);
+                setSandboxAlert(level, `规则审查完成。\n${limitText(reply, 700)}`);
+            }
         } catch (e) {
             alarmBox.textContent = '规则审查请求失败，请稍后重试。';
             setSandboxAlert('yellow', '规则审查请求失败，请稍后重试。');
@@ -3378,6 +3469,11 @@ ${getRulesTextForPrompt()}`;
     if (btnSend) {
         btnSend.onclick = () => {
             if (genesisRequestInFlight) return;
+            if (sandboxRuleGate.blocked) {
+                stashSandboxRuleGateDraft();
+                openSandboxRuleFixEntrance();
+                return alert('规则专家发出红色警告，沙盒推演已暂停。请先修改设定并重新检测，或点击“暂时忽略”后继续。');
+            }
             if (genesisPanelSyncBlocked) return alert('上一轮设定还没有确认写入实时面板。你可以继续编辑输入框，但暂时不能发送；如果同步失败，请优先撤回上一条回答重新回答，连续失败时再使用“从对话刷新面板”。');
             const text = chatInput.value.trim();
             if (!text) return;
