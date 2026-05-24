@@ -2477,6 +2477,19 @@ document.addEventListener('DOMContentLoaded', () => {
         return `当前救猫咪类型：${key || '未锁定'}\n尚未锁定明确类型。监督重点：在继续大纲或正文前，应先确认故事主承诺属于哪一类；若暂时未分类，也要说明本事件承担的类型功能和读者期待。`;
     }
 
+    function getExpertCatalog() {
+        return [
+            { label: '历史专家', keys: ['历史', '古代', '朝代', '皇帝', '皇后', '太子', '宰相', '县令', '官府', '科举', '宗族', '礼法', '朝堂', '边军', '粮草', '诏令', '唐朝', '宋朝', '明朝', '清朝', '民国'], desc: '朝代制度、官职称谓、礼法风俗、交通通讯、战争财政、现代价值观误套。' },
+            { label: '法律/律师专家', keys: ['律师', '法庭', '诉讼', '起诉', '辩护', '证据', '检察', '法院', '法官', '合同'], desc: '接案、利益冲突、会见、证据、文书、庭审、判后沟通与权限边界。' },
+            { label: '医疗/心理专家', keys: ['医生', '医院', '手术', '诊断', '病历', '急救', '药物', '心理治疗'], desc: '诊断、检查、病历、用药、手术、急救、心理干预流程和不确定性。' },
+            { label: '刑侦/警务专家', keys: ['警察', '刑侦', '侦查', '审讯', '取证', '监控', '逮捕', '案发'], desc: '立案、侦查、取证、审讯、监控、逮捕、证据链和程序边界。' },
+            { label: '金融/商业专家', keys: ['金融', '股票', '银行', '基金', '债务', '投资', '审计'], desc: '资金流、合同、审计、投融资、银行、公司治理和交易复杂度。' },
+            { label: '政治制度专家', keys: ['政治', '选举', '议会', '官僚', '政变', '外交'], desc: '权力来源、制度结构、官僚流程、外交博弈、政变成本与反制。' },
+            { label: '社会文化专家', keys: ['种族', '宗教', '文化', '部落', '阶层', '礼制'], desc: '阶层流动、宗教文化、族群关系、礼仪禁忌、社会代价与反制机制。' },
+            { label: '力量体系专家', keys: ['魔法', '技能', '战力', '异能', '修炼', '能力'], desc: '能力、资源、战力、使用条件、代价、限制、反制和无敌解法排查。' }
+        ];
+    }
+
     function getBuiltInExpertBaseline() {
         return `【内置专家系统基线】
 专家系统不需要作者手动粘贴模板。作者只需说明题材、时代、职业、行业或关键词；AI 必须自动调用对应专家审查标准。
@@ -2547,17 +2560,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getExpertKeywordHint(text = "") {
-        const expertMap = [
-            { keys: ['律师', '法庭', '诉讼', '起诉', '辩护', '证据', '检察', '法院', '法官', '合同'], label: '法律/律师专家' },
-            { keys: ['医生', '医院', '手术', '诊断', '病历', '急救', '药物', '心理治疗'], label: '医疗/心理专家' },
-            { keys: ['警察', '刑侦', '侦查', '审讯', '取证', '监控', '逮捕', '案发'], label: '刑侦/警务专家' },
-            { keys: ['金融', '股票', '银行', '基金', '债务', '投资', '审计'], label: '金融/商业专家' },
-            { keys: ['历史', '古代', '朝代', '皇帝', '皇后', '太子', '宰相', '县令', '官府', '科举', '宗族', '礼法', '朝堂', '边军', '粮草', '诏令', '唐朝', '宋朝', '明朝', '清朝', '民国'], label: '历史专家' },
-            { keys: ['政治', '选举', '议会', '官僚', '政变', '外交'], label: '政治制度专家' },
-            { keys: ['种族', '宗教', '文化', '部落', '阶层', '礼制'], label: '社会文化专家' },
-            { keys: ['魔法', '技能', '战力', '异能', '修炼', '能力'], label: '力量体系专家' }
-        ];
-        const matched = expertMap.filter(item => item.keys.some(key => text.includes(key))).map(item => item.label);
+        const matched = getExpertCatalog().filter(item => item.keys.some(key => text.includes(key))).map(item => item.label);
         if (matched.length === 0) return '';
         return `\n\n【专家系统自动介入】检测到关键词，启用：${matched.join('、')}。请先检查规则/专家资料中是否已有相关约束；资料不足时向作者提出需要补充的专业问题，禁止装懂或编造确定专业流程。`;
     }
@@ -3208,8 +3211,9 @@ ${getUnifiedQualityGuardrails()}
                         <button id="btn-close-rules-discussion" class="text-gray-500 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
                     </div>
                     <div id="rules-discussion-history" class="flex-1 overflow-y-auto bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-3 text-xs"></div>
-                    <div class="flex gap-2 mt-4">
-                        <textarea id="rules-discussion-input" class="flex-1 bg-gray-950 border border-gray-700 rounded-xl p-3 text-sm text-white h-20 resize-none" placeholder="讨论架空世界、经济、政治、文化、种族、技能、限制与代价..."></textarea>
+                    <div class="flex gap-2 mt-4 relative">
+                        <textarea id="rules-discussion-input" class="flex-1 bg-gray-950 border border-gray-700 rounded-xl p-3 text-sm text-white h-20 resize-none" placeholder="输入 @ 选择专家，再描述你要讨论的问题..."></textarea>
+                        <div id="rules-expert-mention-picker" class="hidden absolute left-0 bottom-full mb-2 w-full max-h-72 overflow-y-auto bg-gray-950 border border-cyan-800/70 rounded-xl shadow-2xl p-2 z-10"></div>
                         <button id="btn-send-rules-discussion" class="px-4 bg-cyan-700 hover:bg-cyan-600 text-white rounded-xl font-bold">发送</button>
                     </div>
                     <button id="btn-apply-rules-discussion" class="mt-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl font-bold">将最新 AI 回复应用为新规则</button>
@@ -3219,6 +3223,7 @@ ${getUnifiedQualityGuardrails()}
         modal = document.getElementById('rules-discussion-modal');
         document.getElementById('btn-close-rules-discussion').onclick = () => modal.classList.add('hidden');
         document.getElementById('btn-send-rules-discussion').onclick = sendRulesDiscussion;
+        setupRulesExpertMentionPicker();
         document.getElementById('btn-apply-rules-discussion').onclick = async () => {
             const messages = Array.from(document.querySelectorAll('#rules-discussion-history [data-role="assistant"]'));
             const latest = messages[messages.length - 1]?.innerText.trim();
@@ -3232,6 +3237,96 @@ ${getUnifiedQualityGuardrails()}
     }
 
     let rulesDiscussion = [];
+
+    function getRulesExpertMentionContext(input) {
+        if (!input) return null;
+        const cursor = input.selectionStart ?? input.value.length;
+        const before = input.value.slice(0, cursor);
+        const atIndex = before.lastIndexOf('@');
+        if (atIndex < 0) return null;
+        const query = before.slice(atIndex + 1);
+        if (/\s/.test(query)) return null;
+        return { atIndex, cursor, query };
+    }
+
+    function getMentionedRuleExperts(text = '') {
+        const catalog = getExpertCatalog();
+        const labels = new Set();
+        const matches = String(text || '').matchAll(/@([^\s@，,；;]+)/g);
+        for (const match of matches) {
+            const raw = match[1];
+            const expert = catalog.find(item => item.label === raw || item.label.includes(raw) || raw.includes(item.label.replace('专家', '')));
+            if (expert) labels.add(expert.label);
+        }
+        return [...labels];
+    }
+
+    function renderRulesExpertMentionPicker(query = '') {
+        const picker = document.getElementById('rules-expert-mention-picker');
+        const input = document.getElementById('rules-discussion-input');
+        if (!picker || !input) return;
+        const lowerQuery = query.trim().toLowerCase();
+        const experts = getExpertCatalog().filter(item => {
+            if (!lowerQuery) return true;
+            return item.label.toLowerCase().includes(lowerQuery)
+                || item.desc.toLowerCase().includes(lowerQuery)
+                || item.keys.some(key => key.toLowerCase().includes(lowerQuery));
+        });
+        if (!experts.length) {
+            picker.innerHTML = `<div class="px-3 py-2 text-xs text-gray-500">没有匹配专家</div>`;
+        } else {
+            picker.innerHTML = experts.map(item => `
+                <button type="button" data-expert="${escapeHtml(item.label)}" class="expert-mention-option w-full text-left px-3 py-2 rounded-lg hover:bg-cyan-900/40 border border-transparent hover:border-cyan-800/60">
+                    <div class="text-sm font-bold text-cyan-100">@${escapeHtml(item.label)}</div>
+                    <div class="text-[11px] text-gray-400 leading-relaxed mt-0.5">${escapeHtml(item.desc)}</div>
+                </button>
+            `).join('');
+        }
+        picker.classList.remove('hidden');
+        picker.querySelectorAll('.expert-mention-option').forEach(button => {
+            button.addEventListener('click', () => insertRulesExpertMention(button.dataset.expert || ''));
+        });
+    }
+
+    function hideRulesExpertMentionPicker() {
+        document.getElementById('rules-expert-mention-picker')?.classList.add('hidden');
+    }
+
+    function insertRulesExpertMention(label = '') {
+        const input = document.getElementById('rules-discussion-input');
+        const context = getRulesExpertMentionContext(input);
+        if (!input || !context || !label) return;
+        const before = input.value.slice(0, context.atIndex);
+        const after = input.value.slice(context.cursor);
+        const inserted = `@${label} `;
+        input.value = `${before}${inserted}${after}`;
+        const cursor = before.length + inserted.length;
+        input.focus();
+        input.setSelectionRange(cursor, cursor);
+        hideRulesExpertMentionPicker();
+    }
+
+    function setupRulesExpertMentionPicker() {
+        const input = document.getElementById('rules-discussion-input');
+        const picker = document.getElementById('rules-expert-mention-picker');
+        if (!input || !picker || input.dataset.expertMentionReady) return;
+        input.dataset.expertMentionReady = '1';
+        const updatePicker = () => {
+            const context = getRulesExpertMentionContext(input);
+            if (!context) return hideRulesExpertMentionPicker();
+            renderRulesExpertMentionPicker(context.query);
+        };
+        input.addEventListener('input', updatePicker);
+        input.addEventListener('keyup', updatePicker);
+        input.addEventListener('click', updatePicker);
+        input.addEventListener('keydown', event => {
+            if (event.key === 'Escape') hideRulesExpertMentionPicker();
+        });
+        document.addEventListener('mousedown', event => {
+            if (!picker.contains(event.target) && event.target !== input) hideRulesExpertMentionPicker();
+        });
+    }
+
     function appendRulesDiscussion(role, text) {
         const box = document.getElementById('rules-discussion-history');
         if (!box) return;
@@ -3259,9 +3354,15 @@ ${getUnifiedQualityGuardrails()}
         input.value = '';
         rulesDiscussion.push({ role: 'user', content: text });
         appendRulesDiscussion('user', text);
+        hideRulesExpertMentionPicker();
+        const mentionedExperts = getMentionedRuleExperts(text);
+        const explicitExpertInstruction = mentionedExperts.length
+            ? `【本轮@指定专家】${mentionedExperts.join('、')}。你必须明确以这些专家身份优先工作：先说明该专家本轮要检查什么，再给出专业流程、术语、边界、常见误区、资料缺口和最小可执行修改建议。不要泛泛创作，不要越过该专家权限乱编。`
+            : '【本轮@指定专家】未手动指定；可根据关键词自动调用相关专家，但必须说明调用理由。';
         const prompt = `请基于当前规则继续讨论，并把“专家系统”并入规则体系：如果涉及职业/行业/学科，请补充工作流程、专业术语、常见误区、真实感细节、不能乱写的边界。
 如果涉及历史剧或古代/朝代背景，自动启用历史专家，检查朝代、官职、称谓、礼法、交通通讯、军队调动、审案/科举/婚嫁/朝会等流程，以及现代价值观误套问题。
 所有设定都要明确优势、劣势、成本、限制、反制方式，避免无敌设定。
+${explicitExpertInstruction}
 ${getBuiltInExpertBaseline()}
 ${getRulesTextForPrompt()}`;
         const convo = [...rulesDiscussion, { role: 'user', content: prompt }];
