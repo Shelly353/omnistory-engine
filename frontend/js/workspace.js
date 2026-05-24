@@ -1222,6 +1222,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function openSandboxRuleFixEntrance() {
+        hideSandboxRuleConflictModal();
         if (window.switchSandboxModule) window.switchSandboxModule('rules');
         const alarm = document.getElementById('sandbox-rule-alarm');
         const rulesBox = document.getElementById('prev-rules') || document.getElementById('prev-worldview');
@@ -1235,6 +1236,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return String(text || '').replace(/\s+/g, ' ').trim().slice(0, 900);
     }
 
+    function showSandboxRuleConflictModal(reason = '') {
+        if (!sandboxRuleConflictModal) return;
+        if (ruleConflictReport) ruleConflictReport.textContent = reason || '规则专家发现红色冲突，请修改设定后重新检测。';
+        sandboxRuleConflictModal.classList.remove('hidden');
+        if (window.lucide) lucide.createIcons();
+    }
+
+    function hideSandboxRuleConflictModal() {
+        sandboxRuleConflictModal?.classList.add('hidden');
+    }
+
     function activateSandboxRuleGate(reason = '') {
         const signature = getRuleGateSignature(reason);
         if (sandboxRuleGate.ignored && sandboxRuleGate.ignoredSignature === signature) {
@@ -1245,6 +1257,7 @@ document.addEventListener('DOMContentLoaded', () => {
         sandboxRuleGate = { ...sandboxRuleGate, blocked: true, ignored: false, ignoredSignature: '', reason: reason || sandboxRuleGate.reason };
         setSandboxAlert('red', `规则冲突已中断沙盒推演。请先点击“修改设定”处理冲突，或“暂时忽略”继续当前轮。\n${limitText(reason, 650)}`);
         openSandboxRuleFixEntrance();
+        showSandboxRuleConflictModal(reason);
         updateSandboxRuleGateControls();
     }
 
@@ -1252,6 +1265,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const wasBlocked = sandboxRuleGate.blocked;
         sandboxRuleGate = { blocked: false, ignored: false, ignoredSignature: '', reason: '', pendingText: sandboxRuleGate.pendingText };
         restoreSandboxRuleGateDraft();
+        hideSandboxRuleConflictModal();
         updateSandboxRuleGateControls();
         if (wasBlocked) setSandboxAlert('green', message);
     }
@@ -1260,6 +1274,7 @@ document.addEventListener('DOMContentLoaded', () => {
         stashSandboxRuleGateDraft();
         sandboxRuleGate = { ...sandboxRuleGate, blocked: false, ignored: true, ignoredSignature: getRuleGateSignature(sandboxRuleGate.reason) };
         restoreSandboxRuleGateDraft();
+        hideSandboxRuleConflictModal();
         updateSandboxRuleGateControls();
         setSandboxAlert('yellow', '已暂时忽略本次红色规则警告，可以继续当前推演。请在后续对话中补齐或修正，否则下一次规则检测仍可能再次中断。');
     }
@@ -1479,6 +1494,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnRuleGateEdit = document.getElementById('btn-rule-gate-edit');
     const btnRuleGateRecheck = document.getElementById('btn-rule-gate-recheck');
     const btnRuleGateIgnore = document.getElementById('btn-rule-gate-ignore');
+    const sandboxRuleConflictModal = document.getElementById('sandbox-rule-conflict-modal');
+    const ruleConflictReport = document.getElementById('rule-conflict-report');
+    const btnCloseRuleConflictModal = document.getElementById('btn-close-rule-conflict-modal');
+    const btnModalRuleGateEdit = document.getElementById('btn-modal-rule-gate-edit');
+    const btnModalRuleGateRecheck = document.getElementById('btn-modal-rule-gate-recheck');
+    const btnModalRuleGateIgnore = document.getElementById('btn-modal-rule-gate-ignore');
     const mainWorkspace = document.getElementById('main-workspace');
     const chatHistory = document.getElementById('chat-history');
     const chatInput = document.getElementById('chat-input');
@@ -1843,6 +1864,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnRuleGateEdit) btnRuleGateEdit.addEventListener('click', openSandboxRuleFixEntrance);
     if (btnRuleGateRecheck) btnRuleGateRecheck.addEventListener('click', () => window.runSandboxRuleAudit(getCurrentBibleSnapshot()));
     if (btnRuleGateIgnore) btnRuleGateIgnore.addEventListener('click', ignoreSandboxRuleGate);
+    if (btnCloseRuleConflictModal) btnCloseRuleConflictModal.addEventListener('click', hideSandboxRuleConflictModal);
+    if (btnModalRuleGateEdit) btnModalRuleGateEdit.addEventListener('click', openSandboxRuleFixEntrance);
+    if (btnModalRuleGateRecheck) btnModalRuleGateRecheck.addEventListener('click', () => window.runSandboxRuleAudit(getCurrentBibleSnapshot()));
+    if (btnModalRuleGateIgnore) btnModalRuleGateIgnore.addEventListener('click', ignoreSandboxRuleGate);
 
     function closeGenesisSandbox() {
         if (sandbox) sandbox.classList.add('hidden');
@@ -3471,7 +3496,7 @@ ${getRulesTextForPrompt()}`;
             if (genesisRequestInFlight) return;
             if (sandboxRuleGate.blocked) {
                 stashSandboxRuleGateDraft();
-                openSandboxRuleFixEntrance();
+                showSandboxRuleConflictModal(sandboxRuleGate.reason);
                 return alert('规则专家发出红色警告，沙盒推演已暂停。请先修改设定并重新检测，或点击“暂时忽略”后继续。');
             }
             if (genesisPanelSyncBlocked) return alert('上一轮设定还没有确认写入实时面板。你可以继续编辑输入框，但暂时不能发送；如果同步失败，请优先撤回上一条回答重新回答，连续失败时再使用“从对话刷新面板”。');

@@ -214,6 +214,41 @@
         <button id="btn-close-sandbox" class="absolute top-4 right-4 text-gray-500 hover:text-white z-50 bg-gray-900 p-2 rounded-full border border-gray-800"><i data-lucide="x" class="w-5 h-5"></i></button>
     </div>
 
+    <div id="sandbox-rule-conflict-modal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-[78] hidden flex items-center justify-center p-6">
+        <div class="bg-gray-950 border border-red-700/80 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[86vh] flex flex-col overflow-hidden">
+            <div class="flex items-start justify-between gap-4 p-5 border-b border-red-900/50 bg-red-950/30">
+                <div>
+                    <div class="text-[11px] font-bold tracking-wider text-red-300 mb-1">规则最高权限 · 红色中断</div>
+                    <h3 class="text-xl font-bold text-white flex items-center">
+                        <i data-lucide="shield-alert" class="w-5 h-5 mr-2 text-red-300"></i>必须先处理规则冲突
+                    </h3>
+                </div>
+                <button id="btn-close-rule-conflict-modal" class="text-gray-500 hover:text-white p-1 rounded border border-transparent hover:border-gray-700" title="收起窗口，不解除中断">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="grid md:grid-cols-[1.7fr_1fr] gap-0 flex-1 min-h-0">
+                <div class="p-5 overflow-y-auto">
+                    <div class="text-xs text-gray-400 mb-2 font-bold">完整冲突报告</div>
+                    <pre id="rule-conflict-report" class="whitespace-pre-wrap text-sm leading-relaxed text-red-50 bg-black/40 border border-red-900/40 rounded-xl p-4 min-h-[280px]"></pre>
+                </div>
+                <div class="p-5 border-t md:border-t-0 md:border-l border-gray-800 bg-gray-950/80 flex flex-col">
+                    <div class="text-xs text-gray-400 mb-3 font-bold">处理流程</div>
+                    <div class="space-y-3 text-xs text-gray-300 leading-relaxed flex-1">
+                        <div class="bg-red-950/30 border border-red-900/50 rounded-xl p-3">1. 沙盒推演已暂停，当前输入会暂存。</div>
+                        <div class="bg-gray-900 border border-gray-800 rounded-xl p-3">2. 修改世界观、规则、专家资料或事件设定后，点击重新检测。</div>
+                        <div class="bg-gray-900 border border-gray-800 rounded-xl p-3">3. 检测通过后自动恢复发送；确实要以后解决时，可暂时忽略。</div>
+                    </div>
+                    <div class="grid grid-cols-1 gap-2 mt-5">
+                        <button id="btn-modal-rule-gate-edit" class="py-2.5 bg-red-700 hover:bg-red-600 text-white rounded-lg font-bold text-sm">修改设定</button>
+                        <button id="btn-modal-rule-gate-recheck" class="py-2.5 bg-amber-700 hover:bg-amber-600 text-white rounded-lg font-bold text-sm">重新检测</button>
+                        <button id="btn-modal-rule-gate-ignore" class="py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-100 rounded-lg font-bold text-sm">暂时忽略</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="timeline-modal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-50 hidden flex items-center justify-center p-8"><div class="bg-gray-900 border border-indigo-500/50 rounded-2xl p-6 w-full max-w-5xl h-full max-h-[85vh] shadow-2xl flex flex-col relative"><h3 class="text-xl font-bold text-white mb-4 flex items-center flex-shrink-0"><i data-lucide="clock" class="text-indigo-400 mr-2"></i> 上帝视角：绝对时间轴</h3><div class="flex-1 flex space-x-6 overflow-hidden"><div class="w-2/3 overflow-y-auto pr-4 relative"><div class="absolute left-[23px] top-0 bottom-0 w-0.5 bg-gray-800 z-0"></div><div id="timeline-display-list" class="space-y-6 relative z-10 mt-2"></div></div><div class="w-1/3 bg-gray-950 rounded-xl p-5 border border-gray-800 flex flex-col space-y-4"><button id="btn-ai-extract-timeline" class="w-full py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold rounded-lg transition shadow-[0_0_15px_rgba(79,70,229,0.5)] flex justify-center items-center text-sm mb-2"><i data-lucide="sparkles" class="w-4 h-4 mr-2"></i> AI 智能扫描当前章节</button><button id="btn-manual-hook" class="w-full py-2.5 bg-red-900/40 hover:bg-red-600 text-red-300 hover:text-white border border-red-800/50 font-bold rounded-lg transition flex justify-center items-center text-sm"><i data-lucide="anchor" class="w-4 h-4 mr-2"></i> 手动添加伏笔</button><div class="text-xs text-gray-500 leading-relaxed border-t border-gray-800 pt-4">新增叙事事件请在左侧“世界大纲轴”的事件前后点击 + 按钮。</div></div></div><button id="btn-close-timeline" class="absolute top-6 right-6 text-gray-500 hover:text-white"><i data-lucide="x" class="w-6 h-6"></i></button></div></div>
     <div id="relation-modal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-50 hidden flex items-center justify-center p-8"><div class="bg-gray-900 border border-emerald-500/50 rounded-2xl p-6 w-full max-w-6xl h-full max-h-[85vh] shadow-2xl flex flex-col relative"><h3 class="text-xl font-bold text-white mb-4 flex items-center flex-shrink-0"><i data-lucide="network" class="text-emerald-400 mr-2"></i> 宇宙群星纠葛网</h3><div class="flex-1 flex space-x-6 overflow-hidden"><div class="w-3/4 bg-gray-950 rounded-xl border border-gray-800 relative overflow-hidden"><div id="relation-network" class="absolute inset-0 w-full h-full"></div></div><div class="w-1/4 bg-gray-950 rounded-xl p-5 border border-gray-800 flex flex-col space-y-4"><h4 class="text-sm font-bold text-emerald-400 border-b border-gray-800 pb-2">🔗 缔结关系羁绊</h4><select id="rel-from" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-white text-sm"></select><div class="text-center text-gray-600"><i data-lucide="arrow-down" class="w-4 h-4 mx-auto"></i></div><select id="rel-to" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-white text-sm"></select><input type="text" id="rel-label" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-white text-sm" placeholder="关系 (例: 父子)"><button id="btn-save-relation" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition shadow-lg">缔结羁绊</button><div class="mt-4 border-t border-gray-800 pt-4 flex-1 overflow-y-auto"><h4 class="text-xs font-bold text-gray-500 mb-2">已缔结的因果：</h4><ul id="relation-list" class="space-y-2 text-xs"></ul></div></div></div><button id="btn-close-relation" class="absolute top-6 right-6 text-gray-500 hover:text-white"><i data-lucide="x" class="w-6 h-6"></i></button></div></div>
     <div id="asset-modal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-50 hidden flex items-center justify-center"><div class="bg-gray-900 border border-blue-500/50 rounded-2xl p-8 w-full max-w-6xl shadow-2xl relative flex flex-col h-[85vh]"><h3 class="text-xl font-bold text-white mb-6 flex items-center"><i data-lucide="users" class="text-blue-500 mr-2"></i>全局资产控制台</h3><div class="flex-1 flex space-x-6 overflow-hidden"><div class="w-1/4 flex flex-col border-r border-gray-800 pr-4"><div class="flex justify-between items-center mb-4"><span class="text-sm font-bold text-gray-400">人物卡</span></div><ul id="asset-character-list" class="space-y-2 overflow-y-auto flex-1"></ul></div><div class="w-3/4 asset-overview-pane flex flex-col pl-2 overflow-y-auto"></div></div><button id="btn-close-asset-modal" class="absolute top-6 right-6 text-gray-500 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button></div></div>
