@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const GENESIS_CLOUD_TYPE = "上帝沙盒 · 创世圣经";
     const LONGFORM_STATE_KEY = `longform_editor_state_${PROJECT_ID}`;
     const LONGFORM_CLOUD_TYPE = "长篇连载编辑系统";
+    const INTERACTION_STATE_KEY = `interaction_focus_state_${PROJECT_ID}`;
 
     if (!PROJECT_ID) { alert("非法侵入！即将返回大厅。"); window.location.href = 'dashboard.html'; return; }
 
@@ -86,6 +87,166 @@ document.addEventListener('DOMContentLoaded', () => {
             '"': '&quot;',
             "'": '&#39;'
         }[char]));
+    }
+
+    function loadInteractionState() {
+        try {
+            const state = JSON.parse(localStorage.getItem(INTERACTION_STATE_KEY) || '{}');
+            return state && typeof state === 'object' ? state : {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function saveInteractionState(state = {}) {
+        localStorage.setItem(INTERACTION_STATE_KEY, JSON.stringify(state));
+        return state;
+    }
+
+    function getInteractionScope(scope = 'sandbox') {
+        return scope === 'sop' && currentLocalContext.chapterId
+            ? `sop_${currentLocalContext.chapterId}`
+            : 'sandbox';
+    }
+
+    function getScopedInteractionState(scope = 'sandbox') {
+        const all = loadInteractionState();
+        const key = getInteractionScope(scope);
+        return {
+            queue: [],
+            inbox: [],
+            lastUpdated: '',
+            ...(all[key] || {})
+        };
+    }
+
+    function saveScopedInteractionState(scope = 'sandbox', scopedState = {}) {
+        const all = loadInteractionState();
+        const key = getInteractionScope(scope);
+        all[key] = {
+            queue: Array.isArray(scopedState.queue) ? scopedState.queue.slice(0, 24) : [],
+            inbox: Array.isArray(scopedState.inbox) ? scopedState.inbox.slice(0, 30) : [],
+            lastUpdated: new Date().toISOString()
+        };
+        saveInteractionState(all);
+        return all[key];
+    }
+
+    function normalizeQuestionId(id = '') {
+        const match = String(id || '').match(/Q\s*(\d+)/i);
+        return match ? `Q${match[1]}` : '';
+    }
+
+    function extractNumberedQuestions(text = '') {
+        const clean = stripBibleJsonBlocks(stripFencedBlocks(text || ''));
+        const questions = [];
+        const seen = new Set();
+        clean.split('\n').forEach(line => {
+            const trimmed = line.trim().replace(/^[-*]\s*/, '');
+            const match = trimmed.match(/^(Q\s*\d+)[\.、:：\s-]+(.+)/i);
+            if (!match) return;
+            const id = normalizeQuestionId(match[1]);
+            const question = match[2].trim();
+            if (/已回答|已吸收|已解决|部分回答|冲突|不再追问/.test(question)) return;
+            if (!id || !question || seen.has(id)) return;
+            seen.add(id);
+            questions.push({ id, question });
+        });
+        return questions;
+    }
+
+    function extractStatusQuestionIds(text = '', statusPattern) {
+        const ids = new Set();
+        const clean = stripBibleJsonBlocks(stripFencedBlocks(text || ''));
+        clean.split('\n').forEach(line => {
+            const id = normalizeQuestionId(line);
+            if (id && statusPattern.test(line)) ids.add(id);
+        });
+        return ids;
+    }
+
+    function extractInboxSettings(text = '') {
+        const clean = stripBibleJsonBlocks(stripFencedBlocks(text || ''));
+        const settings = [];
+        const seen = new Set();
+        clean.split('\n').forEach(line => {
+            const trimmed = line.trim().replace(/^[-*]\s*/, '');
+            const match = trimmed.match(/^(S\s*\d+)[\.、:：\s-]+(.+)/i);
+            if (!match) return;
+            const id = match[1].replace(/\s+/g, '').toUpperCase();
+            const content = match[2].trim();
+            if (!content || seen.has(`${id}:${content}`)) return;
+            seen.add(`${id}:${content}`);
+            const destinationMatch = content.match(/建议写入[：:]\s*([^；。\n]+)/);
+            settings.push({
+                id,
+                content,
+                destination: destinationMatch ? destinationMatch[1].trim() : '',
+                status: /暂存/.test(content) ? '暂存' : '待确认'
+            });
+        });
+        return settings;
+    }
+
+    function mergeInteractionStateFromReply(scope = 'sandbox', reply = '') {
+        const state = getScopedInteractionState(scope);
+        const queue = Array.isArray(state.queue) ? [...state.queue] : [];
+        const inbox = Array.isArray(state.inbox) ? [...state.inbox] : [];
+        const answered = extractStatusQuestionIds(reply, /已回答|已吸收|已解决|覆盖|不再追问/);
+        const partial = extractStatusQuestionIds(reply, /部分回答|待补充|不完整|还缺/);
+        const conflict = extractStatusQuestionIds(reply, /冲突|矛盾|不一致/);
+
+        queue.forEach(item => {
+            if (answered.has(item.id)) item.status = 'answered';
+            if (partial.has(item.id)) item.status = 'partial';
+            if (conflict.has(item.id)) item.status = 'conflict';
+        });
+
+        extractNumberedQuestions(reply).forEach(item => {
+            const existing = queue.find(q => q.id === item.id);
+            if (existing) {
+                existing.question = item.question;
+                if (!existing.status || existing.status === 'answered') existing.status = 'pending';
+            } else {
+                queue.push({ ...item, status: 'pending' });
+            }
+        });
+
+        extractInboxSettings(reply).forEach(item => {
+            const exists = inbox.some(existing => normalizeStableKey(existing.content) === normalizeStableKey(item.content));
+            if (!exists) inbox.unshift(item);
+        });
+
+        return saveScopedInteractionState(scope, { queue, inbox });
+    }
+
+    function buildInteractionFocusPrompt(scope = 'sandbox', userText = '') {
+        const state = getScopedInteractionState(scope);
+        const pending = (state.queue || []).filter(item => !['answered', 'skipped'].includes(item.status));
+        const inbox = (state.inbox || []).filter(item => item.status === '待确认' || item.status === '暂存');
+        const queueText = pending.length
+            ? pending.slice(0, 10).map(item => `${item.id}【${item.status || 'pending'}】${item.question}`).join('\n')
+            : '暂无未解决问题。';
+        const inboxText = inbox.length
+            ? inbox.slice(0, 10).map(item => `${item.id}【${item.status}】${item.content}${item.destination ? ` -> ${item.destination}` : ''}`).join('\n')
+            : '暂无待处理新增设定。';
+        return `\n\n【问题队列与设定收件箱协议】\n当前未解决问题：\n${queueText}\n\n当前设定收件箱：\n${inboxText}\n\n用户本轮原文：\n${limitText(userText, 1600)}\n\n请先判断用户本轮是否回答了当前问题、后续问题或没有被问到但重要的新设定。规则：\n1. 所有问题必须编号为 Q1、Q2、Q3...；界面会默认只显示当前优先问题，但不能删掉其他问题。\n2. 如果用户一段话已经回答了后续问题，必须在【已吸收】中写明“Qx 已回答：摘要”，后续不要重复问。\n3. 如果用户提供了 AI 没问但重要的设定，必须在【新增重要设定】中写成 S1、S2...，并标注建议写入：人物卡/人物规则/事件/规则/上帝视角/伏笔/暂存。\n4. 如果新增设定影响人物卡、事件、规则或后续时间线，必须在【监督提醒】里说明影响；有冲突时给 A/B/C 处理选项。\n5. 【下一步选择】里只放仍未解决的问题，并把当前最该回答的问题放第一位。`;
+    }
+
+    function renderInteractionQueueHtml(scope = 'sandbox') {
+        const state = getScopedInteractionState(scope);
+        const active = (state.queue || []).filter(item => !['answered', 'skipped'].includes(item.status));
+        const inbox = (state.inbox || []).filter(item => ['待确认', '暂存'].includes(item.status)).slice(0, 5);
+        if (active.length === 0 && inbox.length === 0) return '';
+        const current = active[0];
+        const later = active.slice(1, 8);
+        return `
+            <div class="mt-3 border border-cyan-900/50 bg-cyan-950/20 rounded-xl p-3 text-xs text-cyan-100 space-y-2">
+                ${current ? `<div><span class="text-[10px] text-cyan-400 font-bold">当前要回答</span><div class="mt-1 font-bold">${escapeHtml(current.id)}：${escapeHtml(current.question)}</div></div>` : ''}
+                ${later.length ? `<details class="text-cyan-200/90"><summary class="cursor-pointer hover:text-white">后续问题 ${later.length} 个</summary><div class="mt-2 space-y-1">${later.map(item => `<div>${escapeHtml(item.id)}：${escapeHtml(item.question)}</div>`).join('')}</div></details>` : ''}
+                ${inbox.length ? `<details class="text-amber-200/90"><summary class="cursor-pointer hover:text-white">设定收件箱 ${inbox.length} 条</summary><div class="mt-2 space-y-1">${inbox.map(item => `<div>${escapeHtml(item.id)}：${escapeHtml(item.content)}</div>`).join('')}</div></details>` : ''}
+            </div>
+        `;
     }
 
     function buildGenesisChatPayload() {
@@ -3022,6 +3183,7 @@ ${getRulesTextForPrompt()}`;
             contentHtml = `
                 <div class="text-[10px] uppercase tracking-wide text-violet-300/80 font-bold mb-2">需要你关注</div>
                 <div class="bg-gray-950/60 border border-violet-800/50 rounded-xl p-3 text-violet-50">${escapeHtml(parts.focus || text)}</div>
+                ${(typeof index !== 'number' || index === genesisConversation.length - 1) ? renderInteractionQueueHtml('sandbox') : ''}
                 ${hasDetails ? `
                     <button type="button" onclick="toggleSandboxMessageDetails(this)" class="mt-3 inline-flex items-center text-xs text-gray-300 hover:text-white bg-gray-900 border border-gray-700 hover:border-violet-600 rounded-lg px-3 py-1.5">
                         <i data-lucide="chevron-down" class="w-3.5 h-3.5 mr-1"></i>展开完整推演
@@ -3061,6 +3223,7 @@ ${getRulesTextForPrompt()}`;
                 let aiReplyText = data.reply;
                 const conversationForExtraction = [...genesisConversation, { role: 'assistant', content: aiReplyText }];
                 syncPanelFromReplyInBackground(aiReplyText, conversationForExtraction);
+                mergeInteractionStateFromReply('sandbox', aiReplyText);
                 const newIndex = genesisConversation.length;
                 genesisConversation.push({ role: 'assistant', content: aiReplyText || '已更新设定数据。' });
                 if(aiReplyText.length > 0) appendMessage('assistant', aiReplyText, newIndex);
@@ -3089,6 +3252,7 @@ ${getRulesTextForPrompt()}`;
             chatInput.value = '';
             const userMsgWithContext = text
                 + `\n\n(系统附加：当前沙盒模块是【${getActiveSandboxModuleLabel()}】，当前权限模式是【${getCurrentControlMode()}】。流程骨架、事件、人物、规则、上帝视角模块互相影响；规则/世界观/专家资料拥有最高权限。右侧数据面板已由用户实时更新，优先级高于旧聊天记录和你之前提出的方案。沙盒主流程必须遵守：类型 -> 起终点 -> 主角/最终反派 -> 双弧线 -> 好莱坞六节点 -> 桥接事件 -> 沙盒验收；沙盒只做故事骨架，不做章节细化或正文。若旧设定与面板冲突，必须废弃旧设定，以面板为准继续推演。若当前输入新增人物，请将其绑定到相关事件，并提醒参与少于三个事件的人物需要后续复用或合并。人物相关专家设定必须沉淀到人物卡的【人物规则】。未揭露/部分揭露的上帝视角秘密只用于后台校验，沙盒推理只能基于观众视角推进；已揭露后才可公开调用上帝视角。沙盒回复禁止写正文式情节段落；第一段必须是【当前任务】，写清阶段、本轮只处理什么、你需要我决定什么。随后用【缺口诊断】【事件连接】【人物/关系影响】【规则或降智风险】【下一步选择】输出；长分析放进【可展开：推演依据】，完整保留关键因果、人物动机、关系变化、不可逆后果和待确认项。)`
+                + buildInteractionFocusPrompt('sandbox', text)
                 + getExpertKeywordHint(text);
             const newIndex = genesisConversation.length;
             genesisConversation.push({ role: 'user', content: userMsgWithContext });
@@ -3727,7 +3891,7 @@ if (data.success) {
         if (targetLi) { targetLi.querySelector('div')?.click(); } else { alert(`大纲中未找到事件 ${chapNum}`); }
     };
 
-    function appendChapMsg(role, text) {
+    function appendChapMsg(role, text, index) {
         if(!chapHistoryDiv) return;
         const msgDiv = document.createElement('div');
         msgDiv.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
@@ -3741,6 +3905,7 @@ if (data.success) {
             contentHtml = `
                 <div class="text-[10px] uppercase tracking-wide text-purple-300/80 font-bold mb-2">当前任务</div>
                 <div class="bg-gray-950/60 border border-purple-800/50 rounded-lg p-2.5 text-purple-50">${escapeHtml(parts.focus || text)}</div>
+                ${(typeof index !== 'number' || index === currentChapterChatHistory.length - 1) ? renderInteractionQueueHtml('sop') : ''}
                 ${hasDetails ? `
                     <button type="button" onclick="toggleSopMessageDetails(this)" class="mt-2 inline-flex items-center text-[11px] text-gray-300 hover:text-white bg-gray-900 border border-gray-700 hover:border-purple-600 rounded-lg px-2.5 py-1.5">
                         <i data-lucide="chevron-down" class="w-3.5 h-3.5 mr-1"></i>展开更多信息
@@ -3824,7 +3989,7 @@ if (data.success) {
                         currentChapterChatHistory = [{ role: 'assistant', content: aiGreeting }];
                         localStorage.setItem(localSopKey, JSON.stringify(currentChapterChatHistory));
                     }
-                    if (chapHistoryDiv) { chapHistoryDiv.innerHTML = ''; currentChapterChatHistory.forEach(msg => appendChapMsg(msg.role, msg.content)); }
+                    if (chapHistoryDiv) { chapHistoryDiv.innerHTML = ''; currentChapterChatHistory.forEach((msg, idx) => appendChapMsg(msg.role, msg.content, idx)); }
                 } else {
                     currentChapterChatHistory = [{ role: 'assistant', content: aiGreeting }];
                     if (chapHistoryDiv) { chapHistoryDiv.innerHTML = ''; appendChapMsg('assistant', aiGreeting); }
@@ -5004,13 +5169,14 @@ if (data.success) {
 【监督提醒】
 【下一步选择】
 【可展开：完整推演依据】
-其中【当前任务】和【下一步选择】必须默认可读；长分析、蓝图校验、专家审查细节放入【可展开：完整推演依据】。`;
+其中【当前任务】和【下一步选择】必须默认可读；长分析、蓝图校验、专家审查细节放入【可展开：完整推演依据】。
+15. 提问必须编号为 Q1、Q2、Q3...。如果作者一口气回答了多个问题，先在【已吸收】列出“Qx 已回答/部分回答/冲突：摘要”，后续不要重复问已回答问题。作者额外提出的重要设定要写入【新增重要设定】，编号为 S1、S2...，并建议写入人物卡/人物规则/事件/规则/上帝视角/伏笔/暂存。`;
 
                 // 3. 把私货、工作流、防 OOC 指令、伏笔全塞进最后一句话里发给 AI！
                 let lastUserMsg = payloadConvo[payloadConvo.length - 1];
                 if (lastUserMsg && lastUserMsg.role === 'user') {
                     // 如果有必须要回收的伏笔 (hookAlert)，它会变成红字警告随同发送！
-                    lastUserMsg.content += `\n\n${hiddenWorkflow}` + (currentLocalContext.hookAlert || "") + `\n\n[统一监督指令]：请严格遵循规则/专家资料、救猫咪类型、人物档案、上帝视角信息权限和长篇编辑状态推演，严禁专业乱写、逻辑跳步、人物降智、OOC或提前泄露真相。\n【救猫咪类型监督】：\n${getSaveTheCatGenreGuide(getCurrentStoryGenre())}\n【统一规则/专家资料】：\n${worldRules}\n【人物卡】：\n${characterDetails}\n【上帝视角信息权限】：\n${godViewContext}\n【长篇编辑状态】：\n${getLongformEditorialContext()}`;
+                    lastUserMsg.content += `\n\n${hiddenWorkflow}` + (currentLocalContext.hookAlert || "") + buildInteractionFocusPrompt('sop', text) + `\n\n[统一监督指令]：请严格遵循规则/专家资料、救猫咪类型、人物档案、上帝视角信息权限和长篇编辑状态推演，严禁专业乱写、逻辑跳步、人物降智、OOC或提前泄露真相。\n【救猫咪类型监督】：\n${getSaveTheCatGenreGuide(getCurrentStoryGenre())}\n【统一规则/专家资料】：\n${worldRules}\n【人物卡】：\n${characterDetails}\n【上帝视角信息权限】：\n${godViewContext}\n【长篇编辑状态】：\n${getLongformEditorialContext()}`;
                 }
 
                 // 4. 发送给主脑
@@ -5023,6 +5189,7 @@ if (data.success) {
                 if (loader) loader.remove();
                 if (data.success) {
                     const cleanedReply = stripFencedBlocks(data.reply) || data.reply;
+                    mergeInteractionStateFromReply('sop', cleanedReply);
                     currentChapterChatHistory.push({ role: 'assistant', content: cleanedReply });
                     appendChapMsg('assistant', cleanedReply);
                     localStorage.setItem(`sop_v3_${PROJECT_ID}_${currentLocalContext.chapterId}`, JSON.stringify(currentChapterChatHistory));
