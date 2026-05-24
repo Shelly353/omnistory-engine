@@ -199,21 +199,47 @@ router.post('/preview', async (req, res) => {
         // 这里直接将前端拼好的会话扔给大模型
         const userContent = "【对话记录】：\n" + conversation.map(msg => `${msg.role}: ${msg.content}`).join('\n') + "\n\n请严格按照要求输出包含所有章节和设定的完整JSON：";
 
-        const dsResponse = await fetch('https://api.deepseek.com/chat/completions', {
+        const requestBody = {
+            model: "deepseek-v4-flash",
+            // 提示词已由前端 prompts.js 在对话开头注入，这里只需极简系统音
+            messages: [{ role: "system", content: "你是一个严格的JSON提取器。请提取对话中的设定，必须包含 genre、worldview、rules、workflow、protagonist_arc、antagonist_arc、hollywood_beats、characters、relations、timeline、narrative_logic、secrets、chapters；workflow 包含 control_mode、stage、status、notes；protagonist_arc 与 antagonist_arc 包含 want、need、lie、fear、start、end、turning_points；hollywood_beats 必须包含 opening、first_turn、midpoint_false_victory、opposition_rises、dark_night、finale 六项，每项包含 beat、title、event_ref、status、content、function。narrative_logic 需要包含 mode、description、presentation_order。事件、人物、规则/专家、上帝视角四个模块互相影响；规则/世界观/专家资料权限最高。不符合规则、专业流程或人物逻辑的事件，要把警报和整改约束写入 rules。沙盒职责是建立好莱坞六节点骨架、桥接事件、时间线、观众/上帝视角和人物卡，不负责章节细化和正文。人物应尽量绑定到具体 timeline/chapters；参与事件少于三个的人物，要在人物简介或弧光中保留后续复用提示，避免一次性人物。与人物有关的疾病、职业权限、身份限制、能力代价、心理触发点必须写入对应 characters[].character_rules；全局专家资料写入 rules。观众不知道但作者必须知道的真实情况、真正坏人、真实动机、隐藏误导写入 secrets；secrets 每项包含 title、status(hidden/partial/revealed)、audience_view、god_view、reveal_event、related_characters、related_events。未揭露或部分揭露时，角色/观众只能基于 audience_view 推理，god_view 只用于后台因果校验，不能提前泄露。用户修正记录的优先级高于 AI 早期方案；凡是用户说“不是、不对、改成、不要、应该、必须、设定为”的内容，都视为最新事实。当前面板数据中的 workflow、protagonist_arc、antagonist_arc、hollywood_beats、characters 详细字段、character_rules、relations 人物羁绊、timeline 细密时间轴、secrets 上帝视角信息是稳定资产；除非最近对话明确要求删除某一项，否则必须完整保留，不允许用摘要版、空数组或字段缺失版覆盖。如果当前面板的 relations 或 timeline 为空，必须从全量用户修正记录和沙盒对话尾迹中重建，不允许留空。律师、医生、警察、金融、政治、文化、种族、技能、历史、古代、朝代、官职、科举、礼法、战争等专业关键词对应的专家资料也按上述规则归档。历史专家为后台内置能力：遇到历史剧/古代背景时，必须检查朝代、年代、官职称谓、礼法礼仪、服饰器物、交通通讯、军队调动、审案/科举/婚嫁/朝会流程，以及现代价值观误套问题；史实不确定时必须标注不确定，不能编成确定事实。" }, { role: "user", content: userContent }],
+            temperature: 0.1,
+            response_format: { type: "json_object" }
+        };
+        let dsResponse = await fetch('https://api.deepseek.com/chat/completions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}` },
-            body: JSON.stringify({
-                model: "deepseek-v4-flash",
-                // 提示词已由前端 prompts.js 在对话开头注入，这里只需极简系统音
-                messages: [{ role: "system", content: "你是一个严格的JSON提取器。请提取对话中的设定，必须包含 genre、worldview、rules、workflow、protagonist_arc、antagonist_arc、hollywood_beats、characters、relations、timeline、narrative_logic、secrets、chapters；workflow 包含 control_mode、stage、status、notes；protagonist_arc 与 antagonist_arc 包含 want、need、lie、fear、start、end、turning_points；hollywood_beats 必须包含 opening、first_turn、midpoint_false_victory、opposition_rises、dark_night、finale 六项，每项包含 beat、title、event_ref、status、content、function。narrative_logic 需要包含 mode、description、presentation_order。事件、人物、规则/专家、上帝视角四个模块互相影响；规则/世界观/专家资料权限最高。不符合规则、专业流程或人物逻辑的事件，要把警报和整改约束写入 rules。沙盒职责是建立好莱坞六节点骨架、桥接事件、时间线、观众/上帝视角和人物卡，不负责章节细化和正文。人物应尽量绑定到具体 timeline/chapters；参与事件少于三个的人物，要在人物简介或弧光中保留后续复用提示，避免一次性人物。与人物有关的疾病、职业权限、身份限制、能力代价、心理触发点必须写入对应 characters[].character_rules；全局专家资料写入 rules。观众不知道但作者必须知道的真实情况、真正坏人、真实动机、隐藏误导写入 secrets；secrets 每项包含 title、status(hidden/partial/revealed)、audience_view、god_view、reveal_event、related_characters、related_events。未揭露或部分揭露时，角色/观众只能基于 audience_view 推理，god_view 只用于后台因果校验，不能提前泄露。用户修正记录的优先级高于 AI 早期方案；凡是用户说“不是、不对、改成、不要、应该、必须、设定为”的内容，都视为最新事实。当前面板数据中的 workflow、protagonist_arc、antagonist_arc、hollywood_beats、characters 详细字段、character_rules、relations 人物羁绊、timeline 细密时间轴、secrets 上帝视角信息是稳定资产；除非最近对话明确要求删除某一项，否则必须完整保留，不允许用摘要版、空数组或字段缺失版覆盖。如果当前面板的 relations 或 timeline 为空，必须从全量用户修正记录和沙盒对话尾迹中重建，不允许留空。律师、医生、警察、金融、政治、文化、种族、技能、历史、古代、朝代、官职、科举、礼法、战争等专业关键词对应的专家资料也按上述规则归档。历史专家为后台内置能力：遇到历史剧/古代背景时，必须检查朝代、年代、官职称谓、礼法礼仪、服饰器物、交通通讯、军队调动、审案/科举/婚嫁/朝会流程，以及现代价值观误套问题；史实不确定时必须标注不确定，不能编成确定事实。" }, { role: "user", content: userContent }],
-                temperature: 0.1 
-            })
+            body: JSON.stringify(requestBody)
         });
 
-        const result = await dsResponse.json();
+        let rawResult = await dsResponse.text();
+        if (!dsResponse.ok && /response_format|json_object/i.test(rawResult || '')) {
+            delete requestBody.response_format;
+            dsResponse = await fetch('https://api.deepseek.com/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}` },
+                body: JSON.stringify(requestBody)
+            });
+            rawResult = await dsResponse.text();
+        }
+        if (!dsResponse.ok) {
+            let message = rawResult;
+            try {
+                message = JSON.parse(rawResult)?.error?.message || rawResult;
+            } catch (e) {}
+            throw new Error(`DeepSeek 提取接口 ${dsResponse.status}: ${String(message || '').slice(0, 500)}`);
+        }
+
+        let result;
+        try {
+            result = JSON.parse(rawResult);
+        } catch (e) {
+            throw new Error(`DeepSeek 提取接口返回非 JSON：${rawResult.slice(0, 500)}`);
+        }
         if (result.error) throw new Error(result.error.message);
 
-        let jsonStr = result.choices[0].message.content.trim();
+        let jsonStr = result.choices?.[0]?.message?.content?.trim();
+        if (!jsonStr) throw new Error('DeepSeek 提取接口没有返回可解析内容。');
         const fencedMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
         if (fencedMatch) {
             jsonStr = fencedMatch[1].trim();
