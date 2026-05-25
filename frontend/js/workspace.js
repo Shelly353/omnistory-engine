@@ -2814,8 +2814,35 @@ ${limitText(eventDescriptions || '暂无事件描述', 5000)}
         return !!(normalized.want && normalized.need && normalized.fear && normalized.start && normalized.end);
     }
 
+    function hasCharacterArcText(character = {}) {
+        return /(弧线|成长|开始|结束|转折|变化|误判|目标|恐惧|需求|代价)/.test(`${character.character_arc || ''} ${character.background || ''} ${character.description || ''}`);
+    }
+
     function isHollywoodBeatFilled(beat = {}) {
         return !!(String(beat.title || '').trim() && String(beat.content || '').trim() && String(beat.function || '').trim());
+    }
+
+    function getSandboxStructureText(bible = {}) {
+        return [
+            bible.genre,
+            bible.worldview,
+            bible.rules,
+            JSON.stringify(bible.protagonist_arc || {}),
+            JSON.stringify(bible.antagonist_arc || {}),
+            ...(bible.hollywood_beats || []).map(beat => `${getHollywoodBeatLabel(beat.beat || beat.key)} ${beat.title || ''} ${beat.event_ref || ''} ${beat.content || ''} ${beat.function || ''}`),
+            ...(bible.characters || []).map(char => `${char.name || ''} ${char.role || ''} ${char.faction || ''} ${char.description || ''} ${char.personality || ''} ${char.core_desire || ''} ${char.goal || ''} ${char.motivation || ''} ${char.flaw || ''} ${char.fear || ''} ${char.skills || ''} ${char.character_rules || ''} ${char.background || ''} ${char.character_arc || ''}`),
+            ...(bible.timeline || []).map(item => `${item.time_label || ''} ${item.chapter_number || ''} ${item.description || ''}`),
+            ...(bible.chapters || []).map(item => `${item.chapter_number || ''} ${item.title || ''} ${item.content || ''}`),
+            JSON.stringify(bible.narrative_logic || {}),
+            JSON.stringify(bible.secrets || [])
+        ].filter(Boolean).join('\n');
+    }
+
+    function textHasEventAnchor(text = '', type = 'opening') {
+        const source = String(text || '');
+        return type === 'finale'
+            ? /(结束事件|终局事件|结局|最终事件|最后|收束|终点|终章|高潮|大结局|finale)/i.test(source)
+            : /(开始事件|开场|开端|起点|旧秩序|打破|诱因|opening)/i.test(source);
     }
 
     function getOpeningBeat(bible = {}) {
@@ -2829,16 +2856,39 @@ ${limitText(eventDescriptions || '暂无事件描述', 5000)}
     function hasStartEndAnchors(bible = {}) {
         const opening = getOpeningBeat(bible);
         const finale = getFinaleBeat(bible);
-        const hasOpening = isHollywoodBeatFilled(opening) || !!String(opening.title || opening.content || '').trim();
-        const hasFinale = isHollywoodBeatFilled(finale) || !!String(finale.title || finale.content || '').trim();
+        const sortedChapters = (bible.chapters || []).filter(ch => String(ch.title || ch.content || '').trim())
+            .sort((a, b) => (parseFloat(a.chapter_number) || 0) - (parseFloat(b.chapter_number) || 0));
+        const sortedTimeline = (bible.timeline || []).filter(item => String(item.description || '').trim())
+            .sort((a, b) => (parseFloat(a.chapter_number) || 0) - (parseFloat(b.chapter_number) || 0));
+        const structureText = getSandboxStructureText(bible);
+        const firstEventText = [
+            opening.title,
+            opening.content,
+            sortedChapters[0]?.title,
+            sortedChapters[0]?.content,
+            sortedTimeline[0]?.description
+        ].filter(Boolean).join('\n');
+        const lastEventText = [
+            finale.title,
+            finale.content,
+            sortedChapters[sortedChapters.length - 1]?.title,
+            sortedChapters[sortedChapters.length - 1]?.content,
+            sortedTimeline[sortedTimeline.length - 1]?.description
+        ].filter(Boolean).join('\n');
+        const hasOpening = isHollywoodBeatFilled(opening)
+            || !!String(opening.title || opening.content || '').trim()
+            || textHasEventAnchor(firstEventText || structureText, 'opening');
+        const hasFinale = isHollywoodBeatFilled(finale)
+            || !!String(finale.title || finale.content || '').trim()
+            || textHasEventAnchor(lastEventText || structureText, 'finale');
         return { hasOpening, hasFinale, opening, finale };
     }
 
     function findLeadCharacter(bible = {}, type = 'protagonist') {
         const chars = Array.isArray(bible.characters) ? bible.characters : [];
         const pattern = type === 'antagonist'
-            ? /反派|对手|敌人|核心阻力|最终阻力|antagonist/i
-            : /主角|主人公|男主|女主|protagonist/i;
+            ? /反派|对手|敌人|敌方|核心阻力|最终阻力|幕后|真凶|凶手|恶人|boss|antagonist/i
+            : /主角|主人公|男主|女主|主视角|核心人物|protagonist/i;
         return chars.find(c => !isPlaceholderCharacterName(c.name) && pattern.test(`${c.role || ''} ${c.description || ''} ${c.name || ''}`));
     }
 
@@ -2853,14 +2903,15 @@ ${limitText(eventDescriptions || '暂无事件描述', 5000)}
         if (!character) return false;
         const desire = character.core_desire || character.goal || character.motivation;
         const limit = character.character_rules || character.skills;
+        const combined = `${character.description || ''} ${character.background || ''} ${character.character_arc || ''} ${character.character_rules || ''}`;
         return !!(
             !isPlaceholderCharacterName(character.name)
             && String(character.role || '').trim()
-            && String(character.personality || '').trim()
-            && String(desire || '').trim()
-            && String(character.flaw || '').trim()
-            && String(character.fear || '').trim()
-            && String(limit || '').trim()
+            && (String(character.personality || '').trim() || /性格|MBTI|冷静|冲动|谨慎|偏执|外向|内向|理性|感性/.test(combined))
+            && (String(desire || '').trim() || /欲望|目标|动机|想要|追求|必须|为了/.test(combined))
+            && (String(character.flaw || '').trim() || /缺陷|弱点|盲点|错误|执念/.test(combined))
+            && (String(character.fear || '').trim() || /恐惧|害怕|软肋|不敢|畏惧/.test(combined))
+            && (String(limit || '').trim() || /限制|代价|不能|禁忌|弱点|规则|能力/.test(combined))
         );
     }
 
@@ -2882,7 +2933,15 @@ ${limitText(eventDescriptions || '暂无事件描述', 5000)}
 
     function hasNarrativeLogic(bible = {}) {
         const logic = bible.narrative_logic || {};
-        return !!(String(logic.mode || '').trim() && String(logic.description || '').trim());
+        const text = getSandboxStructureText(bible);
+        return !!(String(logic.mode || '').trim() && String(logic.description || '').trim())
+            || /(顺叙|倒叙|双线|多视角|框架叙事|非线性|读者阅读顺序|叙事顺序|presentation_order)/.test(text);
+    }
+
+    function hasSixBeatStructure(bible = {}, filledBeats = []) {
+        if (filledBeats.length >= 6) return true;
+        const text = getSandboxStructureText(bible);
+        return ['开始事件', '第一转折', '中点', '虚假胜利', '反派逼近', '至暗', '终局'].every(label => text.includes(label));
     }
 
     function getSandboxCompletionReport(bible = getCurrentBibleSnapshot()) {
@@ -3124,6 +3183,9 @@ ${active.chat.map(msg => `${msg.role}: ${msg.content}`).join('\n')}
         const anchors = hasStartEndAnchors(target);
         const leads = hasLeadCharacters(target);
         const basicCards = getBasicCharacterCardStatus(target);
+        const protagonistArcReady = hasArcCore(target.protagonist_arc) || hasCharacterArcText(leads.protagonist);
+        const antagonistArcReady = hasArcCore(target.antagonist_arc) || hasCharacterArcText(leads.antagonist);
+        const sixBeatsReady = hasSixBeatStructure(target, filledBeats);
         let stage = 'sandbox_acceptance';
         let focus = '沙盒骨架已基本完成，可以进入沙盒验收。';
         let forbid = '';
@@ -3148,25 +3210,20 @@ ${active.chat.map(msg => `${msg.role}: ${msg.content}`).join('\n')}
             focus = `先补全六节点前的基础行为决策卡。缺失：${[!basicCards.protagonistReady ? '主角基础卡' : '', !basicCards.antagonistReady ? '反派/核心阻力基础卡' : ''].filter(Boolean).join('、')}。基础卡至少要有人物定位、性格/MBTI、欲望/目标/动机、缺陷、恐惧、能力限制或人物规则。`;
             forbid = '禁止进入六节点细化、桥接事件或章节细节；下一轮只能补人物行为决策依据。';
             issues.push(focus);
-        } else if (!hasArcCore(target.protagonist_arc)) {
+        } else if (!protagonistArcReady) {
             stage = 'arcs';
             focus = '先补全主角人物弧线：外在目标、内在需求、恐惧、开始状态、结束状态。';
             forbid = '禁止进入六节点细化、桥接事件或场景细节。';
             issues.push('主角弧线核心字段未完成。');
-        } else if (!hasArcCore(target.antagonist_arc)) {
+        } else if (!antagonistArcReady) {
             stage = 'arcs';
             focus = '先补全最终反派/核心阻力弧线：目标、优势、恐惧/误判、开始状态、结束状态。';
             forbid = '禁止进入六节点细化、桥接事件或场景细节。';
             issues.push('反派/核心阻力弧线核心字段未完成。');
-        } else if (filledBeats.length < 6) {
+        } else if (!sixBeatsReady) {
             stage = 'six_beats';
             focus = `必须先确定好莱坞六节点，当前完成 ${filledBeats.length}/6，缺失：${missingBeats.join('、') || '未识别'}。`;
             forbid = '禁止追问桥接事件、章节细节、场景细节、人物小动作、具体执行过程；下一轮问题只能围绕缺失六节点。';
-            issues.push(focus);
-        } else if (unapprovedBeats.length > 0) {
-            stage = 'six_beats_review';
-            focus = `六节点已有草案但未全部确认，待确认/修复：${unapprovedBeats.join('、')}。`;
-            forbid = '禁止进入桥接事件和细节追问；下一轮只能让作者确认、修改或批准六节点。';
             issues.push(focus);
         } else if (!hasBridgeEvents(target)) {
             stage = 'bridges';
