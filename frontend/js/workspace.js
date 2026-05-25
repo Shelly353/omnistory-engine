@@ -4810,19 +4810,33 @@ ${JSON.stringify(chapterPipelineState.event_nodes || [], null, 2)}
     }
 
     function buildChapterCutsPrompt() {
+        const currentNodes = getCurrentEventNodes();
+        const currentNodeIds = currentNodes.map(node => node.node_id).filter(Boolean);
+        const relevantTracks = normalizePipelineArray(chapterPipelineState.character_state_tracks).map(track => ({
+            ...track,
+            states: normalizePipelineArray(track.states).filter(state => currentNodeIds.includes(state.node_id))
+        })).filter(track => track.states.length);
         return `${buildPipelineCanonPrompt()}
 
-【event_nodes】
-${JSON.stringify(chapterPipelineState.event_nodes || [], null, 2)}
+【当前操作范围】
+只切分当前事件 ${currentLocalContext.chapterNumber || ''}《${currentLocalContext.title || ''}》。
+不得引用下面列表之外的 node_id。
 
-【character_state_tracks】
-${JSON.stringify(chapterPipelineState.character_state_tracks || [], null, 2)}
+【允许引用的 node_id】
+${currentNodeIds.join(', ') || '暂无'}
+
+【当前事件 event_nodes】
+${JSON.stringify(currentNodes, null, 2)}
+
+【当前事件 character_state_tracks】
+${JSON.stringify(relevantTracks, null, 2)}
 
 请从 event_nodes 切分章节。规则：
 1. 一章默认包含 2-5 个节点；高潮章 1-3 个高密度节点；过渡/反应章 3-6 个低压节点。
 2. 每章必须有 opening_state、chapter_goal、core_obstacle、info_or_relationship_change、ending_hook、next_trigger。
 3. 不能跨越重大真相揭露边界、人物弧线阶段边界、六节点关键转折边界、时间线不可逆事件边界、观众/上帝视角权限边界。
-4. 只输出 JSON。
+4. node_ids 只能从【允许引用的 node_id】中选择，禁止编造不存在的节点。
+5. 只输出 JSON。
 
 输出格式：
 {
@@ -4849,14 +4863,52 @@ ${JSON.stringify(chapterPipelineState.character_state_tracks || [], null, 2)}
         if (!chapterPipelineState.event_nodes?.length) return alert('请先生成细化事件链。');
         if (!chapterPipelineState.character_state_tracks?.length) await generateCharacterStateTracks();
         const parsed = await requestPipelineJson(buildChapterCutsPrompt(), value => Array.isArray(value.chapter_cuts));
-        chapterPipelineState.chapter_cuts = parsed.chapter_cuts || [];
+        chapterPipelineState.chapter_cuts = normalizeChapterCutsForCurrentEvent(parsed.chapter_cuts || []);
         setPipelineStatus('章节切分待检测', `已完成章节切分：${chapterPipelineState.chapter_cuts.length} 章，请先检测章节切分。`);
+    }
+
+    function normalizeChapterCutsForCurrentEvent(cuts = []) {
+        const currentNodes = getCurrentEventNodes();
+        const validNodeIds = new Set(currentNodes.map(node => String(node.node_id || '')).filter(Boolean));
+        const currentChapterNumber = Number(currentLocalContext.chapterNumber || 0);
+        const currentKey = getCurrentChapterPipelineKey();
+        const normalized = normalizePipelineArray(cuts).map((cut, index) => {
+            const filteredNodeIds = normalizePipelineArray(cut.node_ids).map(String).filter(id => validNodeIds.has(id));
+            const fallbackNodeIds = filteredNodeIds.length
+                ? filteredNodeIds
+                : currentNodes.map(node => String(node.node_id || '')).filter(Boolean);
+            return {
+                ...cut,
+                chapter_id: currentKey,
+                chapter_number: currentChapterNumber || cut.chapter_number || index + 1,
+                title: cut.title || currentLocalContext.title || `事件 ${currentChapterNumber}`,
+                node_ids: fallbackNodeIds
+            };
+        });
+        if (normalized.length) return normalized;
+        return [{
+            chapter_id: currentKey,
+            chapter_number: currentChapterNumber || 1,
+            title: currentLocalContext.title || `事件 ${currentChapterNumber || 1}`,
+            node_ids: currentNodes.map(node => String(node.node_id || '')).filter(Boolean),
+            opening_state: '',
+            chapter_goal: '',
+            core_obstacle: '',
+            info_or_relationship_change: '',
+            ending_state: '',
+            ending_hook: '',
+            next_trigger: '',
+            pacing_type: '推进'
+        }];
     }
 
     function getChapterCutsLocalIssues(cuts = chapterPipelineState.chapter_cuts) {
         const issues = [];
-        const list = normalizePipelineArray(cuts);
-        const nodeIds = new Set(normalizePipelineArray(chapterPipelineState.event_nodes).map(node => String(node.node_id || '')));
+        const list = normalizePipelineArray(cuts).filter(cut =>
+            String(cut.chapter_id || '') === getCurrentChapterPipelineKey()
+            || Number(cut.chapter_number || 0) === Number(currentLocalContext.chapterNumber || 0)
+        );
+        const nodeIds = new Set(getCurrentEventNodes().map(node => String(node.node_id || '')));
         if (list.length === 0) issues.push('没有生成章节切分。');
         list.forEach(cut => {
             const label = `章节 ${cut.chapter_number || '-'}《${cut.title || ''}》`;
@@ -4879,11 +4931,18 @@ ${JSON.stringify(chapterPipelineState.character_state_tracks || [], null, 2)}
         }
         const prompt = `${buildPipelineCanonPrompt()}
 
-【event_nodes】
-${JSON.stringify(chapterPipelineState.event_nodes || [], null, 2)}
+【当前操作范围】
+只检测当前事件 ${currentLocalContext.chapterNumber || ''}《${currentLocalContext.title || ''}》的章节切分。
+不要因为其他事件没有切分而报错。
 
-【chapter_cuts】
-${JSON.stringify(chapterPipelineState.chapter_cuts || [], null, 2)}
+【当前事件 event_nodes】
+${JSON.stringify(getCurrentEventNodes() || [], null, 2)}
+
+【当前事件 chapter_cuts】
+${JSON.stringify(normalizePipelineArray(chapterPipelineState.chapter_cuts).filter(cut =>
+    String(cut.chapter_id || '') === getCurrentChapterPipelineKey()
+    || Number(cut.chapter_number || 0) === Number(currentLocalContext.chapterNumber || 0)
+), null, 2)}
 
 你是章节切分闸门。请检查：每章是否有明确开头/结尾；是否有冲突、信息变化、关系变化或状态变化；是否提前越过下一事件；是否有节奏过载或连续爆点；是否遗漏必须回收/种下的伏笔；是否跨越重大真相揭露边界、人物弧线阶段边界、六节点关键转折边界、时间线不可逆事件边界、观众视角与上帝视角权限边界。
 
