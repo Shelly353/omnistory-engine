@@ -5228,24 +5228,6 @@ ${JSON.stringify(node, null, 2)}`;
         saveChapterPipelineState();
     }
 
-    function renderPipelineCharacterFocus() {
-        const chars = normalizePipelineArray(currentLocalContext.characters).slice(0, 4);
-        if (!chars.length) {
-            return `<div class="text-xs text-gray-500 italic">当前事件尚未绑定人物卡。正文前最好先拉入本事件人物。</div>`;
-        }
-        return chars.map(character => {
-            const global = window.globalCharacters?.find(c => c.id === character.id || c.name === character.name) || character;
-            return `<div class="border border-gray-800 bg-gray-900/70 rounded-lg p-2">
-                <div class="text-xs font-black text-purple-200">${escapeHtml(global.name || character.name || '未命名人物')}</div>
-                <div class="mt-1 text-[11px] text-gray-300 leading-relaxed">
-                    <div><span class="text-gray-500">身份</span> ${escapeHtml(global.role || global.identity || '-')}</div>
-                    <div><span class="text-gray-500">动机</span> ${escapeHtml(global.motivation || global.core_desire || '-')}</div>
-                    <div><span class="text-gray-500">限制</span> ${escapeHtml(global.flaw || global.fear || global.character_rules || '-')}</div>
-                </div>
-            </div>`;
-        }).join('');
-    }
-
     function renderPipelineNodeEditor() {
         const entries = getCurrentEventNodeEntries();
         if (!entries.length) {
@@ -5317,39 +5299,33 @@ ${JSON.stringify(node, null, 2)}`;
         if (!viewSop || document.getElementById('chapter-pipeline-panel')) return;
         const header = viewSop.querySelector('.border-b');
         header?.insertAdjacentHTML('afterend', `
-            <div id="chapter-pipeline-panel" class="border-b border-gray-800 bg-gray-950 p-4 space-y-4">
-                <div class="grid xl:grid-cols-[1fr_280px] gap-4">
-                    <section class="border border-cyan-900/70 bg-gray-900/70 rounded-lg p-4">
-                        <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-                            <div>
-                                <div class="text-[10px] font-black text-cyan-300 tracking-wider">当前任务</div>
-                                <div id="chapter-pipeline-main-title" class="mt-1 text-lg font-black text-white">章节展开</div>
-                                <div id="chapter-pipeline-status" class="text-[11px] text-gray-400 mt-1">未展开</div>
-                            </div>
-                            <button id="btn-pipeline-next" class="w-full md:w-auto px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-black transition flex items-center justify-center">
-                                继续
-                            </button>
+            <div id="chapter-pipeline-panel" class="border-b border-gray-800 bg-gray-950 p-3 space-y-3">
+                <section class="border border-cyan-900/70 bg-gray-900/70 rounded-lg p-3">
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                        <div class="min-w-0">
+                            <div class="text-[10px] font-black text-cyan-300 tracking-wider">当前任务</div>
+                            <div id="chapter-pipeline-main-title" class="mt-1 text-base font-black text-white truncate">章节展开</div>
+                            <div id="chapter-pipeline-status" class="text-[11px] text-gray-400 mt-1 truncate">未展开</div>
                         </div>
-                        <div id="chapter-pipeline-hint" class="mt-3 text-sm text-gray-200 leading-relaxed"></div>
-                    </section>
-                    <aside class="border border-purple-900/60 bg-gray-900/70 rounded-lg p-3">
-                        <div class="text-[10px] font-black text-purple-300 tracking-wider mb-2">当前人物卡</div>
-                        <div id="chapter-pipeline-character-focus" class="space-y-2"></div>
-                    </aside>
-                </div>
-                <section class="border border-gray-800 bg-gray-950/80 rounded-lg p-4">
+                        <button id="btn-pipeline-next" class="w-full md:w-auto px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-black transition flex items-center justify-center">
+                            继续
+                        </button>
+                    </div>
+                    <div id="chapter-pipeline-hint" class="mt-2 text-xs text-gray-200 leading-relaxed"></div>
+                </section>
+                <section id="chapter-pipeline-report-box" class="hidden border border-amber-900/70 bg-amber-950/20 rounded-lg p-3">
+                    <div class="text-[10px] font-black text-amber-300 tracking-wider mb-2">反馈</div>
+                    <div id="chapter-pipeline-report" class="text-xs text-gray-100 whitespace-pre-wrap leading-relaxed max-h-36 overflow-y-auto"></div>
+                </section>
+                <section class="border border-gray-800 bg-gray-950/80 rounded-lg p-3">
                     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
                         <div>
-                            <div class="text-[10px] font-black text-gray-400 tracking-wider">返回内容 / 可编辑输入</div>
-                            <div class="text-xs text-gray-500 mt-1">AI 返回的 JSON 会在这里转换成可读卡片。手动改动后，下游结果会失效，需要重新检测。</div>
+                            <div class="text-[10px] font-black text-gray-400 tracking-wider">修改内容</div>
+                            <div class="text-xs text-gray-500 mt-1">这里就是下一步会读取的内容。改完后继续即可。</div>
                         </div>
                         <button data-pipeline-action="add-node" class="px-3 py-1.5 rounded bg-emerald-900/50 border border-emerald-800 text-emerald-200 text-xs font-bold hover:bg-emerald-700">新增事件节点</button>
                     </div>
                     <div id="chapter-pipeline-editor" class="space-y-3"></div>
-                </section>
-                <section id="chapter-pipeline-report-box" class="hidden border border-gray-800 bg-gray-900/70 rounded-lg p-3">
-                    <div class="text-[10px] font-black text-amber-300 tracking-wider mb-2">检测反馈</div>
-                    <div id="chapter-pipeline-report" class="text-xs text-gray-200 whitespace-pre-wrap leading-relaxed max-h-44 overflow-y-auto"></div>
                 </section>
             </div>
         `);
@@ -5388,6 +5364,7 @@ ${JSON.stringify(node, null, 2)}`;
         } finally {
             buttons.forEach(button => { button.disabled = false; button.classList.remove('opacity-60', 'cursor-wait'); });
             renderChapterPipelinePanel();
+            document.getElementById('chapter-pipeline-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
     }
 
@@ -5397,22 +5374,19 @@ ${JSON.stringify(node, null, 2)}`;
         const hint = document.getElementById('chapter-pipeline-hint');
         const nextBtn = document.getElementById('btn-pipeline-next');
         const editor = document.getElementById('chapter-pipeline-editor');
-        const characterFocus = document.getElementById('chapter-pipeline-character-focus');
         const reportBox = document.getElementById('chapter-pipeline-report-box');
         const report = document.getElementById('chapter-pipeline-report');
         const next = getNextChapterPipelineAction();
         const pkg = getCurrentChapterPackage();
         if (status) {
-            status.textContent = `${chapterPipelineState.status || '未展开'} · 节点 ${chapterPipelineState.event_nodes?.length || 0} · 状态轨道 ${chapterPipelineState.character_state_tracks?.length || 0} · 当前章节包 ${pkg ? (pkg.audit_status || '待检测') : '无'}`;
+            status.textContent = `${chapterPipelineState.status || '未展开'} · 节点 ${chapterPipelineState.event_nodes?.length || 0} · 章节包 ${pkg ? (pkg.audit_status || '待检测') : '无'}`;
         }
         if (title) title.textContent = next?.label || '章节展开';
         if (hint) hint.textContent = next?.hint || '当前只显示和下一步有关的信息。';
         if (nextBtn) nextBtn.textContent = next?.label || '继续';
-        if (characterFocus) characterFocus.innerHTML = renderPipelineCharacterFocus();
         if (editor) {
             editor.innerHTML = [
                 renderPipelineNodeEditor(),
-                chapterPipelineState.character_state_tracks?.length ? `<details class="border border-gray-800 bg-gray-900/70 rounded-lg p-3 text-xs text-gray-300"><summary class="cursor-pointer text-blue-300 font-bold">查看人物状态轨道</summary><pre class="mt-2 whitespace-pre-wrap">${escapeHtml(JSON.stringify(chapterPipelineState.character_state_tracks, null, 2))}</pre></details>` : '',
                 pkg ? `<details open class="border border-gray-800 bg-gray-900/70 rounded-lg p-3 text-xs text-gray-300"><summary class="cursor-pointer text-purple-300 font-bold">查看章节包</summary><div class="mt-3">${renderPipelineReadablePackage(pkg)}</div></details>` : ''
             ].filter(Boolean).join('');
         }
