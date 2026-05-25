@@ -2500,6 +2500,8 @@ ${limitText(stripBibleJsonBlocks(aiReplyText), 1800) || '本轮 AI 回复主要�
     const btnModalRuleGateRecheck = document.getElementById('btn-modal-rule-gate-recheck');
     const btnModalRuleGateIgnore = document.getElementById('btn-modal-rule-gate-ignore');
     const mainWorkspace = document.getElementById('main-workspace');
+    const btnToggleOutline = document.getElementById('btn-toggle-outline');
+    const btnCollapseOutline = document.getElementById('btn-collapse-outline');
     const chatHistory = document.getElementById('chat-history');
     const chatInput = document.getElementById('chat-input');
     const humanPreviewContainer = document.getElementById('human-preview-container');
@@ -2582,6 +2584,21 @@ ${limitText(stripBibleJsonBlocks(aiReplyText), 1800) || '本轮 AI 回复主要�
     const btnConfirmHook = document.getElementById('btn-confirm-hook');
     const btnExportBook = document.getElementById('btn-export-book');
     const btnFinalizeChapter = document.getElementById('btn-finalize-chapter');
+
+    function isMobileWorkspaceLayout() {
+        return window.matchMedia('(max-width: 768px), (pointer: coarse) and (max-width: 1024px)').matches;
+    }
+
+    function setOutlineOpen(open) {
+        if (!mainWorkspace) return;
+        if (isMobileWorkspaceLayout()) {
+            mainWorkspace.dataset.outlineOpen = open ? 'true' : 'false';
+            mainWorkspace.dataset.outlineCollapsed = 'false';
+        } else {
+            mainWorkspace.dataset.outlineCollapsed = open ? 'false' : 'true';
+            mainWorkspace.dataset.outlineOpen = 'false';
+        }
+    }
     const btnVolumePlan = document.getElementById('btn-volume-plan');
     const btnRhythmCurve = document.getElementById('btn-rhythm-curve');
     const btnSourceCitations = document.getElementById('btn-source-citations');
@@ -7543,9 +7560,11 @@ if (data.success) {
     window.jumpToSourceChapter = (chapNum) => {
         if (!chapNum) return;
         const treeItems = document.querySelectorAll('#chapter-tree li');
-        // 💥 变更为：匹配“事件 X”
         const targetLi = Array.from(treeItems).find(el => el.innerText.includes(`事件 ${chapNum}`));
-        if (targetLi) { targetLi.querySelector('div')?.click(); } else { alert(`大纲中未找到事件 ${chapNum}`); }
+        if (targetLi) {
+            targetLi.querySelector('div')?.click();
+            if (isMobileWorkspaceLayout()) setOutlineOpen(false);
+        } else { alert(`大纲中未找到事件 ${chapNum}`); }
     };
 
     function appendChapMsg(role, text, index) {
@@ -7737,13 +7756,6 @@ if (data.success) {
             <div class="p-2 bg-blue-950/20 border border-blue-900/30 rounded text-blue-300"><span class="font-bold block text-[10px]">✔ 人物内核状态:</span> 角色动机连贯，未发生OOC脱离。</div>
         </div>`;
     }
-
-    window.jumpToSourceChapter = (chapNum) => {
-        if (!chapNum) return;
-        const treeItems = document.querySelectorAll('#chapter-tree li');
-        const targetLi = Array.from(treeItems).find(el => el.innerText.includes(`第 ${chapNum} 章`));
-        if (targetLi) { targetLi.click(); } else { alert(`大纲中未找到第 ${chapNum} 章`); }
-    };
 
     async function renderTimelineModal() {
         try {
@@ -8130,6 +8142,20 @@ ${sourceText}`;
 
     if (btnOpenAssetModal) btnOpenAssetModal.addEventListener('click', () => { loadGlobalAssets(); loadGlobalAssetOverview(); if(assetModal) assetModal.classList.remove('hidden'); });
     if (btnCloseAssetModal) btnCloseAssetModal.addEventListener('click', () => { if(assetModal) assetModal.classList.add('hidden');});
+
+    if (btnToggleOutline) btnToggleOutline.addEventListener('click', () => {
+        const isOpen = mainWorkspace?.dataset.outlineOpen === 'true';
+        setOutlineOpen(!isOpen);
+    });
+    if (btnCollapseOutline) btnCollapseOutline.addEventListener('click', () => setOutlineOpen(false));
+    window.addEventListener('resize', () => {
+        if (isMobileWorkspaceLayout()) {
+            if (mainWorkspace?.dataset.outlineOpen !== 'true') setOutlineOpen(false);
+        } else if (mainWorkspace?.dataset.outlineCollapsed === undefined) {
+            setOutlineOpen(true);
+        }
+    });
+    setOutlineOpen(!isMobileWorkspaceLayout());
 
     if (btnAddChapter) btnAddChapter.addEventListener('click', () => {
         const last = workspaceChapters[workspaceChapters.length - 1] || null;
