@@ -167,15 +167,7 @@ router.post('/context', async (req, res) => {
         const { data: allCharacters, error: charErr } = await supabase.from('characters').select('*').eq('project_id', projectId);
         if (charErr) throw charErr;
 
-        const { data: chapters } = await supabase
-            .from('chapters')
-            .select('id, chapter_number, title, content, content_text')
-            .eq('project_id', projectId)
-            .order('chapter_number', { ascending: true });
-        const sortedChapters = chapters || [];
-        const currentIndex = sortedChapters.findIndex(ch => Number(ch.chapter_number) === Number(chapterNumber));
-        const nextChapter = currentIndex >= 0 ? sortedChapters[currentIndex + 1] : null;
-        const eventScope = [chapter, nextChapter].filter(Boolean);
+        const eventScope = [chapter].filter(Boolean);
 
         let linkedCharacterIds = new Set();
         const scopedChapterIds = eventScope.map(ch => ch.id).filter(Boolean);

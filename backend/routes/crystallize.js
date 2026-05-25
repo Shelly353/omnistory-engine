@@ -17,6 +17,22 @@ if (!supabaseUrl || !supabaseKey) {
 
 // 3. 初始化客户端
 const supabase = createClient(supabaseUrl, supabaseKey);
+const CLOUD_STATE_TABLE = 'workspace_cloud_state';
+const CHAPTER_CHARACTER_TABLE = 'chapter_characters';
+const CHAPTER_CHARACTER_CLOUD_TYPE = '章节人物关联';
+
+function isMissingChapterCharacterTable(error) {
+    return error && (error.code === '42P01' || String(error.message || '').includes(CHAPTER_CHARACTER_TABLE));
+}
+
+async function saveChapterCharacterCloudMap(projectId, payload) {
+    await supabase.from(CLOUD_STATE_TABLE).upsert({
+        project_id: projectId,
+        data_type: CHAPTER_CHARACTER_CLOUD_TYPE,
+        payload,
+        updated_at: new Date().toISOString()
+    }, { onConflict: 'project_id,data_type' });
+}
 
 function stripExistingNarrativeNote(rules = '') {
     return String(rules || '')
@@ -155,6 +171,35 @@ function relationNamesFromRows(rows = [], characters = []) {
     })).filter(rel => rel.from_name && rel.to_name);
 }
 
+function normalizeTextKey(value = '') {
+    return String(value || '').toLowerCase().replace(/\s+/g, '');
+}
+
+async function writeChapterCharacterLinks(projectId, insertedChapters = [], characters = [], orderedChapters = []) {
+    if (!insertedChapters.length || !characters.length || !orderedChapters.length) return;
+    const charByName = new Map(characters.map(char => [normalizeTextKey(char.name), char]).filter(([name]) => name));
+    const links = [];
+    insertedChapters.forEach((row, index) => {
+        const sourceChapter = orderedChapters[index] || {};
+        const eventText = normalizeTextKey(`${sourceChapter.title || row.title || ''}\n${sourceChapter.content || row.content || ''}\n${JSON.stringify(sourceChapter)}`);
+        charByName.forEach((char, nameKey) => {
+            if (nameKey && eventText.includes(nameKey)) links.push({ chapter_id: row.id, character_id: char.id });
+        });
+    });
+    const uniqueLinks = Array.from(new Map(links.map(link => [`${link.chapter_id}:${link.character_id}`, link])).values());
+    if (uniqueLinks.length === 0) return;
+    const { error } = await supabase.from(CHAPTER_CHARACTER_TABLE).insert(uniqueLinks);
+    if (error) {
+        if (!isMissingChapterCharacterTable(error)) throw error;
+        const cloudMap = {};
+        uniqueLinks.forEach(link => {
+            cloudMap[link.chapter_id] = cloudMap[link.chapter_id] || [];
+            cloudMap[link.chapter_id].push(link.character_id);
+        });
+        await saveChapterCharacterCloudMap(projectId, cloudMap);
+    }
+}
+
 function normalizeIncomingRelations(relations = []) {
     if (!Array.isArray(relations)) return [];
     return relations.map(rel => ({
@@ -280,6 +325,12 @@ router.post('/confirm', async (req, res) => {
         }
         
         // 0. 清理旧数据
+        const { data: existingChapters } = await supabase.from('chapters').select('id').eq('project_id', projectId);
+        const existingChapterIds = (existingChapters || []).map(ch => ch.id).filter(Boolean);
+        if (existingChapterIds.length > 0) {
+            const { error: linkDeleteErr } = await supabase.from(CHAPTER_CHARACTER_TABLE).delete().in('chapter_id', existingChapterIds);
+            if (linkDeleteErr && !isMissingChapterCharacterTable(linkDeleteErr)) throw linkDeleteErr;
+        }
         await supabase.from('character_relations').delete().eq('project_id', projectId);
         await supabase.from('timeline_events').delete().eq('project_id', projectId);
         await supabase.from('characters').delete().eq('project_id', projectId);
@@ -349,7 +400,12 @@ router.post('/confirm', async (req, res) => {
                     plot_type: 'main'
                 };
             });
-            await supabase.from('chapters').insert(chapPayload);
+            const { data: insertedChapters, error: chapterInsertError } = await supabase
+                .from('chapters')
+                .insert(chapPayload)
+                .select('id, chapter_number, title, content');
+            if (chapterInsertError) throw chapterInsertError;
+            await writeChapterCharacterLinks(projectId, insertedChapters || [], allChars || [], orderedChapters);
         }
 
         console.log("✅ 数据库写入全部通关！");
