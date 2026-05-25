@@ -99,6 +99,83 @@
                 background: rgba(30, 64, 175, 0.35);
                 border-color: rgba(59, 130, 246, 0.55);
             }
+            #main-workspace > aside:first-child {
+                display: none !important;
+            }
+            #main-workspace > section {
+                width: 100% !important;
+                min-width: 0;
+            }
+            #current-chapter-title {
+                max-width: 42vw;
+            }
+            #view-sop,
+            #view-editor {
+                inset: 0.5rem !important;
+                border-radius: 0.75rem;
+            }
+            #view-sop > .p-3.border-b {
+                padding: 0.65rem 0.75rem;
+            }
+            #chapter-pipeline-panel {
+                padding: 0.5rem !important;
+                gap: 0.5rem;
+                -webkit-overflow-scrolling: touch;
+            }
+            #chapter-pipeline-panel section {
+                padding: 0.65rem !important;
+                border-radius: 0.65rem !important;
+            }
+            #chapter-pipeline-main-title {
+                font-size: 0.9rem !important;
+                white-space: normal !important;
+            }
+            #chapter-pipeline-status {
+                white-space: normal !important;
+                line-height: 1.35;
+            }
+            #btn-pipeline-next {
+                min-height: 2.75rem;
+                font-size: 0.78rem;
+            }
+            #chapter-pipeline-hint {
+                font-size: 0.72rem;
+            }
+            #chapter-pipeline-report {
+                max-height: 7.5rem;
+            }
+            .pipeline-node-card {
+                padding: 0.65rem !important;
+                border-radius: 0.65rem !important;
+            }
+            .pipeline-node-head {
+                flex-direction: column;
+                align-items: stretch !important;
+            }
+            .pipeline-node-actions {
+                width: 100%;
+                display: grid !important;
+                grid-template-columns: 1fr 1fr;
+            }
+            .pipeline-node-actions button,
+            [data-pipeline-action="add-node"],
+            [data-pipeline-action="ignore-event-warning"] {
+                min-height: 2.25rem;
+                font-size: 0.72rem;
+            }
+            .pipeline-node-fields {
+                display: grid !important;
+                grid-template-columns: 1fr !important;
+                gap: 0.5rem !important;
+            }
+            .pipeline-node-card textarea {
+                min-height: 4rem;
+                font-size: 0.78rem;
+            }
+            .pipeline-node-card input {
+                min-height: 2.25rem;
+                font-size: 0.78rem;
+            }
         }
         @media (min-width: 769px) {
             #sandbox-mobile-task,

@@ -5310,20 +5310,20 @@ ${JSON.stringify(node, null, 2)}`;
             </div>`;
         }
         return entries.map(({ node, index }, displayIndex) => `
-            <div class="border border-gray-800 bg-gray-900/70 rounded-lg p-3 space-y-2">
-                <div class="flex items-start justify-between gap-2">
-                    <div>
+            <div class="pipeline-node-card border border-gray-800 bg-gray-900/70 rounded-lg p-3 space-y-2">
+                <div class="pipeline-node-head flex items-start justify-between gap-2">
+                    <div class="min-w-0 flex-1">
                         <div class="text-[10px] text-cyan-300 font-black">节点 ${displayIndex + 1} · ${escapeHtml(node.node_id || '')}</div>
                         <input data-node-index="${index}" data-node-field="node_type" value="${escapeHtml(node.node_type || '')}" class="mt-1 w-full bg-gray-950 border border-gray-800 rounded px-2 py-1 text-xs text-white outline-none focus:border-cyan-600" placeholder="节点类型：触发/调查/选择/对抗/代价/过渡">
                     </div>
-                    <div class="flex gap-1 shrink-0">
+                    <div class="pipeline-node-actions flex gap-1 shrink-0">
                         <button data-pipeline-action="polish-node" data-node-index="${index}" class="px-2 py-1 rounded bg-cyan-900/50 border border-cyan-800 text-cyan-200 text-[10px] font-bold hover:bg-cyan-700">AI润色</button>
                         <button data-pipeline-action="delete-node" data-node-index="${index}" class="px-2 py-1 rounded bg-red-950/50 border border-red-900 text-red-200 text-[10px] font-bold hover:bg-red-800">删除</button>
                     </div>
                 </div>
                 <label class="block text-[10px] text-gray-500 font-bold">事件内容</label>
                 <textarea data-node-index="${index}" data-node-field="summary" class="w-full min-h-[64px] bg-gray-950 border border-gray-800 rounded p-2 text-xs text-gray-100 outline-none focus:border-cyan-600">${escapeHtml(node.summary || '')}</textarea>
-                <div class="grid md:grid-cols-2 gap-2">
+                <div class="pipeline-node-fields grid md:grid-cols-2 gap-2">
                     ${[
                         ['trigger', '触发原因'],
                         ['actor_motivation', '人物动机'],
