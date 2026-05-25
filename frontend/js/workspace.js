@@ -2518,6 +2518,7 @@ ${limitText(stripBibleJsonBlocks(aiReplyText), 1800) || '本轮 AI 回复主要�
     const tabEditor = document.getElementById('tab-editor');
     const viewSop = document.getElementById('view-sop');
     const viewEditor = document.getElementById('view-editor');
+    const chapterSidePanel = document.getElementById('chapter-side-panel');
     const chapHistoryDiv = document.getElementById('chapter-chat-history');
     const chapterChatInput = document.getElementById('chapter-chat-input');
     const localHooks = document.getElementById('local-hooks');
@@ -4551,29 +4552,42 @@ ${buildLongformBasePrompt()}
     }
 
     function getCurrentEventNodes() {
+        return getCurrentEventNodeEntries().map(entry => entry.node);
+    }
+
+    function isNodeForCurrentChapter(node = {}) {
         const chapterNumber = String(currentLocalContext.chapterNumber || '');
         const chapterId = String(currentLocalContext.chapterId || '');
-        return normalizePipelineArray(chapterPipelineState.event_nodes).filter(node => {
-            const parentId = String(node.parent_event_id || '');
-            return parentId === chapterId
-                || parentId === `chapter_${chapterNumber}`
-                || String(node.parent_event_number || '') === chapterNumber
-                || String(node.chapter_number || '') === chapterNumber;
-        });
+        const title = String(currentLocalContext.title || '').trim();
+        const parentTitle = String(node.parent_event_title || node.title || '').trim();
+        const parentIdRaw = String(node.parent_event_id || node.chapter_id || '');
+        const parentId = parentIdRaw.toLowerCase();
+        return parentIdRaw === chapterId
+            || parentId === `chapter_${chapterNumber}`.toLowerCase()
+            || parentId === `event_${chapterNumber}`.toLowerCase()
+            || parentId === `e${chapterNumber}`.toLowerCase()
+            || String(node.parent_event_number || node.chapter_number || node.event_number || '') === chapterNumber
+            || (!!title && parentTitle === title);
     }
 
     function getCurrentEventNodeEntries() {
-        const chapterNumber = String(currentLocalContext.chapterNumber || '');
-        const chapterId = String(currentLocalContext.chapterId || '');
-        return normalizePipelineArray(chapterPipelineState.event_nodes)
+        const direct = normalizePipelineArray(chapterPipelineState.event_nodes)
             .map((node, index) => ({ node, index }))
-            .filter(({ node }) => {
-                const parentId = String(node.parent_event_id || '');
-                return parentId === chapterId
-                    || parentId === `chapter_${chapterNumber}`
-                    || String(node.parent_event_number || '') === chapterNumber
-                    || String(node.chapter_number || '') === chapterNumber;
+            .filter(({ node }) => isNodeForCurrentChapter(node));
+        if (direct.length) return direct;
+        const chapterNumber = Number(currentLocalContext.chapterNumber || 0);
+        const sorted = normalizePipelineArray(chapterPipelineState.event_nodes)
+            .map((node, index) => ({ node, index }))
+            .sort((a, b) => {
+                const ao = Number(a.node.parent_event_number || a.node.chapter_number || a.node.event_number || 0);
+                const bo = Number(b.node.parent_event_number || b.node.chapter_number || b.node.event_number || 0);
+                return ao - bo || Number(a.node.node_order || 0) - Number(b.node.node_order || 0);
             });
+        if (!chapterNumber || !workspaceChapters.length) return sorted;
+        const currentChapterIndex = workspaceChapters.findIndex(ch => Number(ch.chapter_number || 0) === chapterNumber);
+        const hasAnyNumberedNode = sorted.some(({ node }) => Number(node.parent_event_number || node.chapter_number || node.event_number || 0) > 0);
+        if (currentChapterIndex === 0 && !hasAnyNumberedNode) return sorted;
+        return direct;
     }
 
     function getCurrentChapterPackage() {
@@ -5299,7 +5313,7 @@ ${JSON.stringify(node, null, 2)}`;
         if (!viewSop || document.getElementById('chapter-pipeline-panel')) return;
         const header = viewSop.querySelector('.border-b');
         header?.insertAdjacentHTML('afterend', `
-            <div id="chapter-pipeline-panel" class="border-b border-gray-800 bg-gray-950 p-3 space-y-3">
+            <div id="chapter-pipeline-panel" class="flex-1 overflow-y-auto border-b border-gray-800 bg-gray-950 p-3 space-y-3">
                 <section class="border border-cyan-900/70 bg-gray-900/70 rounded-lg p-3">
                     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                         <div class="min-w-0">
@@ -7822,12 +7836,16 @@ if (data.success) {
         tabSop.onclick = () => {
             if(viewSop) viewSop.classList.remove('hidden'); 
             if(viewEditor) viewEditor.classList.add('hidden');
+            if(chapterSidePanel) chapterSidePanel.classList.add('hidden');
             tabSop.className = "px-3 py-1 text-xs font-bold rounded-md bg-purple-600 text-white transition";
             tabEditor.className = "px-3 py-1 text-xs font-bold rounded-md text-gray-400 hover:text-white transition";
+            ensureChapterPipelinePanel();
+            renderChapterPipelinePanel();
         };
         tabEditor.onclick = () => {
             if(viewEditor) viewEditor.classList.remove('hidden'); 
             if(viewSop) viewSop.classList.add('hidden');
+            if(chapterSidePanel) chapterSidePanel.classList.remove('hidden');
             tabEditor.className = "px-3 py-1 text-xs font-bold rounded-md bg-purple-600 text-white transition";
             tabSop.className = "px-3 py-1 text-xs font-bold rounded-md text-gray-400 hover:text-white transition";
         };
