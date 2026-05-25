@@ -4684,13 +4684,10 @@ ${buildInformationFirewallPrompt()}`;
 
     function getEventExpansionLocalIssues(nodes = chapterPipelineState.event_nodes) {
         const issues = [];
-        const list = normalizePipelineArray(nodes);
-        if (list.length === 0) issues.push('没有生成任何 event_nodes。');
-        const grouped = new Map();
+        const list = nodes === chapterPipelineState.event_nodes ? getCurrentEventNodes() : normalizePipelineArray(nodes);
+        if (list.length === 0) issues.push(`当前事件 ${currentLocalContext.chapterNumber || ''}《${currentLocalContext.title || ''}》没有生成任何 event_nodes。`);
         list.forEach(node => {
             const parent = node.parent_event_id || `chapter_${node.parent_event_number || node.chapter_number || 'unknown'}`;
-            if (!grouped.has(parent)) grouped.set(parent, []);
-            grouped.get(parent).push(node);
             ['summary', 'trigger', 'actor_motivation', 'obstacle', 'choice', 'cost', 'result', 'next_trigger'].forEach(field => {
                 if (!String(node[field] || '').trim()) issues.push(`${node.node_id || parent} 缺少 ${field}，不能通过四段因果检查。`);
             });
@@ -4703,20 +4700,10 @@ ${buildInformationFirewallPrompt()}`;
             ].some(Boolean);
             if (!hasChange) issues.push(`${node.node_id || parent} 没有可检测的信息/状态/关系/伏笔变化。`);
         });
-        const existingEvents = workspaceChapters.length ? workspaceChapters : normalizePipelineArray(getCurrentBibleSnapshot()?.chapters);
-        existingEvents.forEach(ch => {
-            const keyA = String(ch.id || '');
-            const keyB = `chapter_${ch.chapter_number || ''}`;
-            const matched = normalizePipelineArray(nodes).filter(node =>
-                String(node.parent_event_id || '') === keyA
-                || String(node.parent_event_id || '') === keyB
-                || Number(node.parent_event_number || node.chapter_number) === Number(ch.chapter_number)
-            );
-            if (matched.length === 0) issues.push(`事件 ${ch.chapter_number}《${ch.title || ''}》没有对应展开节点。`);
-            const isTransitionEvent = /过渡|反应|余波|铺垫|间章|休整/.test(`${ch.title || ''}${ch.content || ''}`);
-            const minNodes = isTransitionEvent ? 2 : 3;
-            if (matched.length > 0 && matched.length < minNodes) issues.push(`事件 ${ch.chapter_number}《${ch.title || ''}》节点过少，至少需要 ${minNodes} 个节点。`);
-        });
+        const currentChapter = workspaceChapters.find(ch => Number(ch.chapter_number || 0) === Number(currentLocalContext.chapterNumber || 0)) || {};
+        const isTransitionEvent = /过渡|反应|余波|铺垫|间章|休整/.test(`${currentChapter.title || currentLocalContext.title || ''}${currentChapter.content || currentLocalContext.synopsis || ''}`);
+        const minNodes = isTransitionEvent ? 2 : 3;
+        if (list.length > 0 && list.length < minNodes) issues.push(`当前事件节点过少，至少需要 ${minNodes} 个节点。`);
         return issues.slice(0, 20);
     }
 
@@ -4738,10 +4725,14 @@ ${buildInformationFirewallPrompt()}`;
         }
         const prompt = `${buildPipelineCanonPrompt()}
 
-【待检测 event_nodes】
-${JSON.stringify(chapterPipelineState.event_nodes || [], null, 2)}
+【当前操作范围】
+只检测当前事件 ${currentLocalContext.chapterNumber || ''}《${currentLocalContext.title || ''}》。
+不要因为其他事件没有展开而报错；其他事件会在用户选择对应事件后单独展开。
 
-你是事件展开闸门。请检查：节点是否覆盖所有沙盒大事件；节点之间是否有因果链；人物行动是否来自人物卡和当前状态；是否存在巧合、降智、反派犯蠢；是否提前泄露 hidden/partial 真相；是否违反规则/专家资料；是否缺少人物状态变化。
+【当前事件待检测 event_nodes】
+${JSON.stringify(getCurrentEventNodes() || [], null, 2)}
+
+你是事件展开闸门。请检查：当前事件节点是否覆盖当前事件的触发、人物主动选择、阻力/对抗、代价或不可逆后果、过渡到下一事件；节点之间是否有因果链；人物行动是否来自人物卡和当前状态；是否存在巧合、降智、反派犯蠢；是否提前泄露 hidden/partial 真相；是否违反规则/专家资料；是否缺少人物状态变化。
 
 输出格式：
 【结论】通过/不通过
@@ -4760,6 +4751,16 @@ ${JSON.stringify(chapterPipelineState.event_nodes || [], null, 2)}
         chapterPipelineState.reports = { ...(chapterPipelineState.reports || {}), eventExpansion: report };
         setPipelineStatus(failed ? '展开检测未通过' : '可生成章节包', report);
         return !failed;
+    }
+
+    function ignoreEventExpansionWarning() {
+        const report = chapterPipelineState.reports?.last || chapterPipelineState.reports?.eventExpansion || '作者已手动忽略当前事件链警告。';
+        chapterPipelineState.reports = {
+            ...(chapterPipelineState.reports || {}),
+            eventExpansion: `【结论】通过\n【作者忽略警告继续】\n${report}`,
+            last: `已忽略当前事件链警告，可继续下一步。\n\n${report}`
+        };
+        setPipelineStatus('可生成章节包', chapterPipelineState.reports.last);
     }
 
     function buildCharacterStateTracksPrompt() {
@@ -5105,7 +5106,7 @@ ${JSON.stringify(pkg, null, 2)}`;
     function getNextChapterPipelineAction() {
         const pkg = getCurrentChapterPackage();
         if (chapterPipelineState.status === '展开检测未通过') {
-            return { label: '重新生成细化事件链', hint: '当前事件链未通过检测。继续会重新展开事件节点。', action: generateEventExpansion };
+            return { label: '忽略警告继续', hint: '当前事件链有警告。你可以先修改事件卡，也可以忽略警告继续生成后续内容。', action: ignoreEventExpansionWarning };
         }
         if (!chapterPipelineState.event_nodes?.length) {
             return { label: '开始：生成细化事件链', hint: '把沙盒大事件拆成可检测、可写作的节点链。', action: generateEventExpansion };
@@ -5328,7 +5329,10 @@ ${JSON.stringify(node, null, 2)}`;
                     <div id="chapter-pipeline-hint" class="mt-2 text-xs text-gray-200 leading-relaxed"></div>
                 </section>
                 <section id="chapter-pipeline-report-box" class="hidden border border-amber-900/70 bg-amber-950/20 rounded-lg p-3">
-                    <div class="text-[10px] font-black text-amber-300 tracking-wider mb-2">反馈</div>
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <div class="text-[10px] font-black text-amber-300 tracking-wider">反馈</div>
+                        <button data-pipeline-action="ignore-event-warning" class="hidden px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-[10px] font-bold">忽略警告继续</button>
+                    </div>
                     <div id="chapter-pipeline-report" class="text-xs text-gray-100 whitespace-pre-wrap leading-relaxed max-h-36 overflow-y-auto"></div>
                 </section>
                 <section class="border border-gray-800 bg-gray-950/80 rounded-lg p-3">
@@ -5353,6 +5357,7 @@ ${JSON.stringify(node, null, 2)}`;
             if (action === 'add-node') addCurrentEventNode();
             if (action === 'delete-node') deletePipelineNode(index);
             if (action === 'polish-node') runPipelineAction(() => polishPipelineNode(index));
+            if (action === 'ignore-event-warning') ignoreEventExpansionWarning();
         });
         panel?.addEventListener('input', event => {
             const target = event.target.closest('[data-node-field]');
@@ -5390,6 +5395,7 @@ ${JSON.stringify(node, null, 2)}`;
         const editor = document.getElementById('chapter-pipeline-editor');
         const reportBox = document.getElementById('chapter-pipeline-report-box');
         const report = document.getElementById('chapter-pipeline-report');
+        const ignoreEventWarningBtn = document.querySelector('[data-pipeline-action="ignore-event-warning"]');
         const next = getNextChapterPipelineAction();
         const pkg = getCurrentChapterPackage();
         if (status) {
@@ -5408,6 +5414,9 @@ ${JSON.stringify(node, null, 2)}`;
             const lastReport = chapterPipelineState.reports?.last || chapterPipelineState.reports?.eventExpansion || chapterPipelineState.reports?.chapterCuts || pkg?.audit_report || '';
             reportBox.classList.toggle('hidden', !lastReport);
             report.textContent = lastReport;
+        }
+        if (ignoreEventWarningBtn) {
+            ignoreEventWarningBtn.classList.toggle('hidden', chapterPipelineState.status !== '展开检测未通过');
         }
     }
 
