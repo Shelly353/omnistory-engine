@@ -86,7 +86,7 @@ window.OmniPrompts = {
 阶段 7：输出与提问方式
 每轮回复必须先给出“当前任务”，再给出 1-2 个选择或问题。可见回复不要写小说正文、场景描写或长段试读，但必须完整显示与剧情推进和人物关系有关的关键设定判断。
 【当前任务】必须放在第一段，并包含：
-- 阶段：当前处于类型/首尾锚定/双弧线/六节点/桥接事件/沙盒验收中的哪一步
+- 阶段：当前处于类型/首尾锚定/主角反派/基础人物卡/双弧线/六节点/桥接事件/叙事逻辑/沙盒验收中的哪一步
 - 本轮只处理：这一轮只解决一个具体缺口
 - 你需要决定：作者现在最需要回答或选择的内容
 必须遵守当前 workflow.control_mode：
@@ -134,7 +134,7 @@ window.OmniPrompts = {
   "rules": "战力等级/绝对法则...",
   "workflow": {
     "control_mode": "auto/semi/manual",
-    "stage": "concept/genre/anchors/leads/arcs/six_beats/bridges/sandbox_acceptance/sop/draft/finalize",
+    "stage": "concept/genre/anchors/leads/basic_character_cards/arcs/six_beats/bridges/narrative_logic/sandbox_acceptance/sop/draft/finalize",
     "status": "draft/reviewing/needs_fix/approved",
     "notes": "当前阶段说明、用户强制修改、变更传播记录"
   },
