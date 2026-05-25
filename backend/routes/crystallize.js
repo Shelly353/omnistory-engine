@@ -26,6 +26,14 @@ function stripExistingNarrativeNote(rules = '') {
         .trim();
 }
 
+function dedupeWorldLexicon(rules = '') {
+    const text = String(rules || '').trim();
+    const matches = text.match(/【世界用词规范表】[\s\S]*?(?=\n【世界用词规范表】|\n【参考资料摘录】|\n【创作流程骨架】|\n【叙事逻辑】|\n【上帝视角信息】|$)/g) || [];
+    if (matches.length <= 1) return text;
+    const withoutAll = text.replace(/\n*【世界用词规范表】[\s\S]*?(?=\n【世界用词规范表】|\n【参考资料摘录】|\n【创作流程骨架】|\n【叙事逻辑】|\n【上帝视角信息】|$)/g, '').trim();
+    return [withoutAll, matches[matches.length - 1].trim()].filter(Boolean).join('\n\n');
+}
+
 function buildWorkflowNote(bible = {}) {
     const workflow = bible.workflow || {};
     const beatLines = (Array.isArray(bible.hollywood_beats) ? bible.hollywood_beats : [])
@@ -281,7 +289,7 @@ router.post('/confirm', async (req, res) => {
         const narrativeNote = buildNarrativeNote(bible.narrative_logic);
         const secretsNote = buildSecretsNote(bible.secrets);
         const workflowNote = buildWorkflowNote(bible);
-        const projectRules = [stripExistingNarrativeNote(bible.rules), workflowNote, narrativeNote, secretsNote].filter(Boolean).join('\n\n');
+        const projectRules = [dedupeWorldLexicon(stripExistingNarrativeNote(bible.rules)), workflowNote, narrativeNote, secretsNote].filter(Boolean).join('\n\n');
         await supabase.from('projects').update({ genre: bible.genre, worldview: bible.worldview, rules: projectRules }).eq('id', projectId);
 
         // 2. 插入人物卡 (全息维度版)
