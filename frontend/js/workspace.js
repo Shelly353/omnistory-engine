@@ -4255,7 +4255,73 @@ ${buildLongformBasePrompt()}
     function buildLongformBasePrompt() {
         const eventContext = getAdjacentEventContext(currentLocalContext.chapterNumber);
         const currentBible = getCurrentBibleSnapshot() || {};
-        return `【当前事件】\n${eventContext.startInfo}\n【下一事件锚点】\n${eventContext.endInfo}\n【沙盒好莱坞六节点】\n${JSON.stringify(compactBibleForPrompt(currentBible.hollywood_beats || []))}\n【主角弧线】\n${JSON.stringify(compactBibleForPrompt(currentBible.protagonist_arc || {}))}\n【反派/核心阻力弧线】\n${JSON.stringify(compactBibleForPrompt(currentBible.antagonist_arc || {}))}\n【当前大纲】\n${currentLocalContext.synopsis || editorSopConflict?.innerText || '暂无'}\n【正文草稿】\n${limitText(editorTextarea?.value || '', 2600)}\n【救猫咪类型监督】\n${getSaveTheCatGenreGuide(getCurrentStoryGenre())}\n【人物卡】\n${getCharacterDetailsForSop()}\n【统一规则/专家资料】\n${getWorldRulesText()}\n【上帝视角信息权限】\n${formatGodViewContext()}\n【已有长篇编辑状态】\n${getLongformEditorialContext()}`;
+        const eventBriefState = loadSopEventBriefState(currentLocalContext.chapterId);
+        const confirmedBrief = eventBriefState.confirmed && eventBriefState.brief ? eventBriefState.brief : '暂无已确认事件梗概。';
+        return `【当前事件】\n${eventContext.startInfo}\n【下一事件锚点】\n${eventContext.endInfo}\n【沙盒好莱坞六节点】\n${JSON.stringify(compactBibleForPrompt(currentBible.hollywood_beats || []))}\n【主角弧线】\n${JSON.stringify(compactBibleForPrompt(currentBible.protagonist_arc || {}))}\n【反派/核心阻力弧线】\n${JSON.stringify(compactBibleForPrompt(currentBible.antagonist_arc || {}))}\n【已确认的SOP事件梗概】\n${confirmedBrief}\n【当前大纲】\n${currentLocalContext.synopsis || editorSopConflict?.innerText || '暂无'}\n【正文草稿】\n${limitText(editorTextarea?.value || '', 2600)}\n【救猫咪类型监督】\n${getSaveTheCatGenreGuide(getCurrentStoryGenre())}\n【人物卡】\n${getCharacterDetailsForSop()}\n【统一规则/专家资料】\n${getWorldRulesText()}\n【上帝视角信息权限】\n${formatGodViewContext()}\n【已有长篇编辑状态】\n${getLongformEditorialContext()}`;
+    }
+
+    function buildSopWritingBoundaryPrompt() {
+        const eventContext = getAdjacentEventContext(currentLocalContext.chapterNumber);
+        const eventBriefState = loadSopEventBriefState(currentLocalContext.chapterId);
+        const finalOutline = (editorSopConflict?.innerText || currentLocalContext.synopsis || '').trim();
+        const confirmedBrief = eventBriefState.confirmed && eventBriefState.brief
+            ? eventBriefState.brief
+            : '未找到已确认事件梗概。若当前操作是正文执笔或重写，必须先以最终 SOP 大纲为准，不得新增改变因果的重大细节。';
+        return `【SOP写作硬边界：最高优先级】
+1. 正文只能执行【已确认的本事件故事梗概】和【最终SOP大纲】中的事件顺序、关键事实、人物选择、信息释放和结尾过渡。
+2. 禁止新增会改变因果链的事件、隐藏真相、反派计划、人物关系、能力、道具、死因、时间顺序或世界规则。
+3. 禁止提前解决下一事件，禁止把下一事件的核心内容写进当前事件。
+4. 需要补环境、动作、心理、对白时，只能补“表现层细节”，不能改变剧情事实。
+5. 如果场景卡、对白打磨、场面导演、文笔风格与事件梗概或最终大纲冲突，以事件梗概和最终大纲为准。
+6. 如果必须补充大纲没有写明的细节，必须满足：不改变已定事实、不新增关键角色、不制造新规则、不让人物获得未设定能力、不让观众提前知道未揭露秘密。
+
+【当前事件】
+${eventContext.startInfo}
+【下一事件锚点】
+${eventContext.endInfo}
+【已确认的本事件故事梗概】
+${confirmedBrief}
+【最终SOP大纲】
+${finalOutline || '暂无最终大纲。'}`;
+    }
+
+    function getCachedLongformTaskReply(taskType) {
+        const key = getLongformChapterKey();
+        const map = {
+            budget: longformState.wordBudget,
+            volume: longformState.volumePlan,
+            beats: longformState.beatSheet,
+            rhythm: longformState.rhythmCurve,
+            blueprint: longformState.storyBlueprint,
+            goldenThree: longformState.goldenThree,
+            voice: longformState.characterVoice,
+            relationship: longformState.relationshipLine,
+            theme: longformState.themeMotif,
+            arcs: longformState.arcTracker,
+            board: longformState.productionBoard,
+            memory: longformState.stageMemory,
+            bookAudit: longformState.bookAudit,
+            state: longformState.characterStates,
+            continuity: longformState.continuityLedger,
+            opposition: longformState.oppositionPlans?.[key],
+            scene: longformState.sceneCards?.[key],
+            dialogue: longformState.dialoguePolish?.[key],
+            setpiece: longformState.setpieceDirector?.[key],
+            citations: longformState.sourceCitations?.[key],
+            gate: longformState.eventGates?.[key],
+            hook: longformState.attractionPlans?.[key],
+            acceptance: longformState.acceptanceGates?.[key]
+        };
+        return map[taskType] || '';
+    }
+
+    async function runLongformEditorTaskCached(taskType, extra = "") {
+        const cached = getCachedLongformTaskReply(taskType);
+        if (cached) {
+            renderDeviationItems([`已复用高级任务缓存：${taskType}\n\n${cached}`]);
+            return cached;
+        }
+        return runLongformEditorTask(taskType, extra);
     }
 
     async function runLongformEditorTask(taskType, extra = "") {
@@ -4362,9 +4428,12 @@ ${buildLongformBasePrompt()}
         }
         renderDeviationItems(["统一监督系统检测中：专业真实感、叙事逻辑、救猫咪类型、人设一致性、世界规则、用词/器物/货币连续性、伏笔闭环..."]);
         const eventContext = getAdjacentEventContext(currentLocalContext.chapterNumber);
+        const sopBoundary = buildSopWritingBoundaryPrompt();
         const prompt = `请作为统一正文监督系统，审查下面正文。专家系统已经合并进规则系统，监督系统已经合并进偏离审查系统。
 【当前事件】\n${eventContext.startInfo}
 【下一事件锚点】\n${eventContext.endInfo}
+
+${sopBoundary}
 
 ${getUnifiedQualityGuardrails()}
 
@@ -4378,6 +4447,7 @@ ${getUnifiedQualityGuardrails()}
 【MBTI/人物性格一致性】
 【人物降智/OOC问题】
 【世界规则/设定冲突】
+【SOP/事件梗概偏离问题】
 【用词/器物/货币连续性问题】
 【伏笔闭环问题】
 【最小修改建议】
@@ -4410,6 +4480,8 @@ ${getUnifiedQualityGuardrails()}
 目标：更强的戏剧冲突、更清楚的主角目标、更聪明的阻力、更有画面感的场面、更稳定的人物性格、更有钩子的结尾。
 必须保留：已确认事实、世界规则、人物卡、伏笔方向、当前事件边界。
 禁止：改成新剧情、引入无关人物、解决后续事件、用解释代替场景。
+
+${buildSopWritingBoundaryPrompt()}
 
 ${getUnifiedQualityGuardrails()}
 
@@ -6781,11 +6853,12 @@ if (btnTriggerHook) {
                     if (styleSelect && window.WritingStyles && window.WritingStyles[styleSelect.value]) {
                         stylePrompt = window.WritingStyles[styleSelect.value] + "\n\n";
                     }
+                    const sopBoundary = buildSopWritingBoundaryPrompt();
 
                     // 2. 将风格提示词无缝缝合到重写指令的头部
                     const rewriteConvo = [{
                         role: 'user',
-                        content: `请根据以下指令，重写这段小说正文片段。\n\n${stylePrompt}【原文本】：${currentSelectedString}\n【修改指令】：${instruction}\n【系统严厉警告】：请直接、仅仅输出重写后的纯文本，绝不允许包含任何解释性废话（如“好的”、“重写如下”），不要破坏原有第一或第三人称视角。`
+                        content: `请根据以下指令，重写这段小说正文片段。\n\n${stylePrompt}${sopBoundary}\n\n【原文本】：${currentSelectedString}\n【修改指令】：${instruction}\n【系统严厉警告】：请直接、仅仅输出重写后的纯文本，绝不允许包含任何解释性废话（如“好的”、“重写如下”），不要破坏原有第一或第三人称视角。重写只能增强表达，不得新增违反 SOP 边界的情节事实。`
                     }];
 
                     // 3. 发送给后端
@@ -6844,13 +6917,13 @@ if (btnTriggerHook) {
 
             // 💥 核心修复：强硬指令，绝不允许自我放飞
             const eventContext = getAdjacentEventContext(currentLocalContext.chapterNumber);
-            const wordBudget = await runLongformEditorTask('budget', '\n\n这是敲定大纲前的20万字篇幅校准，请确认当前事件在全书篇幅中的位置和功能。');
-            const beatSheet = await runLongformEditorTask('beats', '\n\n这是敲定大纲前的全书节拍校准，请确认当前事件服务哪个节拍。');
-            const blueprint = await runLongformEditorTask('blueprint', '\n\n这是敲定大纲前的全书大片蓝图校准，请确保当前事件服务全书商业叙事骨架。');
-            const arcTracker = await runLongformEditorTask('arcs', '\n\n这是敲定大纲前的人物/反派弧光校准，请确认当前事件推动或保护了哪条弧光。');
-            const oppositionPlan = await runLongformEditorTask('opposition', '\n\n这是敲定大纲前的反派/阻力升级设计，请给出必须写进大纲的对抗链。');
-            const gateReport = await runLongformEditorTask('gate', '\n\n这是敲定大纲前的自动闸门，请严格判断是否允许进入正文。');
-            const attractionPlan = await runLongformEditorTask('hook', '\n\n这是敲定大纲前的自动章节吸引力设计，请给出必须写进大纲的钩子和节奏要求。');
+            const wordBudget = await runLongformEditorTaskCached('budget', '\n\n这是敲定大纲前的20万字篇幅校准，请确认当前事件在全书篇幅中的位置和功能。');
+            const beatSheet = await runLongformEditorTaskCached('beats', '\n\n这是敲定大纲前的全书节拍校准，请确认当前事件服务哪个节拍。');
+            const blueprint = await runLongformEditorTaskCached('blueprint', '\n\n这是敲定大纲前的全书大片蓝图校准，请确保当前事件服务全书商业叙事骨架。');
+            const arcTracker = await runLongformEditorTaskCached('arcs', '\n\n这是敲定大纲前的人物/反派弧光校准，请确认当前事件推动或保护了哪条弧光。');
+            const oppositionPlan = await runLongformEditorTaskCached('opposition', '\n\n这是敲定大纲前的反派/阻力升级设计，请给出必须写进大纲的对抗链。');
+            const gateReport = await runLongformEditorTaskCached('gate', '\n\n这是敲定大纲前的自动闸门，请严格判断是否允许进入正文。');
+            const attractionPlan = await runLongformEditorTaskCached('hook', '\n\n这是敲定大纲前的自动章节吸引力设计，请给出必须写进大纲的钩子和节奏要求。');
             const strictPrompt = `讨论结束。请严格基于我们刚才在对话中敲定的内容，提取一份最终的【分章写作大纲】。
 【当前事件】：${eventContext.startInfo}
 【下一事件过渡锚点】：${eventContext.endInfo}
@@ -7016,14 +7089,15 @@ ${sopEventBriefState.brief || '暂无'}
             btnAiWrite.innerHTML = `<i data-lucide="loader" class="w-3 h-3 mr-1 animate-spin"></i>执笔中...`;
             if (window.lucide) lucide.createIcons();
 
-            const sceneCard = await runLongformEditorTask('scene', '\n\n这是正文执笔前的强制场景卡，请把本章拆成能直接写作的场景链。');
-            const dialoguePlan = await runLongformEditorTask('dialogue', '\n\n这是正文执笔前的对白专项打磨，请给出本章对白写作约束。');
-            const setpiecePlan = await runLongformEditorTask('setpiece', '\n\n这是正文执笔前的动作/场面导演，请给出本章场面调度约束。');
+            const sceneCard = await runLongformEditorTaskCached('scene', '\n\n这是正文执笔前的强制场景卡，请把本章拆成能直接写作的场景链。');
+            const dialoguePlan = await runLongformEditorTaskCached('dialogue', '\n\n这是正文执笔前的对白专项打磨，请给出本章对白写作约束。');
+            const setpiecePlan = await runLongformEditorTaskCached('setpiece', '\n\n这是正文执笔前的动作/场面导演，请给出本章场面调度约束。');
             const key = getLongformChapterKey();
             const godViewContext = formatGodViewContext();
+            const sopBoundaryContract = buildSopWritingBoundaryPrompt();
 
             // 5. 💥 终极 Payload 融合：将文笔风格无缝缝合进最顶级的强约束提示词中！
-            const strictSynopsisText = `【文学主脑至高契约：请彻底废弃历史缓存旧大纲，必须严格基于以下摘要进行正文扩写，维持情节深度连贯，严禁人设漂移OOC！】\n\n${stylePrompt}\n\n【好莱坞大片蓝图】：\n${longformState.storyBlueprint || '暂无，请以当前救猫咪类型和本章大纲建立商业叙事张力。'}\n\n【角色声音系统】：\n${longformState.characterVoice || '暂无，请确保主要角色对白有身份、性格、节奏和潜台词差异。'}\n\n【情感/关系线系统】：\n${longformState.relationshipLine || '暂无，请让关系变化由事件选择触发。'}\n\n【主题与母题追踪】：\n${longformState.themeMotif || '暂无，请让主题自然藏在选择、意象和代价中，不要说教。'}\n\n【本事件反派/阻力升级】：\n${longformState.oppositionPlans?.[key] || '暂无，请确保正文中存在清晰阻力、升级和代价。'}\n\n【本章场景卡】：\n${sceneCard || longformState.sceneCards?.[key] || '暂无'}\n\n【本章对白专项打磨】：\n${dialoguePlan || longformState.dialoguePolish?.[key] || '暂无'}\n\n【本章动作/场面导演】：\n${setpiecePlan || longformState.setpieceDirector?.[key] || '暂无'}\n\n【本章剧情起承转合】：\n${latestSynopsis}\n\n【统一规则/专家资料】：\n${worldRules}\n\n【必须100%严密契合的登场角色人设】：\n${characterDetails}\n\n【上帝视角信息权限】：\n${godViewContext}\n\n【正文质量监督标准】：\n${getUnifiedQualityGuardrails()}`;
+            const strictSynopsisText = `【文学主脑至高契约：请彻底废弃历史缓存旧大纲，必须严格基于以下摘要进行正文扩写，维持情节深度连贯，严禁人设漂移OOC！】\n\n${stylePrompt}\n\n${sopBoundaryContract}\n\n【好莱坞大片蓝图】：\n${longformState.storyBlueprint || '暂无，请以当前救猫咪类型和本章大纲建立商业叙事张力。'}\n\n【角色声音系统】：\n${longformState.characterVoice || '暂无，请确保主要角色对白有身份、性格、节奏和潜台词差异。'}\n\n【情感/关系线系统】：\n${longformState.relationshipLine || '暂无，请让关系变化由事件选择触发。'}\n\n【主题与母题追踪】：\n${longformState.themeMotif || '暂无，请让主题自然藏在选择、意象和代价中，不要说教。'}\n\n【本事件反派/阻力升级】：\n${longformState.oppositionPlans?.[key] || '暂无，请确保正文中存在清晰阻力、升级和代价。'}\n\n【本章场景卡】：\n${sceneCard || longformState.sceneCards?.[key] || '暂无'}\n\n【本章对白专项打磨】：\n${dialoguePlan || longformState.dialoguePolish?.[key] || '暂无'}\n\n【本章动作/场面导演】：\n${setpiecePlan || longformState.setpieceDirector?.[key] || '暂无'}\n\n【本章剧情起承转合】：\n${latestSynopsis}\n\n【统一规则/专家资料】：\n${worldRules}\n\n【必须100%严密契合的登场角色人设】：\n${characterDetails}\n\n【上帝视角信息权限】：\n${godViewContext}\n\n【正文质量监督标准】：\n${getUnifiedQualityGuardrails()}`;
 
             const ultraPayload = {
                 ...currentLocalContext,
@@ -7031,7 +7105,7 @@ ${sopEventBriefState.brief || '暂无'}
                 content: strictSynopsisText,
                 synopsis_text: strictSynopsisText,
                 currentText: currentText,
-                qualityGuardrails: getUnifiedQualityGuardrails(),
+                qualityGuardrails: `${getUnifiedQualityGuardrails()}\n\n${sopBoundaryContract}`,
                 sceneCard: sceneCard || longformState.sceneCards?.[key] || '',
                 blockbusterContext: getLongformEditorialContext()
             };
