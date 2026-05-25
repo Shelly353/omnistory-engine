@@ -4764,9 +4764,11 @@ ${JSON.stringify(getCurrentEventNodes() || [], null, 2)}
         });
         const data = await readApiJson(res, '事件展开检测失败');
         const report = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `事件展开检测失败：${data.error || '未知错误'}`;
-        const failed = /【结论】\s*不通过|结论[:：]\s*不通过|红色问题[\s\S]*(违反|泄露|无动机|巧合|降智|不成立|缺少|不能)/.test(report || '');
+        const failed = /【结论】\s*不通过|结论[:：]\s*不通过/.test(report || '')
+            && /红色问题[\s\S]*(泄露|违反世界观|违反规则|不存在的节点|越界知情|提前揭露|无法成立|关键字段缺失|没有关联 event_nodes)/.test(report || '');
         chapterPipelineState.reports = { ...(chapterPipelineState.reports || {}), eventExpansion: report };
-        setPipelineStatus(failed ? '展开检测未通过' : '可生成章节包', report);
+        const softWarning = /【结论】\s*不通过|结论[:：]\s*不通过|红色问题|黄色问题/.test(report || '');
+        setPipelineStatus(failed ? '展开检测未通过' : '可生成章节包', failed ? report : `${softWarning ? '【黄色提示】检测有建议，但不阻断继续。\n\n' : ''}${report}`);
         return !failed;
     }
 
@@ -4976,9 +4978,11 @@ ${JSON.stringify(normalizePipelineArray(chapterPipelineState.chapter_cuts).filte
         });
         const data = await readApiJson(res, '章节切分检测失败');
         const report = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `章节切分检测失败：${data.error || '未知错误'}`;
-        const failed = /【结论】\s*不通过|结论[:：]\s*不通过|红色问题[\s\S]*(跨越|遗漏|越过|过载|缺少|泄露|违反|不能)/.test(report || '');
+        const failed = /【结论】\s*不通过|结论[:：]\s*不通过/.test(report || '')
+            && /红色问题[\s\S]*(不存在的节点|跨越重大真相|泄露|违反世界观|无法成立|没有关联 event_nodes|关键字段缺失)/.test(report || '');
         chapterPipelineState.reports = { ...(chapterPipelineState.reports || {}), chapterCuts: report };
-        setPipelineStatus(failed ? '章节切分检测未通过' : '可生成章节包', report);
+        const softWarning = /【结论】\s*不通过|结论[:：]\s*不通过|红色问题|黄色问题/.test(report || '');
+        setPipelineStatus(failed ? '章节切分检测未通过' : '可生成章节包', failed ? report : `${softWarning ? '【黄色提示】检测有建议，但不阻断继续。\n\n' : ''}${report}`);
         return !failed;
     }
 
