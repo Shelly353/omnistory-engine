@@ -5070,17 +5070,131 @@ ${JSON.stringify(chapterPipelineState.character_state_tracks || [], null, 2)}
 ${JSON.stringify(pkg, null, 2)}`;
     }
 
+    function pipelineReportPassed(report = '') {
+        return /【结论】\s*通过|结论[:：]\s*通过/.test(report || '');
+    }
+
+    function getPipelineWizardSteps() {
+        const pkg = getCurrentChapterPackage();
+        return [
+            {
+                key: 'event_nodes',
+                label: '细化事件链',
+                done: chapterPipelineState.event_nodes?.length > 0,
+                failed: chapterPipelineState.status === '展开检测未通过'
+            },
+            {
+                key: 'event_audit',
+                label: '事件链检测',
+                done: pipelineReportPassed(chapterPipelineState.reports?.eventExpansion),
+                failed: chapterPipelineState.status === '展开检测未通过'
+            },
+            {
+                key: 'state_tracks',
+                label: '人物状态轨道',
+                done: chapterPipelineState.character_state_tracks?.length > 0,
+                failed: false
+            },
+            {
+                key: 'chapter_cuts',
+                label: '章节切分',
+                done: chapterPipelineState.chapter_cuts?.length > 0,
+                failed: chapterPipelineState.status === '章节切分检测未通过'
+            },
+            {
+                key: 'cuts_audit',
+                label: '切分检测',
+                done: pipelineReportPassed(chapterPipelineState.reports?.chapterCuts),
+                failed: chapterPipelineState.status === '章节切分检测未通过'
+            },
+            {
+                key: 'chapter_package',
+                label: '章节包',
+                done: !!pkg,
+                failed: chapterPipelineState.status === '章节包检测未通过'
+            },
+            {
+                key: 'package_audit',
+                label: '章节包检测',
+                done: pkg?.audit_status === '通过',
+                failed: pkg?.audit_status === '不通过' || chapterPipelineState.status === '章节包检测未通过'
+            },
+            {
+                key: 'write',
+                label: '正文扩写',
+                done: false,
+                failed: false
+            }
+        ];
+    }
+
+    function getNextChapterPipelineAction() {
+        const pkg = getCurrentChapterPackage();
+        if (chapterPipelineState.status === '展开检测未通过') {
+            return { label: '重新生成细化事件链', hint: '当前事件链未通过检测。继续会重新展开事件节点。', action: generateEventExpansion };
+        }
+        if (!chapterPipelineState.event_nodes?.length) {
+            return { label: '开始：生成细化事件链', hint: '把沙盒大事件拆成可检测、可写作的节点链。', action: generateEventExpansion };
+        }
+        if (!pipelineReportPassed(chapterPipelineState.reports?.eventExpansion)) {
+            return { label: '继续：检测事件链', hint: '检查因果、动机、规则、上帝视角泄露和降智问题。', action: auditEventExpansion };
+        }
+        if (!chapterPipelineState.character_state_tracks?.length) {
+            return { label: '继续：生成人物状态轨道', hint: '把人物目标、情绪、知情范围和弧线变化绑定到节点。', action: generateCharacterStateTracks };
+        }
+        if (chapterPipelineState.status === '章节切分检测未通过') {
+            return { label: '重新生成章节切分', hint: '当前章节切分未通过检测。继续会重新按节点链切章。', action: generateChapterCuts };
+        }
+        if (!chapterPipelineState.chapter_cuts?.length) {
+            return { label: '继续：生成章节切分', hint: '从事件节点链切出可写章节，避免直接跳进正文。', action: generateChapterCuts };
+        }
+        if (!pipelineReportPassed(chapterPipelineState.reports?.chapterCuts)) {
+            return { label: '继续：检测章节切分', hint: '检查章节是否跨越真相、弧线、关键转折或视角权限边界。', action: auditChapterCuts };
+        }
+        if (chapterPipelineState.status === '章节包检测未通过' || pkg?.audit_status === '不通过') {
+            return { label: '重新生成章节包', hint: '当前章节包未通过检测。继续会重新从节点链提取本章写作包。', action: generateChapterPackage };
+        }
+        if (!pkg) {
+            return { label: '继续：生成章节包', hint: '只提取本章可写内容、人物状态、信息权限和禁区。', action: generateChapterPackage };
+        }
+        if (pkg.audit_status !== '通过') {
+            return { label: '继续：检测章节包', hint: '通过后章节包会写回当前章，并允许正文扩写。', action: auditChapterPackage };
+        }
+        return {
+            label: '完成：基于章节包扩写正文',
+            hint: '章节包已通过检测。继续会切到正文区并按章节包扩写。',
+            action: async () => {
+                if (tabEditor) tabEditor.click();
+                btnAiWrite?.click();
+            }
+        };
+    }
+
+    async function advanceChapterPipeline() {
+        const next = getNextChapterPipelineAction();
+        if (!next?.action) return;
+        await runPipelineAction(next.action);
+    }
+
     function ensureChapterPipelinePanel() {
         if (!viewSop || document.getElementById('chapter-pipeline-panel')) return;
         const header = viewSop.querySelector('.border-b');
         header?.insertAdjacentHTML('afterend', `
             <div id="chapter-pipeline-panel" class="border-b border-gray-800 bg-gray-950/80 p-3 space-y-3">
-                <div class="flex items-center justify-between gap-3">
+                <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
                     <div>
                         <div class="text-[10px] font-black text-cyan-300 tracking-wider">章节展开流水线</div>
                         <div id="chapter-pipeline-status" class="text-[11px] text-gray-400 mt-0.5">未展开</div>
                     </div>
-                    <div class="flex flex-wrap gap-1.5 justify-end">
+                    <button id="btn-pipeline-next" class="w-full lg:w-auto px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-black shadow-lg shadow-cyan-950/30 transition flex items-center justify-center">
+                        继续下一步
+                    </button>
+                </div>
+                <div id="chapter-pipeline-steps" class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-1.5"></div>
+                <div id="chapter-pipeline-hint" class="text-[11px] text-gray-300 bg-gray-900/70 border border-gray-800 rounded-lg p-2"></div>
+                <details class="text-xs text-gray-300">
+                    <summary class="cursor-pointer text-gray-400 hover:text-white">高级操作与当前摘要</summary>
+                    <div class="flex flex-wrap gap-1.5 mt-3">
                         <button id="btn-generate-event-expansion" class="px-2 py-1 bg-cyan-900/40 text-cyan-200 border border-cyan-800 rounded text-[10px] font-bold hover:bg-cyan-700">生成细化事件链</button>
                         <button id="btn-audit-event-expansion" class="px-2 py-1 bg-amber-900/40 text-amber-200 border border-amber-800 rounded text-[10px] font-bold hover:bg-amber-700">检测事件链</button>
                         <button id="btn-generate-state-tracks" class="px-2 py-1 bg-blue-900/40 text-blue-200 border border-blue-800 rounded text-[10px] font-bold hover:bg-blue-700">人物状态轨道</button>
@@ -5089,13 +5203,11 @@ ${JSON.stringify(pkg, null, 2)}`;
                         <button id="btn-audit-chapter-package" class="px-2 py-1 bg-rose-900/40 text-rose-200 border border-rose-800 rounded text-[10px] font-bold hover:bg-rose-700">检测章节包</button>
                         <button id="btn-write-from-chapter-package" class="px-2 py-1 bg-emerald-900/40 text-emerald-200 border border-emerald-800 rounded text-[10px] font-bold hover:bg-emerald-700">基于章节包扩写</button>
                     </div>
-                </div>
-                <details class="text-xs text-gray-300">
-                    <summary class="cursor-pointer text-gray-400 hover:text-white">查看当前事件链/章节包摘要</summary>
                     <div id="chapter-pipeline-preview" class="mt-2 max-h-48 overflow-y-auto bg-gray-900 border border-gray-800 rounded-lg p-2 whitespace-pre-wrap"></div>
                 </details>
             </div>
         `);
+        document.getElementById('btn-pipeline-next')?.addEventListener('click', () => advanceChapterPipeline());
         document.getElementById('btn-generate-event-expansion')?.addEventListener('click', () => runPipelineAction(generateEventExpansion));
         document.getElementById('btn-audit-event-expansion')?.addEventListener('click', () => runPipelineAction(auditEventExpansion));
         document.getElementById('btn-generate-state-tracks')?.addEventListener('click', () => runPipelineAction(generateCharacterStateTracks));
@@ -5116,20 +5228,50 @@ ${JSON.stringify(pkg, null, 2)}`;
     }
 
     async function runPipelineAction(fn) {
+        const buttons = Array.from(document.querySelectorAll('#chapter-pipeline-panel button'));
+        buttons.forEach(button => { button.disabled = true; button.classList.add('opacity-60', 'cursor-wait'); });
         try {
             await fn();
         } catch (error) {
             setPipelineStatus('章节展开失败', `章节展开流水线失败：${error.message || '未知错误'}`);
+        } finally {
+            buttons.forEach(button => { button.disabled = false; button.classList.remove('opacity-60', 'cursor-wait'); });
+            renderChapterPipelinePanel();
         }
     }
 
     function renderChapterPipelinePanel() {
         const status = document.getElementById('chapter-pipeline-status');
+        const stepsBox = document.getElementById('chapter-pipeline-steps');
+        const hint = document.getElementById('chapter-pipeline-hint');
+        const nextBtn = document.getElementById('btn-pipeline-next');
         const preview = document.getElementById('chapter-pipeline-preview');
+        const next = getNextChapterPipelineAction();
         if (status) {
             const pkg = getCurrentChapterPackage();
             status.textContent = `${chapterPipelineState.status || '未展开'} · 节点 ${chapterPipelineState.event_nodes?.length || 0} · 状态轨道 ${chapterPipelineState.character_state_tracks?.length || 0} · 当前章节包 ${pkg ? (pkg.audit_status || '待检测') : '无'}`;
         }
+        if (stepsBox) {
+            const steps = getPipelineWizardSteps();
+            const firstOpenIndex = steps.findIndex(step => !step.done);
+            stepsBox.innerHTML = steps.map((step, index) => {
+                const isActive = index === firstOpenIndex || (firstOpenIndex === -1 && step.key === 'write');
+                const cls = step.failed
+                    ? 'border-red-700 bg-red-950/40 text-red-200'
+                    : step.done
+                        ? 'border-emerald-800 bg-emerald-950/40 text-emerald-200'
+                        : isActive
+                            ? 'border-cyan-700 bg-cyan-950/40 text-cyan-100'
+                            : 'border-gray-800 bg-gray-900/50 text-gray-500';
+                const mark = step.failed ? '!' : step.done ? '✓' : isActive ? '→' : String(index + 1);
+                return `<div class="border ${cls} rounded-lg px-2 py-1.5 text-[10px] font-bold flex items-center gap-1.5 min-h-[34px]">
+                    <span class="shrink-0 w-4 h-4 rounded-full border border-current flex items-center justify-center text-[9px]">${mark}</span>
+                    <span class="truncate">${step.label}</span>
+                </div>`;
+            }).join('');
+        }
+        if (hint) hint.textContent = next?.hint || '按顺序推进即可。高级操作已折叠，正常使用只需要点击主按钮。';
+        if (nextBtn) nextBtn.textContent = next?.label || '继续下一步';
         if (preview) {
             const nodes = getCurrentEventNodes().slice(0, 8).map(node =>
                 `${node.node_id || '-'}【${node.node_type || '-'}】${node.summary || ''}\n动机：${node.actor_motivation || '-'}\n阻力：${node.obstacle || '-'}\n结果：${node.result || '-'}\n下一触发：${node.next_trigger || '-'}`
