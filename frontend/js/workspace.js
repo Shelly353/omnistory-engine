@@ -58,6 +58,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let sandboxRuleGate = { blocked: false, ignored: false, ignoredSignature: '', ignoredItems: [], reason: '', pendingText: '', items: [] };
     let activeRuleConflictItem = null;
     let sandboxPendingResolution = { items: [], activeIndex: 0, chat: [] };
+    let sopEventBriefState = { chapterId: '', brief: '', confirmed: false, chat: [] };
     let sandboxNextQuestionRetryCount = 0;
     let sandboxRuleGateResumeTimer = null;
     let sopSupervisionGate = { blocked: false, reason: '' };
@@ -671,10 +672,10 @@ ${limitText(stripBibleJsonBlocks(aiReplyText), 1200) || '上一条回复主要�
         localDeviationPanel.innerHTML = `
             <div class="bg-emerald-950/30 border border-emerald-700/60 rounded-xl p-3 text-emerald-100 space-y-3">
                 <div class="font-bold text-emerald-200 flex items-center">
-                    <i data-lucide="check-circle" class="w-3.5 h-3.5 mr-1.5"></i>SOP 已完成：可以提取大纲
+                    <i data-lucide="check-circle" class="w-3.5 h-3.5 mr-1.5"></i>SOP 已完成：先确认事件梗概
                 </div>
-                <div class="text-xs leading-relaxed">当前事件的核心设定已齐：事件理解、人物选择、阻力代价、信息释放、伏笔和章数方案都已覆盖。${reason ? `\n${escapeHtml(limitText(reason, 500))}` : ''}</div>
-                <button id="btn-sop-ready-extract" class="w-full py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold">提取分章大纲</button>
+                <div class="text-xs leading-relaxed">当前事件的核心设定已齐：事件理解、人物选择、阻力代价、信息释放、伏笔和章数方案都已覆盖。提取分章大纲前，需要先确认本事件故事梗概，避免事件顺序或细节不顺。${reason ? `\n${escapeHtml(limitText(reason, 500))}` : ''}</div>
+                <button id="btn-sop-ready-extract" class="w-full py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold">确认事件梗概并提取大纲</button>
             </div>
         `;
         document.getElementById('btn-sop-ready-extract')?.addEventListener('click', () => btnExtractSynopsis?.click());
@@ -686,6 +687,209 @@ ${limitText(stripBibleJsonBlocks(aiReplyText), 1200) || '上一条回复主要�
         const report = getSopOutlineGateReport();
         const explicitReady = /【SOP_READY】|可以提取大纲|可提取大纲|点击.*提取.*大纲|进入提取大纲/.test(reply || '');
         if (report.ok || explicitReady) renderSopReadySignal(explicitReady ? 'AI 已给出明确完成信号。' : '', explicitReady);
+    }
+
+    function getSopEventBriefKey(chapterId = currentLocalContext.chapterId) {
+        return `sop_event_brief_${PROJECT_ID}_${chapterId || 'unknown'}`;
+    }
+
+    function loadSopEventBriefState(chapterId = currentLocalContext.chapterId) {
+        try {
+            const saved = JSON.parse(localStorage.getItem(getSopEventBriefKey(chapterId)) || '{}');
+            sopEventBriefState = {
+                chapterId: chapterId || '',
+                brief: saved.brief || '',
+                confirmed: !!saved.confirmed,
+                chat: Array.isArray(saved.chat) ? saved.chat : []
+            };
+        } catch (e) {
+            sopEventBriefState = { chapterId: chapterId || '', brief: '', confirmed: false, chat: [] };
+        }
+        return sopEventBriefState;
+    }
+
+    function saveSopEventBriefState(state = sopEventBriefState) {
+        if (!currentLocalContext.chapterId) return;
+        sopEventBriefState = { ...state, chapterId: currentLocalContext.chapterId };
+        localStorage.setItem(getSopEventBriefKey(), JSON.stringify(sopEventBriefState));
+    }
+
+    function ensureSopEventBriefModal() {
+        let modal = document.getElementById('sop-event-brief-modal');
+        if (modal) return modal;
+        document.body.insertAdjacentHTML('beforeend', `
+            <div id="sop-event-brief-modal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-[86] hidden flex items-center justify-center p-6">
+                <div class="bg-gray-950 border border-emerald-700/70 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[88vh] flex flex-col overflow-hidden">
+                    <div class="p-5 border-b border-emerald-900/50 bg-emerald-950/20 flex items-start justify-between gap-4">
+                        <div>
+                            <div class="text-[11px] font-bold tracking-wider text-emerald-300 mb-1">SOP 入大纲前 · 当前事件梗概确认</div>
+                            <h3 class="text-xl font-bold text-white">先确认本事件故事流</h3>
+                            <div class="text-xs text-gray-400 mt-1">可在这里调整事件顺序和细节，确认后再提取分章大纲。</div>
+                        </div>
+                        <button id="btn-close-sop-event-brief" class="text-gray-500 hover:text-white p-1 rounded border border-transparent hover:border-gray-700"><i data-lucide="x" class="w-5 h-5"></i></button>
+                    </div>
+                    <div class="grid md:grid-cols-[1.2fr_1fr] flex-1 min-h-0">
+                        <div class="p-5 overflow-y-auto border-r border-gray-800">
+                            <div class="text-xs text-gray-400 mb-2 font-bold">本事件故事梗概</div>
+                            <textarea id="sop-event-brief-text" class="w-full min-h-[420px] bg-gray-900 border border-gray-700 rounded-xl p-4 text-sm text-emerald-50 leading-relaxed resize-none"></textarea>
+                        </div>
+                        <div class="flex flex-col min-h-0">
+                            <div id="sop-event-brief-chat" class="flex-1 overflow-y-auto p-4 space-y-3 text-xs"></div>
+                            <div class="p-4 border-t border-gray-800 bg-gray-950">
+                                <textarea id="sop-event-brief-input" class="w-full h-24 bg-gray-900 border border-gray-700 rounded-xl p-3 text-sm text-white resize-none" placeholder="例如：把第2个细节放到第1个之前；加强反派阻力；删除这个巧合..."></textarea>
+                                <div class="grid grid-cols-3 gap-2 mt-3">
+                                    <button id="btn-send-sop-event-brief" class="py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg font-bold text-sm">和 AI 修改</button>
+                                    <button id="btn-save-sop-event-brief" class="py-2 bg-blue-700 hover:bg-blue-600 text-white rounded-lg font-bold text-sm">保存梗概</button>
+                                    <button id="btn-confirm-sop-event-brief" class="py-2 bg-purple-700 hover:bg-purple-600 text-white rounded-lg font-bold text-sm">确认并提取大纲</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `);
+        modal = document.getElementById('sop-event-brief-modal');
+        document.getElementById('btn-close-sop-event-brief')?.addEventListener('click', () => modal.classList.add('hidden'));
+        document.getElementById('btn-send-sop-event-brief')?.addEventListener('click', sendSopEventBriefRevision);
+        document.getElementById('btn-save-sop-event-brief')?.addEventListener('click', () => {
+            sopEventBriefState.brief = document.getElementById('sop-event-brief-text')?.value.trim() || '';
+            sopEventBriefState.confirmed = false;
+            saveSopEventBriefState();
+            alert('本事件梗概已保存。');
+        });
+        document.getElementById('btn-confirm-sop-event-brief')?.addEventListener('click', () => {
+            const brief = document.getElementById('sop-event-brief-text')?.value.trim() || '';
+            if (!brief) return alert('请先生成或填写本事件梗概。');
+            sopEventBriefState.brief = brief;
+            sopEventBriefState.confirmed = true;
+            saveSopEventBriefState();
+            currentChapterChatHistory.push({ role: 'user', content: `【已确认的本事件故事梗概】\n${brief}` });
+            localStorage.setItem(`sop_v3_${PROJECT_ID}_${currentLocalContext.chapterId}`, JSON.stringify(currentChapterChatHistory));
+            modal.classList.add('hidden');
+            btnExtractSynopsis?.click();
+        });
+        if (window.lucide) lucide.createIcons();
+        return modal;
+    }
+
+    function renderSopEventBriefModal() {
+        const textBox = document.getElementById('sop-event-brief-text');
+        const chatBox = document.getElementById('sop-event-brief-chat');
+        if (textBox) textBox.value = sopEventBriefState.brief || '';
+        if (chatBox) {
+            chatBox.innerHTML = (sopEventBriefState.chat || []).map(msg => `
+                <div class="${msg.role === 'user' ? 'ml-12 bg-emerald-900/40' : 'mr-12 bg-gray-800'} p-3 rounded-xl whitespace-pre-wrap leading-relaxed">${escapeHtml(msg.content || '')}</div>
+            `).join('');
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+    }
+
+    async function generateSopEventBrief() {
+        const eventContext = getAdjacentEventContext(currentLocalContext.chapterNumber);
+        const prompt = `你是 SOP 当前事件总览编辑。请在进入分章大纲前，基于当前 SOP 讨论写一份“本事件故事梗概”，用于确认事件顺序和细节。
+
+【当前事件】
+${eventContext.startInfo}
+【下一事件锚点】
+${eventContext.endInfo}
+【SOP 讨论记录】
+${limitText(currentChapterChatHistory.map(msg => `${msg.role}: ${stripSystemAppendix(msg.content || '')}`).join('\n\n'), 7000)}
+【人物卡】
+${getCharacterDetailsForSop()}
+【规则/专家资料】
+${getWorldRulesText()}
+【上帝视角信息权限】
+${formatGodViewContext()}
+
+要求：
+1. 必须以【本事件故事梗概】开头。
+2. 只讲当前事件，不展开下一事件。
+3. 按事件发生顺序写清：起因、关键行动、阻力升级、人物选择、代价、信息释放、伏笔种植/回收、结尾如何过渡到下一事件。
+4. 单独输出【顺序与细节检查】，指出是否有不顺、跳步、巧合、动机不足或可修改的细节。
+5. 不写正文，不写分章大纲。`;
+        const res = await fetch('/api/chat/deduce', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildChatPayloadWithLocalSources([{ role: 'user', content: prompt }], 1, prompt))
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || '生成事件梗概失败');
+        return stripFencedBlocks(data.reply) || data.reply;
+    }
+
+    async function requireSopEventBriefBeforeOutline() {
+        loadSopEventBriefState();
+        if (sopEventBriefState.confirmed && sopEventBriefState.brief) return true;
+        const modal = ensureSopEventBriefModal();
+        modal.classList.remove('hidden');
+        if (!sopEventBriefState.brief) {
+            sopEventBriefState.brief = 'AI 正在生成本事件故事梗概...';
+            renderSopEventBriefModal();
+            try {
+                sopEventBriefState.brief = await generateSopEventBrief();
+                sopEventBriefState.chat = [{ role: 'assistant', content: '我已生成本事件故事梗概。你可以直接修改文本，或在右侧告诉我想调整的顺序和细节。' }];
+                sopEventBriefState.confirmed = false;
+                saveSopEventBriefState();
+            } catch (error) {
+                sopEventBriefState.brief = '';
+                sopEventBriefState.chat = [{ role: 'assistant', content: `事件梗概生成失败：${error.message || '未知错误'}` }];
+            }
+        }
+        renderSopEventBriefModal();
+        return false;
+    }
+
+    async function sendSopEventBriefRevision() {
+        const input = document.getElementById('sop-event-brief-input');
+        const textBox = document.getElementById('sop-event-brief-text');
+        const sendBtn = document.getElementById('btn-send-sop-event-brief');
+        const text = input?.value.trim();
+        if (!text) return;
+        input.value = '';
+        sopEventBriefState.brief = textBox?.value.trim() || sopEventBriefState.brief || '';
+        sopEventBriefState.chat.push({ role: 'user', content: text });
+        sopEventBriefState.chat.push({ role: 'assistant', content: 'AI 正在按你的意见调整事件梗概...' });
+        renderSopEventBriefModal();
+        if (sendBtn) {
+            sendBtn.disabled = true;
+            sendBtn.textContent = '修改中...';
+        }
+        const prompt = `请根据作者意见修改【本事件故事梗概】。只调整当前事件顺序和细节，不写分章大纲，不写正文。
+
+【当前梗概】
+${sopEventBriefState.brief}
+
+【作者修改意见】
+${text}
+
+【SOP 讨论记录尾迹】
+${limitText(currentChapterChatHistory.slice(-8).map(msg => `${msg.role}: ${stripSystemAppendix(msg.content || '')}`).join('\n\n'), 5000)}
+
+请输出更新后的完整【本事件故事梗概】，并保留【顺序与细节检查】。`;
+        try {
+            const res = await fetch('/api/chat/deduce', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(buildChatPayloadWithLocalSources([{ role: 'user', content: prompt }], 1, prompt))
+            });
+            const data = await res.json();
+            const reply = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `修改失败：${data.error || '未知错误'}`;
+            sopEventBriefState.chat.pop();
+            sopEventBriefState.chat.push({ role: 'assistant', content: '已按你的意见更新梗概。' });
+            sopEventBriefState.brief = reply;
+            sopEventBriefState.confirmed = false;
+            saveSopEventBriefState();
+            renderSopEventBriefModal();
+        } catch (error) {
+            sopEventBriefState.chat.pop();
+            sopEventBriefState.chat.push({ role: 'assistant', content: `修改失败：${error.message || '未知错误'}` });
+            renderSopEventBriefModal();
+        } finally {
+            if (sendBtn) {
+                sendBtn.disabled = false;
+                sendBtn.textContent = '和 AI 修改';
+            }
+        }
     }
 
     function buildGenesisChatPayload() {
@@ -5982,6 +6186,7 @@ if (data.success) {
                     localStorage.setItem(localSopKey, JSON.stringify(currentChapterChatHistory));
                 }
                 const lastSopHistoryItem = currentChapterChatHistory[currentChapterChatHistory.length - 1] || {};
+                loadSopEventBriefState(chapterId);
                 refreshSopCompletionSignal(lastSopHistoryItem.content || '');
 
                 // 💥 伏笔区修复：分为本章回收与本章种下两类
@@ -6631,6 +6836,8 @@ if (btnTriggerHook) {
             if (!outlineGate.ok) {
                 return alert(`当前事件还不能提取大纲，请先补齐：\n${outlineGate.missing.join('\n')}`);
             }
+            const eventBriefReady = await requireSopEventBriefBeforeOutline();
+            if (!eventBriefReady) return;
             btnExtractSynopsis.disabled = true;
             btnExtractSynopsis.innerHTML = `<i data-lucide="loader" class="w-3 h-3 mr-1 animate-spin"></i>提取大纲中...`;
             if (window.lucide) lucide.createIcons();
@@ -6647,6 +6854,8 @@ if (btnTriggerHook) {
             const strictPrompt = `讨论结束。请严格基于我们刚才在对话中敲定的内容，提取一份最终的【分章写作大纲】。
 【当前事件】：${eventContext.startInfo}
 【下一事件过渡锚点】：${eventContext.endInfo}
+【已确认的本事件故事梗概】：
+${sopEventBriefState.brief || '暂无'}
 【20万字篇幅规划】：${wordBudget || longformState.wordBudget || '暂无'}
 【全书节拍表】：${beatSheet || longformState.beatSheet || '暂无'}
 【好莱坞大片蓝图】：${blueprint || longformState.storyBlueprint || '暂无'}
@@ -6661,6 +6870,7 @@ if (btnTriggerHook) {
 
 要求：
 1. 绝不允许自我放飞，严禁编造我们没讨论过的重大情节。
+1.1 必须以【已确认的本事件故事梗概】为最高依据来拆章；不得擅自改变事件顺序和关键细节。
 2. 必须按已确认的章数输出；如果章数未确认，请按最合理章数输出并说明依据。
 3. 每章必须包含：标题、目标字数、所属节拍/篇幅功能、起因、经过、结果、参与人物、救猫咪类型功能、人物行为来源、可种植伏笔/需回收伏笔、世界观/核心戒律/专业资料校验、与下一章衔接。
 4. 所有人物行为必须能从 MBTI/性格、欲望、目标、动机、缺陷、恐惧或成长弧线中找到来源。
@@ -6682,7 +6892,7 @@ if (btnTriggerHook) {
                     body: JSON.stringify(buildChatPayloadWithLocalSources(extractConvo, 12, strictPrompt))
                 });
                 const data = await res.json();
-if (data.success) {
+                if (data.success) {
                     const finalSynopsis = data.reply;
                     await fetch('/api/workspace/save-synopsis', {
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -6691,6 +6901,7 @@ if (data.success) {
                     
                     // 💥 任务完成：静默将本章大纲与 SOP 研讨记录同步至云端
                     await window.syncToCloud("SOP推演室 · 章节大纲", { chapterId: currentLocalContext.chapterId, synopsis: finalSynopsis, chat: currentChapterChatHistory });
+                    await window.syncToCloud("SOP推演室 · 事件梗概", { chapterId: currentLocalContext.chapterId, brief: sopEventBriefState.brief, confirmed: sopEventBriefState.confirmed }, { silent: true });
                     
                     if (editorSopConflict) editorSopConflict.innerText = finalSynopsis;
                     currentLocalContext.synopsis = finalSynopsis;
