@@ -4317,7 +4317,7 @@ ${buildLongformBasePrompt()}
         const currentBible = getCurrentBibleSnapshot() || {};
         const eventBriefState = loadSopEventBriefState(currentLocalContext.chapterId);
         const confirmedBrief = eventBriefState.confirmed && eventBriefState.brief ? eventBriefState.brief : '暂无已确认事件梗概。';
-        return `【当前事件】\n${eventContext.startInfo}\n【下一事件锚点】\n${eventContext.endInfo}\n【沙盒好莱坞六节点】\n${JSON.stringify(compactBibleForPrompt(currentBible.hollywood_beats || []))}\n【主角弧线】\n${JSON.stringify(compactBibleForPrompt(currentBible.protagonist_arc || {}))}\n【反派/核心阻力弧线】\n${JSON.stringify(compactBibleForPrompt(currentBible.antagonist_arc || {}))}\n【已确认的SOP事件梗概】\n${confirmedBrief}\n【当前大纲】\n${currentLocalContext.synopsis || editorSopConflict?.innerText || '暂无'}\n【正文草稿】\n${limitText(editorTextarea?.value || '', 2600)}\n【救猫咪类型监督】\n${getSaveTheCatGenreGuide(getCurrentStoryGenre())}\n${buildCharacterFactLockPrompt()}\n【统一规则/专家资料】\n${getWorldRulesText()}\n【上帝视角信息权限】\n${formatGodViewContext()}\n【已有长篇编辑状态】\n${getLongformEditorialContext()}`;
+        return `【当前事件】\n${eventContext.startInfo}\n【下一事件锚点】\n${eventContext.endInfo}\n【沙盒好莱坞六节点】\n${JSON.stringify(compactBibleForPrompt(currentBible.hollywood_beats || []))}\n【主角弧线】\n${JSON.stringify(compactBibleForPrompt(currentBible.protagonist_arc || {}))}\n【反派/核心阻力弧线】\n${JSON.stringify(compactBibleForPrompt(currentBible.antagonist_arc || {}))}\n【已确认的SOP事件梗概】\n${confirmedBrief}\n【当前大纲】\n${currentLocalContext.synopsis || editorSopConflict?.innerText || '暂无'}\n【正文草稿】\n${limitText(editorTextarea?.value || '', 2600)}\n【救猫咪类型监督】\n${getSaveTheCatGenreGuide(getCurrentStoryGenre())}\n${buildCharacterFactLockPrompt()}\n${buildPacingBrakePrompt()}\n【统一规则/专家资料】\n${getWorldRulesText()}\n【上帝视角信息权限】\n${formatGodViewContext()}\n【已有长篇编辑状态】\n${getLongformEditorialContext()}`;
     }
 
     function buildSopWritingBoundaryPrompt() {
@@ -4345,6 +4345,17 @@ ${confirmedBrief}
 ${finalOutline || '暂无最终大纲。'}`;
     }
 
+    function buildPacingBrakePrompt() {
+        return `【长篇节奏制动器：防止事件集中爆发】
+1. 本章必须有节奏类型标注：推进场、反应/消化场、关系场、信息整理场、铺垫场、静场、高潮场。
+2. 除非最终大纲明确写明“高潮章/追逐章/连续危机章”，否则不得连续三个场景都是高压推进或重大事件爆发。
+3. 每个重大事件之后必须给人物和读者一个反应空间：情绪余波、误判、沉默、观察、关系变化、信息整理、身体代价或环境细节。
+4. 呼吸段不是水文：它必须服务人物弧光、关系线、世界质感、伏笔铺垫、信息消化或下一次选择。
+5. 正文不得把大纲里的多个事件压缩成连续爆点；一个自然段最多承载一个主要动作/信息变化。
+6. 如果场景卡、吸引力设计、阻力升级导致节奏过载，以本节奏制动器为准：保留事件事实，降低爆发密度，补足反应和消化。
+7. 目标章节配比建议：高压推进 30%-45%，中压调查/交锋 25%-35%，低压反应/关系/铺垫 20%-35%。高潮章可以提高高压比例，但仍要保留短反应点。`;
+    }
+
     async function runDraftFactLockCheck(draftText = "", source = "after-ai-write") {
         const text = String(draftText || '').trim();
         if (!text) return { ok: true, report: '空文本，无需检测。' };
@@ -4353,6 +4364,8 @@ ${finalOutline || '暂无最终大纲。'}`;
 ${buildSopWritingBoundaryPrompt()}
 
 ${buildCharacterFactLockPrompt()}
+
+${buildPacingBrakePrompt()}
 
 【统一规则/专家资料】
 ${getWorldRulesText()}
@@ -4366,11 +4379,13 @@ ${limitText(text, 7000)}
 3. 是否新增人物卡没有的关键身份或关系，例如把“刑侦队长”写成“副所长”。
 4. 是否新增或修改 SOP 没有确认的情节、细节、因果、道具、死因、时间顺序、隐藏真相。
 5. 是否违反世界规则、专家资料、上帝视角权限。
+6. 是否把多个事件压缩成连续爆点、缺少重大事件后的反应/消化/关系余波。
 
 请按格式输出：
 【结论】通过/不通过
 【设定漂移】
 【幻觉新增】
+【节奏过载】
 【必须修改】
 来源：${source}`;
         try {
@@ -4396,6 +4411,8 @@ ${buildSopWritingBoundaryPrompt()}
 
 ${buildCharacterFactLockPrompt()}
 
+${buildPacingBrakePrompt()}
+
 【审校报告】
 ${report || '暂无'}
 
@@ -4406,7 +4423,8 @@ ${limitText(draftText, 7000)}
 1. 只改错误称谓、职位、身份、关系、能力、道具、时间、因果等与设定冲突的部分。
 2. 不新增剧情，不扩写新桥段，不改变原正文的叙述顺序。
 3. 如果某细节没有设定依据，删除或改成中性表述。
-4. 直接输出修复后的正文，不要解释。`;
+4. 如果审校报告指出节奏过载，只能通过人物反应、信息整理、关系余波、环境观察、身体/心理代价来降速；不得新增事件。
+5. 直接输出修复后的正文，不要解释。`;
         const res = await fetch('/api/chat/deduce', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -4462,7 +4480,7 @@ ${limitText(draftText, 7000)}
             budget: `你是长篇小说制片主任。请建立【20万字篇幅规划器】：总字数目标约20万字，建议卷数/幕数/章节数，每章目标字数，三幕或八序列的篇幅比例，关键转折所在章节，高潮与收束字数预算。必须输出可执行表格，并指出当前事件属于哪一段篇幅功能。`,
             volume: `你是长篇分卷/季结构设计师。请建立【分卷/季结构管理】：每卷/季的主题、核心冲突、开始钩子、中段反转、卷末高潮、卷尾悬念、主角弧光阶段、反派阶段计划、伏笔种植与回收边界。要求能支撑约20万字长篇，不要把所有高潮挤在一卷。`,
             beats: `你是好莱坞节拍表设计师。请建立【全书节拍表】：开场钩子、主题陈述、诱因、犹豫、第一幕转折、B故事/关系线、中点、反派逼近、至暗点、灵魂黑夜、终局计划、高潮、结尾余波。每个节拍要绑定章节/事件、人物弧光、情绪功能和伏笔职责。`,
-            rhythm: `你是章节节奏曲线师。请为全书建立【章节间节奏曲线】：每章的紧张度、情绪强度、信息量、动作量、关系推进、悬念强度、疲劳风险，指出连续平淡/连续解释/连续打斗/连续情绪过载的问题，并给调节建议。`,
+            rhythm: `你是章节节奏曲线师。请为全书建立【章节间节奏曲线】：每章的紧张度、情绪强度、信息量、动作量、关系推进、悬念强度、呼吸/反应空间、疲劳风险，指出连续平淡/连续解释/连续打斗/连续情绪过载/事件爆点过密的问题，并给调节建议。`,
             blueprint: `你是好莱坞级商业叙事总监。请为全书建立或更新【大片蓝图】：一句话高概念、类型承诺、主题问题、主角外在目标/内在需求、反派或核心阻力、三幕式/八序列推进、重大转折点、情绪卖点、视觉/场面卖点、终局画面、续写禁区。要求能指导后续所有事件，不写空话。`,
             goldenThree: `你是商业小说开篇诊断师。请建立【开篇黄金三章系统】：前三章必须完成的读者钩子、主角吸引力、世界入口、核心危机、反派/阻力露面、信息差、章末钩子、不能写慢的部分。逐章输出问题和强化方案。`,
             voice: `你是角色声音设计师。请建立【角色声音系统】：为主要角色设计专属说话方式、词汇偏好、句长节奏、隐喻来源、情绪失控时的语言变化、沉默/回避方式、禁用语气和容易说出口/绝不会说出口的话。要求能让读者不看名字也能分辨是谁在说话。`,
@@ -4475,9 +4493,9 @@ ${limitText(draftText, 7000)}
             continuity: `你是连续性账本管理员。请更新【连续性账本】：时间、地点、人物状态/伤势/心理变化、道具、秘密、知情范围、关系变化、能力消耗、未解决矛盾、不能遗忘的细节。发现前后冲突要报警，并给最小修正方案。`,
             citations: `你是资料来源标注员。请根据本地资料片段和当前正文/大纲，为专业细节、历史细节、制度流程、术语、事实性描述建立【资料来源标注】。输出：正文/大纲中的说法、可引用的资料片段、来源文件名或片段标题、可信度、仍需补资料的问题。资料不足时必须明确“无资料支撑”，不要编造来源。`,
             bookAudit: `你是成书级一致性总审。请从整书角度审查：人物是否漂移、事件是否断裂、伏笔是否遗忘、世界规则是否冲突、节拍是否偏移、反派是否变弱、章节节奏是否疲劳、开篇三章是否抓人、结尾是否兑现类型承诺。输出严重问题、影响章节、最小修复方案和优先级。`,
-            acceptance: `你是强制验收闸门。请判断当前正文是否允许标记为定稿。必须检查：是否完成本章大纲、是否服从场景卡、是否符合篇幅/节拍功能、连续性是否冲突、人物弧光是否推进或保持合理、反派/阻力是否足够聪明、伏笔是否处理、称谓/货币/器物/计量单位/时代词是否前后一致、正文是否有中/高风险。输出：通过/不通过；若不通过，列出必须整改项。`,
+            acceptance: `你是强制验收闸门。请判断当前正文是否允许标记为定稿。必须检查：是否完成本章大纲、是否服从场景卡、是否符合篇幅/节拍功能、连续性是否冲突、人物弧光是否推进或保持合理、反派/阻力是否足够聪明、伏笔是否处理、称谓/货币/器物/计量单位/时代词是否前后一致、是否存在事件爆点过密、连续高压无反应段、人物没有消化空间、正文是否有中/高风险。输出：通过/不通过；若不通过，列出必须整改项。`,
             opposition: `你是【反派与阻力升级设计器】。请为当前事件设计对抗：谁/什么在阻止主角、对方目标与计划、压迫如何升级、主角每次选择的代价、对方下一步反制、主角赢了什么又失去什么、如何避免反派降智。输出可直接写进大纲的阻力链。`,
-            scene: `你是【场景卡导演】。请把当前大纲拆成 3-7 个可写场景卡。每张场景卡必须包含：场景目标、登场人物、人物策略、冲突/阻力、情绪起点与终点、信息释放、反转/升级点、视觉或感官记忆点、结尾钩子、不可写成流水账的提醒。`,
+            scene: `你是【场景卡导演】。请把当前大纲拆成 3-7 个可写场景卡。每张场景卡必须包含：场景类型（推进/反应消化/关系/信息整理/铺垫/静场/高潮）、压力等级（低/中/高）、场景目标、登场人物、人物策略、冲突/阻力、情绪起点与终点、信息释放、反转/升级点、视觉或感官记忆点、结尾钩子、不可写成流水账的提醒。除非本章是明确高潮章，否则必须至少安排 1 张低压反应/关系/信息整理/铺垫场景，且不得连续 3 张高压推进场。`,
             gate: `你是长篇连载的【事件质量闸门】。请在事件进入正文前审查：因果必要性、救猫咪类型功能是否成立、人物是否必须这样做、人物行为是否符合 MBTI/性格/欲望/缺陷、是否有更聪明选择、反派是否降智、是否靠巧合、读者是否会觉得假、删掉事件主线是否断裂。输出：通过/不通过、风险点、最小整改方案、必须补充的问题。`,
             hook: `你是长篇连载的【章节吸引力设计器】。请为当前事件设计章节级吸引力：符合当前救猫咪类型承诺的读者钩子、冲突升级、信息差、情绪波峰、关系变化、结尾悬念、爽点/痛点/疑问点；同时利用角色 MBTI/性格差异制造自然冲突，避免平淡流水账。`,
             state: `你是长篇连载的【人物状态追踪器】。请根据当前事件/正文更新人物当前状态：当前目标、误解、情绪状态、关系变化、获得/失去资源、身体/心理代价、秘密、下一次行动倾向。每个变化都要注明来自人物的性格/欲望/缺陷/恐惧中的哪一项，只更新当前事件影响到的人物。`,
@@ -4568,6 +4586,8 @@ ${sopBoundary}
 
 ${buildCharacterFactLockPrompt()}
 
+${buildPacingBrakePrompt()}
+
 ${getUnifiedQualityGuardrails()}
 
 【待审正文】\n${limitText(text, 5000)}
@@ -4576,6 +4596,7 @@ ${getUnifiedQualityGuardrails()}
 【风险等级】低/中/高
 【专业真实感问题】
 【叙事逻辑问题】
+【节奏过载/缺少呼吸问题】
 【救猫咪类型契合度】
 【MBTI/人物性格一致性】
 【人物卡事实锁问题】
@@ -4616,6 +4637,8 @@ ${getUnifiedQualityGuardrails()}
 禁止：改成新剧情、引入无关人物、解决后续事件、用解释代替场景。
 
 ${buildSopWritingBoundaryPrompt()}
+
+${buildPacingBrakePrompt()}
 
 ${getUnifiedQualityGuardrails()}
 
@@ -6989,11 +7012,12 @@ if (btnTriggerHook) {
                     }
                     const sopBoundary = buildSopWritingBoundaryPrompt();
                     const characterFactLock = buildCharacterFactLockPrompt();
+                    const pacingBrake = buildPacingBrakePrompt();
 
                     // 2. 将风格提示词无缝缝合到重写指令的头部
                     const rewriteConvo = [{
                         role: 'user',
-                        content: `请根据以下指令，重写这段小说正文片段。\n\n${stylePrompt}${sopBoundary}\n\n${characterFactLock}\n\n【原文本】：${currentSelectedString}\n【修改指令】：${instruction}\n【系统严厉警告】：请直接、仅仅输出重写后的纯文本，绝不允许包含任何解释性废话（如“好的”、“重写如下”），不要破坏原有第一或第三人称视角。重写只能增强表达，不得新增违反 SOP 边界或人物事实锁的情节事实。`
+                        content: `请根据以下指令，重写这段小说正文片段。\n\n${stylePrompt}${sopBoundary}\n\n${characterFactLock}\n\n${pacingBrake}\n\n【原文本】：${currentSelectedString}\n【修改指令】：${instruction}\n【系统严厉警告】：请直接、仅仅输出重写后的纯文本，绝不允许包含任何解释性废话（如“好的”、“重写如下”），不要破坏原有第一或第三人称视角。重写只能增强表达，不得新增违反 SOP 边界或人物事实锁的情节事实；如果原文节奏太急，应通过人物反应、信息消化、关系余波降速，不得新增事件。`
                     }];
 
                     // 3. 发送给后端
@@ -7074,20 +7098,22 @@ ${sopEventBriefState.brief || '暂无'}
 【可调用人物卡】：${getCharacterDetailsForSop()}
 【事件质量闸门】：${gateReport || '暂无'}
 【章节吸引力设计】：${attractionPlan || '暂无'}
+${buildPacingBrakePrompt()}
 【长篇编辑状态】：${getLongformEditorialContext()}
 
 要求：
 1. 绝不允许自我放飞，严禁编造我们没讨论过的重大情节。
 1.1 必须以【已确认的本事件故事梗概】为最高依据来拆章；不得擅自改变事件顺序和关键细节。
 2. 必须按已确认的章数输出；如果章数未确认，请按最合理章数输出并说明依据。
-3. 每章必须包含：标题、目标字数、所属节拍/篇幅功能、起因、经过、结果、参与人物、救猫咪类型功能、人物行为来源、可种植伏笔/需回收伏笔、世界观/核心戒律/专业资料校验、与下一章衔接。
+3. 每章必须包含：标题、目标字数、所属节拍/篇幅功能、节奏类型、压力等级、场景类型配比、起因、经过、结果、参与人物、救猫咪类型功能、人物行为来源、可种植伏笔/需回收伏笔、世界观/核心戒律/专业资料校验、与下一章衔接。
 4. 所有人物行为必须能从 MBTI/性格、欲望、目标、动机、缺陷、恐惧或成长弧线中找到来源。
 5. 每章都要说明它如何履行当前救猫咪类型的读者承诺；如果不契合，必须给出修正。
 6. 每章都要写出：对抗/阻力、主角选择、胜利代价、对方反制或下一步压力。
 7. 每章都要说明推动了哪条人物/反派弧光，以及连续性账本中需要记录的状态变化。
 8. 如果涉及职业、行业或学科，必须依据已入库的专业顾问资料检查流程、术语、权限边界和常见误区；资料不足时不要编造确定细节。
 9. 必须吸收篇幅规划、节拍表、大片蓝图、弧光表、反派/阻力升级、事件质量闸门和章节吸引力设计的整改要求。
-10. 本事件结尾必须能自然过渡到下一事件，但不得展开下一事件正文内容。
+10. 每章必须标注至少一个“反应/消化/关系/信息整理/铺垫”功能点；除非明确为高潮章，不得把所有场景都写成连续爆点。
+11. 本事件结尾必须能自然过渡到下一事件，但不得展开下一事件正文内容。
 请直接输出这份最终大纲，不要掺杂任何废话，它将作为正文执笔的严格依据。`;
 
             // 深拷贝一份不污染原对话的提纯队列
@@ -7232,9 +7258,10 @@ ${sopEventBriefState.brief || '暂无'}
             const key = getLongformChapterKey();
             const godViewContext = formatGodViewContext();
             const sopBoundaryContract = buildSopWritingBoundaryPrompt();
+            const pacingBrakeContract = buildPacingBrakePrompt();
 
             // 5. 💥 终极 Payload 融合：将文笔风格无缝缝合进最顶级的强约束提示词中！
-            const strictSynopsisText = `【文学主脑至高契约：请彻底废弃历史缓存旧大纲，必须严格基于以下摘要进行正文扩写，维持情节深度连贯，严禁人设漂移OOC！】\n\n${stylePrompt}\n\n${sopBoundaryContract}\n\n${characterFactLock}\n\n【好莱坞大片蓝图】：\n${longformState.storyBlueprint || '暂无，请以当前救猫咪类型和本章大纲建立商业叙事张力。'}\n\n【角色声音系统】：\n${longformState.characterVoice || '暂无，请确保主要角色对白有身份、性格、节奏和潜台词差异。'}\n\n【情感/关系线系统】：\n${longformState.relationshipLine || '暂无，请让关系变化由事件选择触发。'}\n\n【主题与母题追踪】：\n${longformState.themeMotif || '暂无，请让主题自然藏在选择、意象和代价中，不要说教。'}\n\n【本事件反派/阻力升级】：\n${longformState.oppositionPlans?.[key] || '暂无，请确保正文中存在清晰阻力、升级和代价。'}\n\n【本章场景卡】：\n${sceneCard || longformState.sceneCards?.[key] || '暂无'}\n\n【本章对白专项打磨】：\n${dialoguePlan || longformState.dialoguePolish?.[key] || '暂无'}\n\n【本章动作/场面导演】：\n${setpiecePlan || longformState.setpieceDirector?.[key] || '暂无'}\n\n【本章剧情起承转合】：\n${latestSynopsis}\n\n【统一规则/专家资料】：\n${worldRules}\n\n【必须100%严密契合的登场角色人设】：\n${characterDetails}\n\n【上帝视角信息权限】：\n${godViewContext}\n\n【正文质量监督标准】：\n${getUnifiedQualityGuardrails()}`;
+            const strictSynopsisText = `【文学主脑至高契约：请彻底废弃历史缓存旧大纲，必须严格基于以下摘要进行正文扩写，维持情节深度连贯，严禁人设漂移OOC！】\n\n${stylePrompt}\n\n${sopBoundaryContract}\n\n${characterFactLock}\n\n${pacingBrakeContract}\n\n【好莱坞大片蓝图】：\n${longformState.storyBlueprint || '暂无，请以当前救猫咪类型和本章大纲建立商业叙事张力。'}\n\n【角色声音系统】：\n${longformState.characterVoice || '暂无，请确保主要角色对白有身份、性格、节奏和潜台词差异。'}\n\n【情感/关系线系统】：\n${longformState.relationshipLine || '暂无，请让关系变化由事件选择触发。'}\n\n【主题与母题追踪】：\n${longformState.themeMotif || '暂无，请让主题自然藏在选择、意象和代价中，不要说教。'}\n\n【本事件反派/阻力升级】：\n${longformState.oppositionPlans?.[key] || '暂无，请确保正文中存在清晰阻力、升级和代价。'}\n\n【本章场景卡】：\n${sceneCard || longformState.sceneCards?.[key] || '暂无'}\n\n【本章对白专项打磨】：\n${dialoguePlan || longformState.dialoguePolish?.[key] || '暂无'}\n\n【本章动作/场面导演】：\n${setpiecePlan || longformState.setpieceDirector?.[key] || '暂无'}\n\n【本章剧情起承转合】：\n${latestSynopsis}\n\n【统一规则/专家资料】：\n${worldRules}\n\n【必须100%严密契合的登场角色人设】：\n${characterDetails}\n\n【上帝视角信息权限】：\n${godViewContext}\n\n【正文质量监督标准】：\n${getUnifiedQualityGuardrails()}`;
 
             const ultraPayload = {
                 ...currentLocalContext,
@@ -7243,7 +7270,7 @@ ${sopEventBriefState.brief || '暂无'}
                 synopsis_text: strictSynopsisText,
                 characters: activeCharacters,
                 currentText: currentText,
-                qualityGuardrails: `${getUnifiedQualityGuardrails()}\n\n${sopBoundaryContract}\n\n${characterFactLock}`,
+                qualityGuardrails: `${getUnifiedQualityGuardrails()}\n\n${sopBoundaryContract}\n\n${characterFactLock}\n\n${pacingBrakeContract}`,
                 sceneCard: sceneCard || longformState.sceneCards?.[key] || '',
                 blockbusterContext: getLongformEditorialContext()
             };
