@@ -34,6 +34,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const GENESIS_CLOUD_TYPE = "上帝沙盒 · 创世圣经";
     const LONGFORM_STATE_KEY = `longform_editor_state_${PROJECT_ID}`;
     const LONGFORM_CLOUD_TYPE = "长篇连载编辑系统";
+    const CHAPTER_PIPELINE_KEY = `chapter_pipeline_state_${PROJECT_ID}`;
+    const CHAPTER_PIPELINE_CLOUD_TYPE = "章节展开流水线";
     const INTERACTION_STATE_KEY = `interaction_focus_state_${PROJECT_ID}`;
 
     if (!PROJECT_ID) { alert("非法侵入！即将返回大厅。"); window.location.href = 'dashboard.html'; return; }
@@ -60,6 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let sandboxPendingResolution = { items: [], activeIndex: 0, chat: [] };
     let sopEventBriefState = { chapterId: '', brief: '', confirmed: false, chat: [] };
     let sopWarningFixState = { reason: '', chat: [] };
+    let chapterPipelineState = loadChapterPipelineState();
     let sandboxNextQuestionRetryCount = 0;
     let sandboxRuleGateResumeTimer = null;
     let sopSupervisionGate = { blocked: false, reason: '' };
@@ -4495,6 +4498,650 @@ ${buildLongformBasePrompt()}
         }
     }
 
+    function getEmptyChapterPipelineState() {
+        return {
+            status: '未展开',
+            event_nodes: [],
+            character_state_tracks: [],
+            chapter_cuts: [],
+            chapter_packages: {},
+            reports: {},
+            updated_at: ''
+        };
+    }
+
+    function loadChapterPipelineState() {
+        try {
+            return { ...getEmptyChapterPipelineState(), ...(JSON.parse(localStorage.getItem(CHAPTER_PIPELINE_KEY) || '{}') || {}) };
+        } catch (e) {
+            return getEmptyChapterPipelineState();
+        }
+    }
+
+    function saveChapterPipelineState(options = {}) {
+        chapterPipelineState.updated_at = new Date().toISOString();
+        localStorage.setItem(CHAPTER_PIPELINE_KEY, JSON.stringify(chapterPipelineState));
+        if (window.syncToCloud && !options.localOnly) {
+            window.syncToCloud(CHAPTER_PIPELINE_CLOUD_TYPE, chapterPipelineState, { silent: true });
+        }
+        renderChapterPipelinePanel();
+    }
+
+    async function loadChapterPipelineStateFromCloud() {
+        try {
+            const res = await fetch(`/api/workspace/cloud-sync/${PROJECT_ID}?type=${encodeURIComponent(CHAPTER_PIPELINE_CLOUD_TYPE)}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.success && data.payload) {
+                chapterPipelineState = { ...getEmptyChapterPipelineState(), ...data.payload };
+                localStorage.setItem(CHAPTER_PIPELINE_KEY, JSON.stringify(chapterPipelineState));
+                renderChapterPipelinePanel();
+            }
+        } catch (e) {
+            console.warn('章节展开流水线恢复失败:', e);
+        }
+    }
+
+    function getCurrentChapterPipelineKey(chapterId = currentLocalContext.chapterId, chapterNumber = currentLocalContext.chapterNumber) {
+        return chapterId || `chapter_${chapterNumber || 'unknown'}`;
+    }
+
+    function normalizePipelineArray(value) {
+        return Array.isArray(value) ? value : [];
+    }
+
+    function getCurrentEventNodes() {
+        const chapterNumber = String(currentLocalContext.chapterNumber || '');
+        const chapterId = String(currentLocalContext.chapterId || '');
+        return normalizePipelineArray(chapterPipelineState.event_nodes).filter(node => {
+            const parentId = String(node.parent_event_id || '');
+            return parentId === chapterId
+                || parentId === `chapter_${chapterNumber}`
+                || String(node.parent_event_number || '') === chapterNumber
+                || String(node.chapter_number || '') === chapterNumber;
+        });
+    }
+
+    function getCurrentChapterPackage() {
+        const key = getCurrentChapterPipelineKey();
+        return chapterPipelineState.chapter_packages?.[key] || null;
+    }
+
+    function setPipelineStatus(status, report = '') {
+        chapterPipelineState.status = status;
+        if (report) {
+            chapterPipelineState.reports = { ...(chapterPipelineState.reports || {}), last: report };
+        }
+        saveChapterPipelineState();
+        if (report) renderDeviationItems([report]);
+    }
+
+    function buildPipelineCanonPrompt() {
+        const bible = getCurrentBibleSnapshot() || {};
+        const orderedChapters = workspaceChapters.length ? workspaceChapters : normalizePipelineArray(bible.chapters);
+        return `【章节展开最高事实源】
+以下沙盒 Bible 是展开依据。你必须把骨架拆成可写节点，不能写正文，不能新增重大设定。
+
+【完整沙盒 Bible】
+${limitText(JSON.stringify(compactBibleForPrompt(bible) || {}, null, 2), 9000)}
+
+【数据库/阅读顺序事件列表】
+${orderedChapters.map(ch => `事件 ${ch.chapter_number || '-'}《${ch.title || ''}》：${ch.content || ''}`).join('\n\n') || '暂无'}
+
+【世界规则/专家资料】
+${getWorldRulesText()}
+
+【上帝视角信息权限：只供后台检测】
+${formatGodViewContext(bible)}
+
+${buildInformationFirewallPrompt()}`;
+    }
+
+    async function requestPipelineJson(prompt, validator = () => true) {
+        const res = await fetch('/api/chat/deduce', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildChatPayloadWithLocalSources([{ role: 'user', content: prompt }], 1, prompt))
+        });
+        const data = await readApiJson(res, '章节展开请求失败');
+        if (!data.success) throw new Error(data.error || '章节展开请求失败');
+        const parsed = extractJsonObjectFromText(data.reply || '');
+        if (!parsed || !validator(parsed)) throw new Error(`AI 没有返回符合要求的 JSON。\n${limitText(data.reply || '', 1000)}`);
+        return parsed;
+    }
+
+    function buildEventExpansionPrompt() {
+        return `${buildPipelineCanonPrompt()}
+
+你是“细化事件展开引擎”。请把沙盒大事件拆成 event_nodes。
+
+硬规则：
+1. 每个普通事件 3-5 个节点；关键转折 5-8 个节点；高潮/至暗/终局 6-10 个节点；过渡事件 2-4 个节点但必须有状态变化。
+2. 每个大事件至少包含：触发、人物主动选择、阻力/对抗、代价或不可逆后果、过渡到下一事件。
+3. 每个节点必须满足四段因果：因为前一节点结果/人物状态/外部压力，所以某人物采取行动，但遇到阻力或限制，因此产生代价、信息变化或状态变化，并触发下一节点。
+4. 禁止只有气氛、无行动或无信息变化；禁止靠巧合获得关键线索；禁止人物无动机行动；禁止反派无理由犯蠢；禁止提前解决后续事件；禁止让角色知道不该知道的信息。
+5. 输出只允许 JSON，不要解释。
+
+输出格式：
+{
+  "event_nodes": [
+    {
+      "node_id": "E01-N01",
+      "parent_event_id": "chapter_1",
+      "parent_event_number": 1,
+      "parent_event_title": "",
+      "node_order": 1,
+      "node_type": "触发/调查/选择/对抗/反应/关系/线索/反转/代价/过渡",
+      "summary": "",
+      "trigger": "",
+      "actor_ids": [],
+      "actor_motivation": "",
+      "obstacle": "",
+      "choice": "",
+      "cost": "",
+      "result": "",
+      "irreversible_change": "",
+      "audience_info_gain": [],
+      "character_knowledge_changes": [],
+      "relationship_changes": [],
+      "foreshadowing_action": [],
+      "rule_constraints_used": [],
+      "must_not_reveal": [],
+      "next_trigger": "",
+      "quality_function": "推进因果/制造阻力/释放线索/关系变化/情绪消化/伏笔处理"
+    }
+  ]
+}`;
+    }
+
+    function getEventExpansionLocalIssues(nodes = chapterPipelineState.event_nodes) {
+        const issues = [];
+        const list = normalizePipelineArray(nodes);
+        if (list.length === 0) issues.push('没有生成任何 event_nodes。');
+        const grouped = new Map();
+        list.forEach(node => {
+            const parent = node.parent_event_id || `chapter_${node.parent_event_number || node.chapter_number || 'unknown'}`;
+            if (!grouped.has(parent)) grouped.set(parent, []);
+            grouped.get(parent).push(node);
+            ['summary', 'trigger', 'actor_motivation', 'obstacle', 'choice', 'cost', 'result', 'next_trigger'].forEach(field => {
+                if (!String(node[field] || '').trim()) issues.push(`${node.node_id || parent} 缺少 ${field}，不能通过四段因果检查。`);
+            });
+            const hasChange = [
+                node.irreversible_change,
+                ...(node.audience_info_gain || []),
+                ...(node.character_knowledge_changes || []),
+                ...(node.relationship_changes || []),
+                ...(node.foreshadowing_action || [])
+            ].some(Boolean);
+            if (!hasChange) issues.push(`${node.node_id || parent} 没有可检测的信息/状态/关系/伏笔变化。`);
+        });
+        const existingEvents = workspaceChapters.length ? workspaceChapters : normalizePipelineArray(getCurrentBibleSnapshot()?.chapters);
+        existingEvents.forEach(ch => {
+            const keyA = String(ch.id || '');
+            const keyB = `chapter_${ch.chapter_number || ''}`;
+            const matched = normalizePipelineArray(nodes).filter(node =>
+                String(node.parent_event_id || '') === keyA
+                || String(node.parent_event_id || '') === keyB
+                || Number(node.parent_event_number || node.chapter_number) === Number(ch.chapter_number)
+            );
+            if (matched.length === 0) issues.push(`事件 ${ch.chapter_number}《${ch.title || ''}》没有对应展开节点。`);
+            const isTransitionEvent = /过渡|反应|余波|铺垫|间章|休整/.test(`${ch.title || ''}${ch.content || ''}`);
+            const minNodes = isTransitionEvent ? 2 : 3;
+            if (matched.length > 0 && matched.length < minNodes) issues.push(`事件 ${ch.chapter_number}《${ch.title || ''}》节点过少，至少需要 ${minNodes} 个节点。`);
+        });
+        return issues.slice(0, 20);
+    }
+
+    async function generateEventExpansion() {
+        setPipelineStatus('展开中', '正在生成细化事件链...');
+        const parsed = await requestPipelineJson(buildEventExpansionPrompt(), value => Array.isArray(value.event_nodes));
+        chapterPipelineState.event_nodes = parsed.event_nodes || [];
+        chapterPipelineState.character_state_tracks = [];
+        chapterPipelineState.chapter_cuts = [];
+        chapterPipelineState.chapter_packages = {};
+        setPipelineStatus('展开待检测', `已生成 ${chapterPipelineState.event_nodes.length} 个细化事件节点，请先检测事件链。`);
+    }
+
+    async function auditEventExpansion() {
+        const localIssues = getEventExpansionLocalIssues();
+        if (localIssues.length) {
+            setPipelineStatus('展开检测未通过', `【红色警报】事件展开本地检测未通过：\n${localIssues.join('\n')}`);
+            return false;
+        }
+        const prompt = `${buildPipelineCanonPrompt()}
+
+【待检测 event_nodes】
+${JSON.stringify(chapterPipelineState.event_nodes || [], null, 2)}
+
+你是事件展开闸门。请检查：节点是否覆盖所有沙盒大事件；节点之间是否有因果链；人物行动是否来自人物卡和当前状态；是否存在巧合、降智、反派犯蠢；是否提前泄露 hidden/partial 真相；是否违反规则/专家资料；是否缺少人物状态变化。
+
+输出格式：
+【结论】通过/不通过
+【红色问题】
+【黄色问题】
+【最小修复建议】`;
+        renderDeviationItems(['事件展开闸门检测中...']);
+        const res = await fetch('/api/chat/deduce', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildChatPayloadWithLocalSources([{ role: 'user', content: prompt }], 1, prompt))
+        });
+        const data = await readApiJson(res, '事件展开检测失败');
+        const report = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `事件展开检测失败：${data.error || '未知错误'}`;
+        const failed = /【结论】\s*不通过|结论[:：]\s*不通过|红色问题[\s\S]*(违反|泄露|无动机|巧合|降智|不成立|缺少|不能)/.test(report || '');
+        chapterPipelineState.reports = { ...(chapterPipelineState.reports || {}), eventExpansion: report };
+        setPipelineStatus(failed ? '展开检测未通过' : '可生成章节包', report);
+        return !failed;
+    }
+
+    function buildCharacterStateTracksPrompt() {
+        return `${buildPipelineCanonPrompt()}
+
+【已通过或待用 event_nodes】
+${JSON.stringify(chapterPipelineState.event_nodes || [], null, 2)}
+
+请生成 character_state_tracks。规则：
+1. 每个主要人物按节点记录目标、动机、误解/信念、情绪、知情范围、资源、伤势/限制、关系状态、弧线阶段、相对上一节点变化、下一步行动倾向。
+2. 人物状态只能逐节点推进，不能跳变。
+3. 如果人物状态没有变化，必须在 change_from_previous 说明为什么保持不变。
+4. 只输出 JSON。
+
+输出格式：
+{
+  "character_state_tracks": [
+    {
+      "character_id": "",
+      "name": "",
+      "states": [
+        {
+          "node_id": "",
+          "goal": "",
+          "motivation": "",
+          "belief_or_misbelief": "",
+          "emotion": "",
+          "knowledge_state": "",
+          "resource_state": "",
+          "injury_or_limit": "",
+          "relationship_state": "",
+          "arc_stage": "",
+          "change_from_previous": "",
+          "next_action_tendency": ""
+        }
+      ]
+    }
+  ]
+}`;
+    }
+
+    async function generateCharacterStateTracks() {
+        if (!chapterPipelineState.event_nodes?.length) return alert('请先生成细化事件链。');
+        const parsed = await requestPipelineJson(buildCharacterStateTracksPrompt(), value => Array.isArray(value.character_state_tracks));
+        chapterPipelineState.character_state_tracks = parsed.character_state_tracks || [];
+        setPipelineStatus('可生成章节包', `已生成人物状态轨道：${chapterPipelineState.character_state_tracks.length} 人。`);
+    }
+
+    function buildChapterCutsPrompt() {
+        return `${buildPipelineCanonPrompt()}
+
+【event_nodes】
+${JSON.stringify(chapterPipelineState.event_nodes || [], null, 2)}
+
+【character_state_tracks】
+${JSON.stringify(chapterPipelineState.character_state_tracks || [], null, 2)}
+
+请从 event_nodes 切分章节。规则：
+1. 一章默认包含 2-5 个节点；高潮章 1-3 个高密度节点；过渡/反应章 3-6 个低压节点。
+2. 每章必须有 opening_state、chapter_goal、core_obstacle、info_or_relationship_change、ending_hook、next_trigger。
+3. 不能跨越重大真相揭露边界、人物弧线阶段边界、六节点关键转折边界、时间线不可逆事件边界、观众/上帝视角权限边界。
+4. 只输出 JSON。
+
+输出格式：
+{
+  "chapter_cuts": [
+    {
+      "chapter_id": "",
+      "chapter_number": 1,
+      "title": "",
+      "node_ids": [],
+      "opening_state": "",
+      "chapter_goal": "",
+      "core_obstacle": "",
+      "info_or_relationship_change": "",
+      "ending_state": "",
+      "ending_hook": "",
+      "next_trigger": "",
+      "pacing_type": "推进/反应/关系/调查/铺垫/高潮"
+    }
+  ]
+}`;
+    }
+
+    async function generateChapterCuts() {
+        if (!chapterPipelineState.event_nodes?.length) return alert('请先生成细化事件链。');
+        if (!chapterPipelineState.character_state_tracks?.length) await generateCharacterStateTracks();
+        const parsed = await requestPipelineJson(buildChapterCutsPrompt(), value => Array.isArray(value.chapter_cuts));
+        chapterPipelineState.chapter_cuts = parsed.chapter_cuts || [];
+        setPipelineStatus('章节切分待检测', `已完成章节切分：${chapterPipelineState.chapter_cuts.length} 章，请先检测章节切分。`);
+    }
+
+    function getChapterCutsLocalIssues(cuts = chapterPipelineState.chapter_cuts) {
+        const issues = [];
+        const list = normalizePipelineArray(cuts);
+        const nodeIds = new Set(normalizePipelineArray(chapterPipelineState.event_nodes).map(node => String(node.node_id || '')));
+        if (list.length === 0) issues.push('没有生成章节切分。');
+        list.forEach(cut => {
+            const label = `章节 ${cut.chapter_number || '-'}《${cut.title || ''}》`;
+            if (!Array.isArray(cut.node_ids) || cut.node_ids.length === 0) issues.push(`${label} 没有关联 event_nodes。`);
+            (cut.node_ids || []).forEach(id => {
+                if (!nodeIds.has(String(id))) issues.push(`${label} 引用了不存在的节点 ${id}。`);
+            });
+            ['opening_state', 'chapter_goal', 'core_obstacle', 'info_or_relationship_change', 'ending_hook', 'next_trigger'].forEach(field => {
+                if (!String(cut[field] || '').trim()) issues.push(`${label} 缺少 ${field}。`);
+            });
+        });
+        return issues.slice(0, 20);
+    }
+
+    async function auditChapterCuts() {
+        const localIssues = getChapterCutsLocalIssues();
+        if (localIssues.length) {
+            setPipelineStatus('章节切分检测未通过', `【红色警报】章节切分本地检测未通过：\n${localIssues.join('\n')}`);
+            return false;
+        }
+        const prompt = `${buildPipelineCanonPrompt()}
+
+【event_nodes】
+${JSON.stringify(chapterPipelineState.event_nodes || [], null, 2)}
+
+【chapter_cuts】
+${JSON.stringify(chapterPipelineState.chapter_cuts || [], null, 2)}
+
+你是章节切分闸门。请检查：每章是否有明确开头/结尾；是否有冲突、信息变化、关系变化或状态变化；是否提前越过下一事件；是否有节奏过载或连续爆点；是否遗漏必须回收/种下的伏笔；是否跨越重大真相揭露边界、人物弧线阶段边界、六节点关键转折边界、时间线不可逆事件边界、观众视角与上帝视角权限边界。
+
+输出：
+【结论】通过/不通过
+【红色问题】
+【黄色问题】
+【最小修复建议】`;
+        renderDeviationItems(['章节切分闸门检测中...']);
+        const res = await fetch('/api/chat/deduce', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildChatPayloadWithLocalSources([{ role: 'user', content: prompt }], 1, prompt))
+        });
+        const data = await readApiJson(res, '章节切分检测失败');
+        const report = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `章节切分检测失败：${data.error || '未知错误'}`;
+        const failed = /【结论】\s*不通过|结论[:：]\s*不通过|红色问题[\s\S]*(跨越|遗漏|越过|过载|缺少|泄露|违反|不能)/.test(report || '');
+        chapterPipelineState.reports = { ...(chapterPipelineState.reports || {}), chapterCuts: report };
+        setPipelineStatus(failed ? '章节切分检测未通过' : '可生成章节包', report);
+        return !failed;
+    }
+
+    function getCurrentChapterCut() {
+        const chapterId = String(currentLocalContext.chapterId || '');
+        const chapterNumber = Number(currentLocalContext.chapterNumber || 0);
+        return normalizePipelineArray(chapterPipelineState.chapter_cuts).find(cut =>
+            String(cut.chapter_id || '') === chapterId || Number(cut.chapter_number || 0) === chapterNumber
+        ) || null;
+    }
+
+    function buildChapterPackagePrompt() {
+        const cut = getCurrentChapterCut();
+        const currentNodes = cut?.node_ids?.length
+            ? normalizePipelineArray(chapterPipelineState.event_nodes).filter(node => cut.node_ids.includes(node.node_id))
+            : getCurrentEventNodes();
+        return `${buildPipelineCanonPrompt()}
+
+【当前章节】
+事件 ${currentLocalContext.chapterNumber}《${currentLocalContext.title}》
+
+【当前章节切分】
+${JSON.stringify(cut || {}, null, 2)}
+
+【本章 event_nodes】
+${JSON.stringify(currentNodes, null, 2)}
+
+【character_state_tracks】
+${JSON.stringify(chapterPipelineState.character_state_tracks || [], null, 2)}
+
+请生成“章节写作包”。章节包正文侧不能包含完整上帝视角，只能包含观众视角、角色视角、can_hint、must_hide。必须从 event_nodes 和人物状态轨道提取，不得新增重大剧情。
+
+只输出 JSON：
+{
+  "chapter_identity": {"chapter_id":"","chapter_number":1,"title":"","source_event_nodes":[],"chapter_type":"","target_words":0},
+  "chapter_goal": "",
+  "opening_state": "",
+  "ending_state": "",
+  "must_write": [],
+  "may_write": [],
+  "must_not_write": [],
+  "active_characters": [],
+  "information_permissions": {"audience_knows":[],"pov_character_knows":[],"other_characters_know":[],"can_reveal":[],"can_hint":[],"must_hide":[]},
+  "rules_constraints": [],
+  "foreshadowing": {"must_payoff":[],"can_plant":[]},
+  "scene_chain": [],
+  "style_target": {"mood":"","pacing":"","reader_feeling":"","ending_hook":"","writing_style":""},
+  "acceptance_checks": []
+}`;
+    }
+
+    async function generateChapterPackage() {
+        if (!chapterPipelineState.event_nodes?.length) return alert('请先生成并检测细化事件链。');
+        const eventReport = chapterPipelineState.reports?.eventExpansion || '';
+        if (chapterPipelineState.status !== '可生成章节包' && !/【结论】\s*通过|结论[:：]\s*通过/.test(eventReport)) {
+            return alert('事件链还没有通过检测。请先点击“检测事件链”，通过后才能生成章节包。');
+        }
+        if (!chapterPipelineState.character_state_tracks?.length) await generateCharacterStateTracks();
+        if (!chapterPipelineState.chapter_cuts?.length) await generateChapterCuts();
+        const cutReport = chapterPipelineState.reports?.chapterCuts || '';
+        if (!/【结论】\s*通过|结论[:：]\s*通过/.test(cutReport)) {
+            const passed = await auditChapterCuts();
+            if (!passed) return;
+        }
+        const parsed = await requestPipelineJson(buildChapterPackagePrompt(), value => value.chapter_identity && Array.isArray(value.must_write));
+        const key = getCurrentChapterPipelineKey();
+        chapterPipelineState.chapter_packages = { ...(chapterPipelineState.chapter_packages || {}), [key]: { ...parsed, audit_status: '待检测' } };
+        setPipelineStatus('章节包待检测', `已生成事件 ${currentLocalContext.chapterNumber}《${currentLocalContext.title}》章节包，请检测后再扩写。`);
+    }
+
+    function formatChapterPackageSynopsis(pkg = getCurrentChapterPackage()) {
+        if (!pkg) return '';
+        const list = value => Array.isArray(value) && value.length
+            ? value.map((item, index) => `${index + 1}. ${typeof item === 'string' ? item : JSON.stringify(item)}`).join('\n')
+            : '暂无';
+        return `【章节写作包已通过闸门】
+章节：${pkg.chapter_identity?.chapter_number || currentLocalContext.chapterNumber}《${pkg.chapter_identity?.title || currentLocalContext.title}》
+
+【本章目标】
+${pkg.chapter_goal || '暂无'}
+
+【开场状态】
+${pkg.opening_state || '暂无'}
+
+【结尾状态】
+${pkg.ending_state || '暂无'}
+
+【必须写入的事件结果】
+${list(pkg.must_write)}
+
+【可写表现层】
+${list(pkg.may_write)}
+
+【禁止越界内容】
+${list(pkg.must_not_write)}
+
+【本章场景链】
+${list(pkg.scene_chain)}
+
+【本章信息权限】
+${JSON.stringify(pkg.information_permissions || {}, null, 2)}
+
+【规则与伏笔】
+规则：${list(pkg.rules_constraints)}
+伏笔：${JSON.stringify(pkg.foreshadowing || {}, null, 2)}
+
+此章节包是正文扩写的唯一执行源。`;
+    }
+
+    async function applyChapterPackageToCurrentSynopsis(pkg = getCurrentChapterPackage()) {
+        if (!pkg) return;
+        const synopsis = formatChapterPackageSynopsis(pkg);
+        if (editorSopConflict) editorSopConflict.innerText = synopsis;
+        currentLocalContext.synopsis = synopsis;
+        updateLatestBibleChapterFields({ content: synopsis });
+        try {
+            await fetch('/api/workspace/save-synopsis', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chapterId: currentLocalContext.chapterId, synopsis })
+            });
+            await window.syncToCloud?.("章节展开流水线 · 当前章节包", {
+                chapterId: currentLocalContext.chapterId,
+                chapterNumber: currentLocalContext.chapterNumber,
+                synopsis,
+                package: pkg
+            }, { silent: true });
+        } catch (err) {
+            console.warn('章节包写回当前章失败:', err);
+        }
+    }
+
+    function getChapterPackageLocalIssues(pkg = getCurrentChapterPackage()) {
+        const issues = [];
+        if (!pkg) return ['当前章节包不存在。'];
+        if (!Array.isArray(pkg.must_write) || pkg.must_write.length === 0) issues.push('must_write 为空，正文没有硬事件依据。');
+        if (!Array.isArray(pkg.must_not_write) || pkg.must_not_write.length < 4) issues.push('must_not_write 不足，缺少反向边界。');
+        if (!Array.isArray(pkg.active_characters) || pkg.active_characters.length === 0) issues.push('active_characters 为空，人物状态无法锁定。');
+        if (!pkg.opening_state || !pkg.ending_state) issues.push('缺少 opening_state 或 ending_state。');
+        if (!pkg.information_permissions?.must_hide) issues.push('缺少 information_permissions.must_hide。');
+        if (!Array.isArray(pkg.scene_chain) || pkg.scene_chain.length === 0) issues.push('scene_chain 为空，正文容易临时补场景。');
+        return issues;
+    }
+
+    async function auditChapterPackage() {
+        const pkg = getCurrentChapterPackage();
+        const localIssues = getChapterPackageLocalIssues(pkg);
+        if (localIssues.length) {
+            const report = `【红色警报】章节包本地检测未通过：\n${localIssues.join('\n')}`;
+            if (pkg) pkg.audit_status = '不通过';
+            setPipelineStatus('章节包检测未通过', report);
+            return false;
+        }
+        const prompt = `${buildPipelineCanonPrompt()}
+
+【当前章节包】
+${JSON.stringify(pkg, null, 2)}
+
+【event_nodes】
+${JSON.stringify(chapterPipelineState.event_nodes || [], null, 2)}
+
+【character_state_tracks】
+${JSON.stringify(chapterPipelineState.character_state_tracks || [], null, 2)}
+
+你是章节包闸门。请检查：章节包是否只包含本章信息；是否继承正确人物状态；是否隐藏上帝视角；must_not_write 是否覆盖关键禁区；是否足够支撑正文扩写；是否提前越过下一事件。
+
+输出：
+【结论】通过/不通过
+【红色问题】
+【黄色问题】
+【最小修复建议】`;
+        renderDeviationItems(['章节包闸门检测中...']);
+        const res = await fetch('/api/chat/deduce', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildChatPayloadWithLocalSources([{ role: 'user', content: prompt }], 1, prompt))
+        });
+        const data = await readApiJson(res, '章节包检测失败');
+        const report = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `章节包检测失败：${data.error || '未知错误'}`;
+        const failed = /【结论】\s*不通过|结论[:：]\s*不通过|红色问题[\s\S]*(泄露|越过|缺少|不符合|违反|不能)/.test(report || '');
+        const key = getCurrentChapterPipelineKey();
+        chapterPipelineState.chapter_packages[key] = { ...pkg, audit_status: failed ? '不通过' : '通过', audit_report: report };
+        setPipelineStatus(failed ? '章节包检测未通过' : '可扩写正文', report);
+        if (!failed) await applyChapterPackageToCurrentSynopsis(chapterPipelineState.chapter_packages[key]);
+        return !failed;
+    }
+
+    function buildChapterPackageWritingContract() {
+        const pkg = getCurrentChapterPackage();
+        if (!pkg) return '';
+        return `【章节写作包：正文唯一执行源】
+正文只能扩写以下章节包。可以润色环境、动作、心理、对白、节奏；不得新增关键人物、能力、道具、关系、规则、事件结果；不得越过 ending_state；不得泄露 must_hide；不得让角色知道 knowledge_state 之外的信息。
+
+${JSON.stringify(pkg, null, 2)}`;
+    }
+
+    function ensureChapterPipelinePanel() {
+        if (!viewSop || document.getElementById('chapter-pipeline-panel')) return;
+        const header = viewSop.querySelector('.border-b');
+        header?.insertAdjacentHTML('afterend', `
+            <div id="chapter-pipeline-panel" class="border-b border-gray-800 bg-gray-950/80 p-3 space-y-3">
+                <div class="flex items-center justify-between gap-3">
+                    <div>
+                        <div class="text-[10px] font-black text-cyan-300 tracking-wider">章节展开流水线</div>
+                        <div id="chapter-pipeline-status" class="text-[11px] text-gray-400 mt-0.5">未展开</div>
+                    </div>
+                    <div class="flex flex-wrap gap-1.5 justify-end">
+                        <button id="btn-generate-event-expansion" class="px-2 py-1 bg-cyan-900/40 text-cyan-200 border border-cyan-800 rounded text-[10px] font-bold hover:bg-cyan-700">生成细化事件链</button>
+                        <button id="btn-audit-event-expansion" class="px-2 py-1 bg-amber-900/40 text-amber-200 border border-amber-800 rounded text-[10px] font-bold hover:bg-amber-700">检测事件链</button>
+                        <button id="btn-generate-state-tracks" class="px-2 py-1 bg-blue-900/40 text-blue-200 border border-blue-800 rounded text-[10px] font-bold hover:bg-blue-700">人物状态轨道</button>
+                        <button id="btn-audit-chapter-cuts" class="px-2 py-1 bg-indigo-900/40 text-indigo-200 border border-indigo-800 rounded text-[10px] font-bold hover:bg-indigo-700">检测章节切分</button>
+                        <button id="btn-generate-chapter-package" class="px-2 py-1 bg-purple-900/40 text-purple-200 border border-purple-800 rounded text-[10px] font-bold hover:bg-purple-700">生成章节包</button>
+                        <button id="btn-audit-chapter-package" class="px-2 py-1 bg-rose-900/40 text-rose-200 border border-rose-800 rounded text-[10px] font-bold hover:bg-rose-700">检测章节包</button>
+                        <button id="btn-write-from-chapter-package" class="px-2 py-1 bg-emerald-900/40 text-emerald-200 border border-emerald-800 rounded text-[10px] font-bold hover:bg-emerald-700">基于章节包扩写</button>
+                    </div>
+                </div>
+                <details class="text-xs text-gray-300">
+                    <summary class="cursor-pointer text-gray-400 hover:text-white">查看当前事件链/章节包摘要</summary>
+                    <div id="chapter-pipeline-preview" class="mt-2 max-h-48 overflow-y-auto bg-gray-900 border border-gray-800 rounded-lg p-2 whitespace-pre-wrap"></div>
+                </details>
+            </div>
+        `);
+        document.getElementById('btn-generate-event-expansion')?.addEventListener('click', () => runPipelineAction(generateEventExpansion));
+        document.getElementById('btn-audit-event-expansion')?.addEventListener('click', () => runPipelineAction(auditEventExpansion));
+        document.getElementById('btn-generate-state-tracks')?.addEventListener('click', () => runPipelineAction(generateCharacterStateTracks));
+        document.getElementById('btn-audit-chapter-cuts')?.addEventListener('click', () => runPipelineAction(async () => {
+            if (!chapterPipelineState.chapter_cuts?.length) await generateChapterCuts();
+            await auditChapterCuts();
+        }));
+        document.getElementById('btn-generate-chapter-package')?.addEventListener('click', () => runPipelineAction(generateChapterPackage));
+        document.getElementById('btn-audit-chapter-package')?.addEventListener('click', () => runPipelineAction(auditChapterPackage));
+        document.getElementById('btn-write-from-chapter-package')?.addEventListener('click', async () => {
+            const pkg = getCurrentChapterPackage();
+            if (!pkg || pkg.audit_status !== '通过') return alert('章节包未通过检测，不能扩写正文。');
+            if (tabEditor) tabEditor.click();
+            btnAiWrite?.click();
+        });
+        renderChapterPipelinePanel();
+        if (window.lucide) lucide.createIcons();
+    }
+
+    async function runPipelineAction(fn) {
+        try {
+            await fn();
+        } catch (error) {
+            setPipelineStatus('章节展开失败', `章节展开流水线失败：${error.message || '未知错误'}`);
+        }
+    }
+
+    function renderChapterPipelinePanel() {
+        const status = document.getElementById('chapter-pipeline-status');
+        const preview = document.getElementById('chapter-pipeline-preview');
+        if (status) {
+            const pkg = getCurrentChapterPackage();
+            status.textContent = `${chapterPipelineState.status || '未展开'} · 节点 ${chapterPipelineState.event_nodes?.length || 0} · 状态轨道 ${chapterPipelineState.character_state_tracks?.length || 0} · 当前章节包 ${pkg ? (pkg.audit_status || '待检测') : '无'}`;
+        }
+        if (preview) {
+            const nodes = getCurrentEventNodes().slice(0, 8).map(node =>
+                `${node.node_id || '-'}【${node.node_type || '-'}】${node.summary || ''}\n动机：${node.actor_motivation || '-'}\n阻力：${node.obstacle || '-'}\n结果：${node.result || '-'}\n下一触发：${node.next_trigger || '-'}`
+            ).join('\n\n');
+            const pkg = getCurrentChapterPackage();
+            preview.textContent = [
+                nodes ? `【当前事件节点】\n${nodes}` : '【当前事件节点】暂无',
+                pkg ? `【当前章节包】\n目标：${pkg.chapter_goal || '-'}\n开场：${pkg.opening_state || '-'}\n结尾：${pkg.ending_state || '-'}\n禁止：${(pkg.must_not_write || []).slice(0, 6).join('；')}` : '【当前章节包】暂无'
+            ].join('\n\n');
+        }
+    }
+
     function loadLongformState() {
         try {
             return JSON.parse(localStorage.getItem(LONGFORM_STATE_KEY)) || {};
@@ -4569,6 +5216,7 @@ ${getLongformEditorialContext()}`;
         const eventContext = getAdjacentEventContext(currentLocalContext.chapterNumber);
         const eventBriefState = loadSopEventBriefState(currentLocalContext.chapterId);
         const finalOutline = (editorSopConflict?.innerText || currentLocalContext.synopsis || '').trim();
+        const chapterPackageContract = buildChapterPackageWritingContract();
         const confirmedBrief = eventBriefState.confirmed && eventBriefState.brief
             ? eventBriefState.brief
             : '未找到已确认事件梗概。若当前操作是正文执笔或重写，必须先以最终 SOP 大纲为准，不得新增改变因果的重大细节。';
@@ -4590,7 +5238,9 @@ ${eventContext.endInfo}
 【已确认的本事件故事梗概】
 ${confirmedBrief}
 【最终SOP大纲】
-${finalOutline || '暂无最终大纲。'}`;
+${finalOutline || '暂无最终大纲。'}
+
+${chapterPackageContract}`;
     }
 
     function buildPacingBrakePrompt() {
@@ -6681,6 +7331,8 @@ if (data.success) {
                 const lastSopHistoryItem = currentChapterChatHistory[currentChapterChatHistory.length - 1] || {};
                 loadSopEventBriefState(chapterId);
                 refreshSopCompletionSignal(lastSopHistoryItem.content || '');
+                ensureChapterPipelinePanel();
+                renderChapterPipelinePanel();
 
                 // 💥 伏笔区修复：分为本章回收与本章种下两类
                 if (localHooks) {
@@ -7493,6 +8145,14 @@ ${buildPacingBrakePrompt()}
 
         btnAiWrite.addEventListener('click', async () => {
             if (!editorTextarea) return;
+            const currentChapterPackage = getCurrentChapterPackage();
+            if (!currentChapterPackage || currentChapterPackage.audit_status !== '通过') {
+                alert('章节包尚未通过检测，不能扩写正文。请先在 SOP 顶部执行：生成细化事件链 → 检测事件链 → 生成章节包 → 检测章节包。');
+                if (tabSop) tabSop.click();
+                ensureChapterPipelinePanel();
+                renderChapterPipelinePanel();
+                return;
+            }
             const currentText = editorTextarea.value.trim();
 
             // 1. 提取大纲摘要
@@ -7522,11 +8182,12 @@ ${buildPacingBrakePrompt()}
             const key = getLongformChapterKey();
             const godViewContext = formatGodViewContext();
             const sopCanonContract = buildSopCanonPrompt();
+            const chapterPackageContract = buildChapterPackageWritingContract();
             const sopBoundaryContract = buildSopWritingBoundaryPrompt();
             const pacingBrakeContract = buildPacingBrakePrompt();
 
             // 5. 💥 终极 Payload 融合：将文笔风格无缝缝合进最顶级的强约束提示词中！
-            const strictSynopsisText = `【文学主脑至高契约：请彻底废弃历史缓存旧大纲，必须严格基于以下摘要进行正文扩写，维持情节深度连贯，严禁人设漂移OOC！】\n\n${stylePrompt}\n\n${sopCanonContract}\n\n${sopBoundaryContract}\n\n${characterFactLock}\n\n${pacingBrakeContract}\n\n【好莱坞大片蓝图】：\n${longformState.storyBlueprint || '暂无，请以当前救猫咪类型和本章大纲建立商业叙事张力。'}\n\n【角色声音系统】：\n${longformState.characterVoice || '暂无，请确保主要角色对白有身份、性格、节奏和潜台词差异。'}\n\n【情感/关系线系统】：\n${longformState.relationshipLine || '暂无，请让关系变化由事件选择触发。'}\n\n【主题与母题追踪】：\n${longformState.themeMotif || '暂无，请让主题自然藏在选择、意象和代价中，不要说教。'}\n\n【本事件反派/阻力升级】：\n${longformState.oppositionPlans?.[key] || '暂无，请确保正文中存在清晰阻力、升级和代价。'}\n\n【本章场景卡】：\n${sceneCard || longformState.sceneCards?.[key] || '暂无'}\n\n【本章对白专项打磨】：\n${dialoguePlan || longformState.dialoguePolish?.[key] || '暂无'}\n\n【本章动作/场面导演】：\n${setpiecePlan || longformState.setpieceDirector?.[key] || '暂无'}\n\n【本章剧情起承转合】：\n${latestSynopsis}\n\n【统一规则/专家资料】：\n${worldRules}\n\n【必须100%严密契合的登场角色人设】：\n${characterDetails}\n\n【上帝视角信息权限】：\n${godViewContext}\n\n${buildInformationFirewallPrompt()}\n\n【正文质量监督标准】：\n${getUnifiedQualityGuardrails()}`;
+            const strictSynopsisText = `【文学主脑至高契约：请彻底废弃历史缓存旧大纲，必须严格基于“已通过检测的章节写作包”进行正文扩写，维持情节深度连贯，严禁人设漂移OOC！】\n\n${stylePrompt}\n\n${chapterPackageContract}\n\n${sopCanonContract}\n\n${sopBoundaryContract}\n\n${characterFactLock}\n\n${pacingBrakeContract}\n\n【好莱坞大片蓝图】：\n${longformState.storyBlueprint || '暂无，请以当前救猫咪类型和本章大纲建立商业叙事张力。'}\n\n【角色声音系统】：\n${longformState.characterVoice || '暂无，请确保主要角色对白有身份、性格、节奏和潜台词差异。'}\n\n【情感/关系线系统】：\n${longformState.relationshipLine || '暂无，请让关系变化由事件选择触发。'}\n\n【主题与母题追踪】：\n${longformState.themeMotif || '暂无，请让主题自然藏在选择、意象和代价中，不要说教。'}\n\n【本事件反派/阻力升级】：\n${longformState.oppositionPlans?.[key] || '暂无，请确保正文中存在清晰阻力、升级和代价。'}\n\n【本章场景卡】：\n${sceneCard || longformState.sceneCards?.[key] || '暂无'}\n\n【本章对白专项打磨】：\n${dialoguePlan || longformState.dialoguePolish?.[key] || '暂无'}\n\n【本章动作/场面导演】：\n${setpiecePlan || longformState.setpieceDirector?.[key] || '暂无'}\n\n【本章剧情起承转合】：\n${latestSynopsis}\n\n【统一规则/专家资料】：\n${worldRules}\n\n【必须100%严密契合的登场角色人设】：\n${characterDetails}\n\n【上帝视角信息权限，仅供后台检测，不得写入观众未获知内容】：\n${godViewContext}\n\n${buildInformationFirewallPrompt()}\n\n【正文质量监督标准】：\n${getUnifiedQualityGuardrails()}`;
 
             const ultraPayload = {
                 ...currentLocalContext,
@@ -7535,7 +8196,7 @@ ${buildPacingBrakePrompt()}
                 synopsis_text: strictSynopsisText,
                 characters: activeCharacters,
                 currentText: currentText,
-                qualityGuardrails: `${getUnifiedQualityGuardrails()}\n\n${sopCanonContract}\n\n${sopBoundaryContract}\n\n${characterFactLock}\n\n${pacingBrakeContract}\n\n${buildInformationFirewallPrompt()}`,
+                qualityGuardrails: `${getUnifiedQualityGuardrails()}\n\n${chapterPackageContract}\n\n${sopCanonContract}\n\n${sopBoundaryContract}\n\n${characterFactLock}\n\n${pacingBrakeContract}\n\n${buildInformationFirewallPrompt()}`,
                 sceneCard: sceneCard || longformState.sceneCards?.[key] || '',
                 blockbusterContext: getLongformEditorialContext()
             };
@@ -7801,6 +8462,9 @@ ${buildPacingBrakePrompt()}
         loadProjectSettings(); 
         loadLocalSourceDocs();
         loadLongformStateFromCloud();
+        loadChapterPipelineStateFromCloud();
+        ensureChapterPipelinePanel();
+        renderChapterPipelinePanel();
         
         // 2. 解除模糊遮罩，让手机端也能看到界面
         if (mainWorkspace) mainWorkspace.classList.remove('opacity-30', 'blur-sm');
