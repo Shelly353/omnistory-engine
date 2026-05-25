@@ -192,26 +192,52 @@
                 background: #030712 !important;
             }
             #view-editor > .bg-gray-900 {
-                padding: 0.75rem !important;
+                padding: 0.55rem !important;
                 margin-bottom: 0.5rem !important;
-                max-height: 38vh;
+                max-height: none;
                 overflow-y: auto;
             }
+            #view-editor[data-outline-open="false"] > .bg-gray-900 {
+                flex: 0 0 auto;
+            }
+            #view-editor[data-outline-open="false"] #editor-sop-conflict {
+                display: none !important;
+            }
+            #view-editor[data-outline-open="false"] #btn-toggle-editor-outline::after {
+                content: "展开大纲";
+            }
+            #view-editor[data-outline-open="true"] > .bg-gray-900 {
+                max-height: 34vh;
+            }
+            #view-editor[data-outline-open="true"] #btn-toggle-editor-outline::after {
+                content: "收起大纲";
+            }
             #view-editor .border-b.border-gray-800.pb-2 {
-                flex-direction: column;
-                align-items: stretch;
-                gap: 0.5rem;
+                flex-direction: row;
+                align-items: center;
+                gap: 0.4rem;
             }
             #view-editor .border-b.border-gray-800.pb-2 > div {
                 flex-wrap: wrap;
                 gap: 0.4rem;
+                justify-content: flex-end;
             }
             #view-editor .border-b.border-gray-800.pb-2 button,
             #view-editor #ai-writing-style {
                 min-height: 2.25rem;
-                flex: 1 1 auto;
+                flex: 0 1 auto;
                 justify-content: center;
                 margin-right: 0 !important;
+            }
+            #view-editor .border-b.border-gray-800.pb-2 > span {
+                font-size: 0.68rem;
+                min-width: 5.5rem;
+            }
+            #btn-save-chapter {
+                display: none !important;
+            }
+            #btn-toggle-editor-outline {
+                display: inline-flex !important;
             }
             #editor-sop-conflict {
                 height: 5.5rem !important;
@@ -222,6 +248,7 @@
                 font-size: 0.95rem !important;
                 line-height: 1.85 !important;
                 min-height: 0;
+                flex: 1 1 auto;
             }
         }
         @media (min-width: 769px) {
@@ -349,6 +376,7 @@
                             <span class="text-xs font-black text-purple-400 tracking-wider flex items-center uppercase"><i data-lucide="sliders" class="w-3.5 h-3.5 mr-1"></i>当前敲定大纲</span>
                             <div class="flex space-x-3 items-center">
                                 <span id="save-status" class="text-xs text-gray-500 mt-0.5"></span>
+                                <button id="btn-toggle-editor-outline" class="hidden px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 text-[10px] font-bold rounded items-center border border-gray-700"></button>
                                 <button id="btn-save-chapter" class="px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 text-[10px] font-bold rounded flex items-center border border-gray-700"><i data-lucide="save" class="w-3 h-3 mr-1"></i>手动保存</button>
                                 <button id="btn-ai-write" class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold rounded shadow-[0_0_10px_rgba(37,99,235,0.4)] flex items-center"><i data-lucide="pen-tool" class="w-3 h-3 mr-1"></i>AI 依大纲撰写</button>
                             </div>

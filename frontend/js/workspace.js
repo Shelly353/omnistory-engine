@@ -2553,6 +2553,7 @@ ${limitText(stripBibleJsonBlocks(aiReplyText), 1800) || '本轮 AI 回复主要�
     const btnApplySubChat = document.getElementById('btn-apply-sub-chat');
     const btnSendChapterChat = document.getElementById('btn-send-chapter-chat');
     const btnExtractSynopsis = document.getElementById('btn-extract-synopsis');
+    const btnToggleEditorOutline = document.getElementById('btn-toggle-editor-outline');
     const btnSaveChapter = document.getElementById('btn-save-chapter');
     const btnAiWrite = document.getElementById('btn-ai-write');
     const btnReviewCurrentDraft = document.getElementById('btn-review-current-draft');
@@ -7930,6 +7931,7 @@ if (data.success) {
             if(viewEditor) viewEditor.classList.remove('hidden'); 
             if(viewSop) viewSop.classList.add('hidden');
             if(chapterSidePanel) chapterSidePanel.classList.remove('hidden');
+            if (isMobileWorkspaceLayout() && viewEditor) viewEditor.dataset.outlineOpen = 'false';
             tabEditor.className = "px-3 py-1 text-xs font-bold rounded-md bg-purple-600 text-white transition";
             tabSop.className = "px-3 py-1 text-xs font-bold rounded-md text-gray-400 hover:text-white transition";
         };
@@ -8450,6 +8452,10 @@ ${buildPacingBrakePrompt()}
         });
     }
     if (btnSaveChapter) btnSaveChapter.onclick = saveChapterContent;
+    if (btnToggleEditorOutline) btnToggleEditorOutline.onclick = () => {
+        if (!viewEditor) return;
+        viewEditor.dataset.outlineOpen = viewEditor.dataset.outlineOpen === 'true' ? 'false' : 'true';
+    };
     if (btnReviewCurrentDraft) btnReviewCurrentDraft.onclick = () => runUnifiedContentReview("manual");
     if (btnRerunChangePatch) btnRerunChangePatch.onclick = () => rerunActiveChangePatchReview();
     if (btnExportBook) btnExportBook.onclick = () => exportWholeBook("md");
