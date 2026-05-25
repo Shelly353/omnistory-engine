@@ -164,6 +164,7 @@ window.OmniPrompts = {
     { "beat": "dark_night", "title": "至暗时刻", "event_ref": "关联事件", "status": "draft/approved/needs_fix", "content": "事件内容", "function": "叙事功能" },
     { "beat": "finale", "title": "终局事件", "event_ref": "关联事件", "status": "draft/approved/needs_fix", "content": "事件内容", "function": "叙事功能" }
   ],
+  "_beat_labels_note": "六节点中文名固定：opening=开始事件；first_turn=第一转折；midpoint_false_victory=中点/虚假胜利；opposition_rises=反派逼近；dark_night=至暗时刻；finale=终局事件。对作者提问时必须使用中文名，禁止询问 opposition rise 是哪个阶段。",
   "characters": [ 
     { 
       "character_id": "已有角色必须沿用原 character_id；新增角色可留空",
