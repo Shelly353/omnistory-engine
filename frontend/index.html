@@ -107,6 +107,56 @@
                 display: none !important;
             }
         }
+        #hook-modal > div,
+        #ai-rewrite-modal > div,
+        #sub-chat-modal > div,
+        #asset-character-modal > div,
+        #character-picker-modal > div,
+        #god-view-composer-modal > div,
+        #local-source-qa-modal > div {
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        #timeline-modal > div,
+        #relation-modal > div,
+        #asset-modal > div,
+        #add-chapter-modal > div,
+        #sandbox-rule-conflict-modal > div,
+        #rules-discussion-modal > div {
+            min-height: 0;
+        }
+        @media (max-width: 768px) {
+            #timeline-modal,
+            #relation-modal,
+            #asset-modal,
+            #add-chapter-modal,
+            #hook-modal,
+            #sub-chat-modal {
+                padding: 0.75rem !important;
+            }
+            #timeline-modal > div,
+            #relation-modal > div,
+            #asset-modal > div,
+            #add-chapter-modal > div,
+            #hook-modal > div,
+            #sub-chat-modal > div {
+                max-height: calc(100vh - 1.5rem) !important;
+                overflow-y: auto;
+            }
+            #timeline-modal .flex.space-x-6,
+            #relation-modal .flex.space-x-6,
+            #asset-modal .flex.space-x-6 {
+                flex-direction: column;
+                gap: 1rem;
+                overflow-y: auto;
+            }
+            #timeline-modal .flex.space-x-6 > div,
+            #relation-modal .flex.space-x-6 > div,
+            #asset-modal .flex.space-x-6 > div {
+                width: 100% !important;
+                min-height: 14rem;
+            }
+        }
     </style>
 </head>
 <body class="bg-gray-950 text-gray-200 h-screen overflow-hidden flex flex-col font-sans">
