@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router({ mergeParams: true });
-const { insert, insertMany, deleteByProject, supabase, memory } = require('../lib/db');
+const { insert, insertMany, deleteByProject, supabase, memory, enrichDbError } = require('../lib/db');
 const { getProject } = require('../lib/repositories');
 const { callAi } = require('../lib/aiClient');
 const { demoBible } = require('../lib/fallbacks');
@@ -47,14 +47,15 @@ router.put('/approve', async (req, res, next) => {
 
     let bible;
     if (supabase) {
-      const { data: existing } = await supabase.from('story_bibles').select('*').eq('project_id', project.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+      const { data: existing, error: existingError } = await supabase.from('story_bibles').select('*').eq('project_id', project.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+      if (existingError) throw enrichDbError(existingError, 'story_bibles');
       const source = payload || existing?.payload || demoBible(project);
       const { data, error } = await supabase
         .from('story_bibles')
         .upsert({ id: existing?.id, project_id: project.id, payload: source, approved: true, updated_at: new Date().toISOString() })
         .select()
         .single();
-      if (error) throw error;
+      if (error) throw enrichDbError(error, 'story_bibles');
       bible = data;
     } else {
       bible = memory.story_bibles.find(item => item.project_id === project.id);
@@ -106,7 +107,7 @@ router.get('/', async (req, res, next) => {
   try {
     if (supabase) {
       const { data, error } = await supabase.from('story_bibles').select('*').eq('project_id', req.params.projectId).order('created_at', { ascending: false }).limit(1).maybeSingle();
-      if (error) throw error;
+      if (error) throw enrichDbError(error, 'story_bibles');
       return res.json({ success: true, bible: data || null });
     }
     res.json({ success: true, bible: memory.story_bibles.find(item => item.project_id === req.params.projectId) || null });

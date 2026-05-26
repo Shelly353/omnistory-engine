@@ -48,11 +48,19 @@ async function runAction(label, fn) {
     return result;
   } catch (err) {
     console.error(err);
-    toast(err.message || `${label}失败`);
+    toast(formatError(err, label));
     throw err;
   } finally {
     document.body.classList.remove('busy');
   }
+}
+
+function formatError(err, label = '操作') {
+  const message = err.message || `${label}失败`;
+  if (/schema cache|尚未创建表|Could not find the table|does not exist/i.test(message)) {
+    return '数据库表还没初始化：请在 Supabase SQL Editor 执行 supabase/schema.sql，然后刷新页面。';
+  }
+  return message;
 }
 
 function $(id) {
@@ -323,7 +331,7 @@ async function boot() {
     $('connectionStatus').textContent = 'API 已连接';
   } catch (err) {
     console.error(err);
-    toast(err.message);
+    toast(formatError(err, '加载项目'));
   }
 }
 

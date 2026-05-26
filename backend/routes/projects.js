@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { insert, supabase, memory } = require('../lib/db');
+const { insert, supabase, memory, enrichDbError } = require('../lib/db');
 const { getProject, listByProject } = require('../lib/repositories');
 
 const PROJECT_SCOPED_TABLES = [
@@ -41,7 +41,7 @@ router.get('/', async (req, res, next) => {
   try {
     if (supabase) {
       const { data, error } = await supabase.from('projects').select('*').order('created_at', { ascending: false });
-      if (error) throw error;
+      if (error) throw enrichDbError(error, 'projects');
       return res.json({ success: true, projects: data || [] });
     }
     res.json({ success: true, projects: memory.projects.slice().reverse() });
@@ -74,7 +74,7 @@ router.delete('/:projectId', async (req, res, next) => {
     const projectId = req.params.projectId;
     if (supabase) {
       const { error } = await supabase.from('projects').delete().eq('id', projectId);
-      if (error) throw error;
+      if (error) throw enrichDbError(error, 'projects');
       return res.json({ success: true });
     }
     PROJECT_SCOPED_TABLES.forEach(table => {

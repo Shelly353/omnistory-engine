@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { listByProject } = require('../lib/repositories');
-const { supabase, memory } = require('../lib/db');
+const { supabase, memory, enrichDbError } = require('../lib/db');
 
 router.get('/projects/:projectId/audit', async (req, res, next) => {
   try {
@@ -26,7 +26,7 @@ router.post('/proposed-facts/:factId/:action', async (req, res, next) => {
     const status = req.params.action === 'accept' ? 'accepted' : 'rejected';
     if (supabase) {
       const { data, error } = await supabase.from('proposed_facts').update({ status }).eq('id', req.params.factId).select().single();
-      if (error) throw error;
+      if (error) throw enrichDbError(error, 'proposed_facts');
       return res.json({ success: true, fact: data });
     }
     const fact = memory.proposed_facts.find(item => item.id === req.params.factId);
