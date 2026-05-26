@@ -8,15 +8,17 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 22
-      - key: APP_ACCESS_TOKEN
+      - key: OMNISTORY_ACCESS_TOKEN
         sync: false
       - key: SUPABASE_URL
         sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
+      - key: SUPABASE_ANON_KEY
         sync: false
-      - key: AI_API_KEY
+      - key: DEEPSEEK_API_KEY
         sync: false
       - key: AI_BASE_URL
         value: https://api.deepseek.com
       - key: AI_MODEL
-        value: deepseek-chat
+        value: deepseek-v4-flash
+      - key: AI_RATE_LIMIT_PER_MINUTE
+        value: 20

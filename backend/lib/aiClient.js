@@ -1,13 +1,14 @@
 const { extractJson } = require('./jsonRepair');
 
 async function callAi({ system, user, json = false, fallback }) {
-  const apiKey = process.env.AI_API_KEY;
-  const baseUrl = (process.env.AI_BASE_URL || '').replace(/\/$/, '');
-  const model = process.env.AI_MODEL || 'deepseek-chat';
+  const apiKey = process.env.AI_API_KEY || process.env.DEEPSEEK_API_KEY;
+  const baseUrl = (process.env.AI_BASE_URL || process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '');
+  const model = process.env.AI_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
 
   if (!apiKey || !baseUrl) return { model: 'local-fallback', content: fallback, parsed: fallback };
 
-  const response = await fetch(`${baseUrl}/chat/completions`, {
+  const endpoint = baseUrl.endsWith('/chat/completions') ? baseUrl : `${baseUrl}/chat/completions`;
+  const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

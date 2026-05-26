@@ -3,7 +3,7 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
-const { requireAccessToken } = require('./security');
+const { aiRateLimit, requireAccessToken, warnIfAccessTokenMissing } = require('./security');
 
 const projects = require('./routes/projects');
 const bible = require('./routes/bible');
@@ -23,7 +23,12 @@ app.get('/health', (req, res) => {
   res.json({ ok: true, service: 'novel-workflow-studio' });
 });
 
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true, service: 'novel-workflow-studio', compatibility: 'omnistory' });
+});
+
 app.use('/api', requireAccessToken);
+app.use('/api', aiRateLimit);
 app.use('/api/projects', projects);
 app.use('/api/projects/:projectId/bible', bible);
 app.use('/api/projects/:projectId/canon', canon);
@@ -37,5 +42,6 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(port, () => {
+  warnIfAccessTokenMissing();
   console.log(`Novel Workflow Studio listening on http://localhost:${port}`);
 });

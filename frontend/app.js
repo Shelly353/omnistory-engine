@@ -5,8 +5,8 @@ const state = {
 };
 
 function tokenHeaders() {
-  const token = localStorage.getItem('novel_access_token') || '';
-  return token ? { 'x-novel-token': token } : {};
+  const token = localStorage.getItem('omnistory_access_token') || localStorage.getItem('novel_access_token') || '';
+  return token ? { 'x-omnistory-token': token, 'x-novel-token': token } : {};
 }
 
 async function api(path, options = {}) {
@@ -21,6 +21,7 @@ async function api(path, options = {}) {
   if (res.status === 401) {
     const token = prompt('请输入访问口令');
     if (token) {
+      localStorage.setItem('omnistory_access_token', token.trim());
       localStorage.setItem('novel_access_token', token.trim());
       return api(path, options);
     }
