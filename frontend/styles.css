@@ -1,0 +1,278 @@
+:root {
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --line: #d9dde5;
+  --text: #1d2430;
+  --muted: #667085;
+  --accent: #0f766e;
+  --accent-dark: #115e59;
+  --warning: #b45309;
+  --danger: #b42318;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.topbar {
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+h1, h2, p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 20px;
+}
+
+h2 {
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+
+p {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.status-strip {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.status-strip span {
+  border: 1px solid var(--line);
+  padding: 6px 8px;
+  font-size: 12px;
+  background: #f9fafb;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 310px minmax(520px, 1fr) 360px;
+  height: calc(100vh - 72px);
+  min-height: 720px;
+}
+
+.sidebar,
+.inspector {
+  overflow: auto;
+  border-right: 1px solid var(--line);
+  background: #fbfcfd;
+  padding: 14px;
+}
+
+.inspector {
+  border-right: 0;
+  border-left: 1px solid var(--line);
+}
+
+.workspace {
+  overflow: auto;
+  padding: 14px;
+}
+
+section {
+  margin-bottom: 14px;
+}
+
+.panel,
+.sidebar section,
+.inspector section {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.stack {
+  display: grid;
+  gap: 8px;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+input,
+textarea,
+button {
+  font: inherit;
+}
+
+input,
+textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 8px;
+  background: #fff;
+  color: var(--text);
+}
+
+textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+button {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: white;
+  border-radius: 5px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--accent-dark);
+}
+
+.list {
+  display: grid;
+  gap: 6px;
+}
+
+.list button,
+.item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+  padding: 8px;
+  border-radius: 5px;
+}
+
+.list button.active {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.event-list {
+  display: grid;
+  gap: 8px;
+}
+
+.event {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 10px;
+  background: #fff;
+}
+
+.event strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.event span,
+.fact-list div {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.panel-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.panel-title h2 {
+  margin-bottom: 0;
+}
+
+.panel-title div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #101828;
+  color: #e6edf3;
+  padding: 10px;
+  border-radius: 5px;
+  max-height: 260px;
+  overflow: auto;
+  font-size: 12px;
+}
+
+.fact-list {
+  display: grid;
+  gap: 8px;
+}
+
+.fact {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 8px;
+  background: #fff;
+}
+
+.finding-blocking {
+  border-color: var(--danger);
+}
+
+.finding-warning {
+  border-color: var(--warning);
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  background: #111827;
+  color: white;
+  padding: 10px 14px;
+  border-radius: 5px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s ease;
+}
+
+.toast.show {
+  opacity: 1;
+}
+
+@media (max-width: 1100px) {
+  .layout {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .sidebar,
+  .inspector {
+    border: 0;
+  }
+}

@@ -1,74 +1,41 @@
-// backend/server.js
 require('dotenv').config();
+
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
-const { aiRateLimit, requireAiAccessToken, warnIfAiTokenMissing } = require('./security');
+const { requireAccessToken } = require('./security');
+
+const projects = require('./routes/projects');
+const bible = require('./routes/bible');
+const canon = require('./routes/canon');
+const planning = require('./routes/planning');
+const chapters = require('./routes/chapters');
+const audit = require('./routes/audit');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const HOST = '0.0.0.0';
-const frontendDir = path.join(__dirname, '../frontend');
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
-    .split(',')
-    .map(origin => origin.trim())
-    .filter(Boolean);
+const port = process.env.PORT || 3000;
 
-// 1. 中间件
-app.set('trust proxy', 1);
-app.use(cors({
-    origin(origin, callback) {
-        if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return callback(null, true);
-        return callback(new Error('Not allowed by CORS'));
-    }
-}));
-app.use(express.json({ limit: '2mb' }));
-app.use(express.urlencoded({ limit: '2mb', extended: true }));
+app.use(cors());
+app.use(express.json({ limit: '4mb' }));
+app.use(express.static(path.join(__dirname, '../frontend')));
 
-app.get('/', (req, res) => {
-    res.sendFile(path.join(frontendDir, 'dashboard.html'));
+app.get('/health', (req, res) => {
+  res.json({ ok: true, service: 'novel-workflow-studio' });
 });
 
-// 2. 静态文件托管 (让浏览器能访问 frontend 里的 HTML 和 JS)
-app.use(express.static(frontendDir));
-
-// 3. 挂载 API 路由 (我们先挂载一个测试接口)
-app.get('/api/health', (req, res) => {
-    res.json({ status: 'Engine V2 is Online', version: '2.0.0' });
-});
-
-// 👇 确保这两行存在且没有被 // 注释掉！
-app.use('/api/projects', requireAiAccessToken, require('./routes/projects'));
-app.use('/api/workspace', requireAiAccessToken, require('./routes/workspace'));
-app.use('/api/chat', aiRateLimit, requireAiAccessToken, require('./routes/chat'));
-app.use('/api/crystallize/preview', aiRateLimit);
-app.use('/api/crystallize', requireAiAccessToken, require('./routes/crystallize'));
-app.use('/api/ai', aiRateLimit, requireAiAccessToken, require('./routes/ai'));
+app.use('/api', requireAccessToken);
+app.use('/api/projects', projects);
+app.use('/api/projects/:projectId/bible', bible);
+app.use('/api/projects/:projectId/canon', canon);
+app.use('/api/projects/:projectId', planning);
+app.use('/api/chapters', chapters);
+app.use('/api', audit);
 
 app.use((err, req, res, next) => {
-    if (err.type === 'entity.too.large') {
-        return res.status(413).json({
-            success: false,
-            error: '请求内容太长，请缩短对话或正文后重试。'
-        });
-    }
-    next(err);
+  console.error(err);
+  res.status(500).json({ success: false, error: err.message || '服务器错误' });
 });
 
-// 未来这里会挂载 projects.js, ai.js 等等...
-
-// 4. 启动引擎
-const server = app.listen(Number(PORT), HOST, () => {
-    const address = server.address();
-    warnIfAiTokenMissing();
-    console.log(`\n=========================================`);
-    console.log(`🚀 OmniStory Engine V2 is ALIVE!`);
-    console.log(`🌌 宇宙大厅入口: http://${HOST}:${PORT}/`);
-    console.log(`🔌 Listening address: ${JSON.stringify(address)}`);
-    console.log(`=========================================\n`);
-});
-
-server.on('error', (error) => {
-    console.error('❌ Server failed to listen:', error);
-    process.exit(1);
+app.listen(port, () => {
+  console.log(`Novel Workflow Studio listening on http://localhost:${port}`);
 });

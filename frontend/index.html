@@ -1,648 +1,107 @@
-<!DOCTYPE html>
-<html lang="zh">
+<!doctype html>
+<html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OmniStory V3.2 - 文学主脑沙盒</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
-    <style>
-        ::-webkit-scrollbar { width: 4px; height: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #374151; border-radius: 2px; }
-        ::-webkit-scrollbar-thumb:hover { background: #4b5563; }
-        #relation-network { outline: none; }
-        @media (max-width: 768px), (pointer: coarse) and (max-width: 1024px) {
-            header {
-                padding-left: 0.75rem;
-                padding-right: 0.75rem;
-            }
-            header #story-genre-badge,
-            header #btn-force-genesis span {
-                display: none;
-            }
-            header #top-project-title {
-                max-width: 52vw;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-            }
-            #genesis-sandbox {
-                top: 0;
-                z-index: 80;
-                flex-direction: column !important;
-                padding-bottom: 4.25rem;
-            }
-            #genesis-sandbox > #sandbox-mobile-task,
-            #genesis-sandbox > #sandbox-mobile-assets,
-            #genesis-sandbox > #sandbox-chat-pane,
-            #genesis-sandbox > #sandbox-preview-pane {
-                width: 100% !important;
-                height: 100% !important;
-                min-height: 0;
-                flex: 1 1 auto;
-                border: 0;
-                order: 1;
-            }
-            #genesis-sandbox:not([data-mobile-tab="task"]) #sandbox-mobile-task,
-            #genesis-sandbox:not([data-mobile-tab="chat"]) #sandbox-chat-pane,
-            #genesis-sandbox:not([data-mobile-tab="panel"]):not([data-mobile-tab="warning"]) #sandbox-preview-pane,
-            #genesis-sandbox:not([data-mobile-tab="assets"]) #sandbox-mobile-assets {
-                display: none !important;
-            }
-            #genesis-sandbox[data-mobile-tab="task"] #sandbox-mobile-task,
-            #genesis-sandbox[data-mobile-tab="assets"] #sandbox-mobile-assets,
-            #genesis-sandbox[data-mobile-tab="chat"] #sandbox-chat-pane,
-            #genesis-sandbox[data-mobile-tab="panel"] #sandbox-preview-pane,
-            #genesis-sandbox[data-mobile-tab="warning"] #sandbox-preview-pane {
-                display: flex !important;
-            }
-            #genesis-sandbox[data-mobile-tab="warning"] #human-preview-container {
-                display: none !important;
-            }
-            #genesis-sandbox[data-mobile-tab="warning"] #sandbox-alert-center {
-                margin: 1rem;
-                max-height: none;
-            }
-            #genesis-sandbox[data-mobile-tab="warning"] #sandbox-alert-summary {
-                max-height: calc(100vh - 15rem);
-            }
-            #sandbox-preview-pane > .p-4.border-b,
-            #sandbox-chat-pane > .p-4.border-b {
-                padding-right: 3.75rem;
-            }
-            #sandbox-preview-pane .flex.items-center.space-x-2 {
-                flex-wrap: wrap;
-                justify-content: flex-end;
-                gap: 0.375rem;
-            }
-            #sandbox-preview-pane .flex.items-center.space-x-2 > button {
-                margin-left: 0;
-            }
-            #chat-history {
-                padding: 1rem;
-            }
-            #chat-input {
-                height: 4.75rem;
-            }
-            #btn-close-sandbox {
-                top: 0.75rem;
-                right: 0.75rem;
-                z-index: 95;
-            }
-            #sandbox-mobile-nav {
-                display: grid !important;
-            }
-            #sandbox-mobile-nav button[data-active="true"] {
-                color: #bfdbfe;
-                background: rgba(30, 64, 175, 0.35);
-                border-color: rgba(59, 130, 246, 0.55);
-            }
-            #chapter-outline-panel {
-                position: fixed;
-                inset: 3.5rem auto 0 0;
-                width: min(82vw, 20rem) !important;
-                z-index: 60;
-                transform: translateX(-105%);
-                transition: transform 0.22s ease;
-                box-shadow: 18px 0 35px rgba(0,0,0,0.35);
-            }
-            #main-workspace[data-outline-open="true"] #chapter-outline-panel {
-                transform: translateX(0);
-            }
-            #main-workspace > section {
-                width: 100% !important;
-                min-width: 0;
-                flex: 1 1 100% !important;
-            }
-            #chapter-side-panel {
-                display: none !important;
-            }
-            #current-chapter-title {
-                max-width: 42vw;
-            }
-            #view-sop,
-            #view-editor {
-                inset: 0.5rem !important;
-                border-radius: 0.75rem;
-            }
-            #view-sop > .p-3.border-b {
-                padding: 0.65rem 0.75rem;
-            }
-            #btn-toggle-outline {
-                display: inline-flex !important;
-            }
-            #chapter-pipeline-panel {
-                padding: 0.5rem !important;
-                gap: 0.5rem;
-                -webkit-overflow-scrolling: touch;
-            }
-            #chapter-pipeline-panel section {
-                padding: 0.65rem !important;
-                border-radius: 0.65rem !important;
-            }
-            #chapter-pipeline-main-title {
-                font-size: 0.9rem !important;
-                white-space: normal !important;
-            }
-            #chapter-pipeline-status {
-                white-space: normal !important;
-                line-height: 1.35;
-            }
-            #btn-pipeline-next {
-                min-height: 2.75rem;
-                font-size: 0.78rem;
-            }
-            #chapter-pipeline-hint {
-                font-size: 0.72rem;
-            }
-            #chapter-pipeline-report {
-                max-height: 7.5rem;
-            }
-            .pipeline-node-card {
-                padding: 0.65rem !important;
-                border-radius: 0.65rem !important;
-            }
-            .pipeline-node-head {
-                flex-direction: column;
-                align-items: stretch !important;
-            }
-            .pipeline-node-actions {
-                width: 100%;
-                display: grid !important;
-                grid-template-columns: 1fr 1fr;
-            }
-            .pipeline-node-actions button,
-            [data-pipeline-action="add-node"],
-            [data-pipeline-action="ignore-event-warning"] {
-                min-height: 2.25rem;
-                font-size: 0.72rem;
-            }
-            .pipeline-node-fields {
-                display: grid !important;
-                grid-template-columns: 1fr !important;
-                gap: 0.5rem !important;
-            }
-            .pipeline-node-card textarea {
-                min-height: 4rem;
-                font-size: 0.78rem;
-            }
-            .pipeline-node-card input {
-                min-height: 2.25rem;
-                font-size: 0.78rem;
-            }
-            #view-editor {
-                background: #030712 !important;
-            }
-            #view-editor > .bg-gray-900 {
-                padding: 0.55rem !important;
-                margin-bottom: 0.5rem !important;
-                max-height: none;
-                overflow-y: auto;
-            }
-            #view-editor[data-outline-open="false"] > .bg-gray-900 {
-                flex: 0 0 auto;
-            }
-            #view-editor[data-outline-open="false"] #editor-sop-conflict {
-                display: none !important;
-            }
-            #view-editor[data-outline-open="false"] #btn-toggle-editor-outline::after {
-                content: "展开大纲";
-            }
-            #view-editor[data-outline-open="true"] > .bg-gray-900 {
-                max-height: 34vh;
-            }
-            #view-editor[data-outline-open="true"] #btn-toggle-editor-outline::after {
-                content: "收起大纲";
-            }
-            #view-editor .border-b.border-gray-800.pb-2 {
-                flex-direction: row;
-                align-items: center;
-                gap: 0.4rem;
-            }
-            #view-editor .border-b.border-gray-800.pb-2 > div {
-                flex-wrap: wrap;
-                gap: 0.4rem;
-                justify-content: flex-end;
-            }
-            #view-editor .border-b.border-gray-800.pb-2 button,
-            #view-editor #ai-writing-style {
-                min-height: 2.25rem;
-                flex: 0 1 auto;
-                justify-content: center;
-                margin-right: 0 !important;
-            }
-            #view-editor .border-b.border-gray-800.pb-2 > span {
-                font-size: 0.68rem;
-                min-width: 5.5rem;
-            }
-            #btn-save-chapter {
-                display: none !important;
-            }
-            #btn-toggle-editor-outline {
-                display: inline-flex !important;
-            }
-            #editor-sop-conflict {
-                height: 5.5rem !important;
-                font-size: 0.72rem;
-            }
-            #editor-textarea {
-                padding: 1rem !important;
-                font-size: 0.95rem !important;
-                line-height: 1.85 !important;
-                min-height: 0;
-                flex: 1 1 auto;
-                width: 100% !important;
-            }
-        }
-        @media (min-width: 769px) {
-            #sandbox-mobile-task,
-            #sandbox-mobile-assets,
-            #sandbox-mobile-nav,
-            #btn-toggle-outline {
-                display: none !important;
-            }
-            #main-workspace[data-outline-collapsed="true"] #chapter-outline-panel {
-                width: 0 !important;
-                border-right: 0;
-            }
-            #main-workspace[data-outline-collapsed="true"] #chapter-outline-panel > * {
-                display: none !important;
-            }
-        }
-        #hook-modal > div,
-        #ai-rewrite-modal > div,
-        #sub-chat-modal > div,
-        #asset-character-modal > div,
-        #character-picker-modal > div,
-        #god-view-composer-modal > div,
-        #local-source-qa-modal > div {
-            max-height: 90vh;
-            overflow-y: auto;
-        }
-        #timeline-modal > div,
-        #relation-modal > div,
-        #asset-modal > div,
-        #add-chapter-modal > div,
-        #sandbox-rule-conflict-modal > div,
-        #rules-discussion-modal > div {
-            min-height: 0;
-        }
-        @media (max-width: 768px) {
-            #timeline-modal,
-            #relation-modal,
-            #asset-modal,
-            #add-chapter-modal,
-            #hook-modal,
-            #sub-chat-modal {
-                padding: 0.75rem !important;
-            }
-            #timeline-modal > div,
-            #relation-modal > div,
-            #asset-modal > div,
-            #add-chapter-modal > div,
-            #hook-modal > div,
-            #sub-chat-modal > div {
-                max-height: calc(100vh - 1.5rem) !important;
-                overflow-y: auto;
-            }
-            #timeline-modal .flex.space-x-6,
-            #relation-modal .flex.space-x-6,
-            #asset-modal .flex.space-x-6 {
-                flex-direction: column;
-                gap: 1rem;
-                overflow-y: auto;
-            }
-            #timeline-modal .flex.space-x-6 > div,
-            #relation-modal .flex.space-x-6 > div,
-            #asset-modal .flex.space-x-6 > div {
-                width: 100% !important;
-                min-height: 14rem;
-            }
-        }
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Novel Workflow Studio</title>
+  <link rel="stylesheet" href="/styles.css">
 </head>
-<body class="bg-gray-950 text-gray-200 h-screen overflow-hidden flex flex-col font-sans">
-
-    <header class="h-14 border-b border-gray-800 bg-gray-900 flex items-center justify-between px-6 z-10 flex-shrink-0">
-        <div class="flex items-center space-x-4">
-            <button onclick="handleWorkspaceBack()" class="text-gray-400 hover:text-white transition"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>
-            <span class="font-mono text-xs bg-purple-950 text-purple-300 px-2 py-0.5 rounded border border-purple-800" id="story-genre-badge">类型: 未锁定</span>
-            <span class="font-bold text-base text-gray-100" id="top-project-title">读取宇宙中...</span>
-        </div>
-        <div class="flex items-center space-x-3">
-            <button id="btn-force-genesis" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-purple-400 text-sm font-bold rounded flex items-center transition border border-purple-900/50">
-                <i data-lucide="wand-2" class="w-4 h-4 mr-1"></i>唤醒上帝沙盒
-            </button>
-        </div>
-    </header>
-
-    <main class="flex-1 flex overflow-hidden opacity-30 filter blur-sm transition-all duration-1000 bg-gray-950" id="main-workspace">
-        <aside id="chapter-outline-panel" class="w-64 flex-shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col overflow-hidden">
-            <div class="p-3 border-b border-gray-800 flex justify-between items-center bg-gray-950">
-                <span class="font-bold text-xs text-gray-400 tracking-wider flex items-center"><i data-lucide="git-commit" class="w-3.5 h-3.5 mr-1 text-purple-500"></i>世界大纲轴</span>
-                <div class="flex items-center gap-2">
-                    <button id="btn-add-chapter" class="text-gray-500 hover:text-purple-400 transition" title="开启新时空"><i data-lucide="plus-square" class="w-4 h-4"></i></button>
-                    <button id="btn-collapse-outline" class="text-gray-500 hover:text-purple-400 transition" title="折叠世界大纲轴"><i data-lucide="panel-left-close" class="w-4 h-4"></i></button>
-                </div>
-            </div>
-            <div class="flex-1 overflow-y-auto p-2 border-b border-gray-800/60">
-                <ul id="chapter-tree" class="space-y-1"></ul>
-            </div>
-            <div class="p-4 space-y-3 bg-gray-950 border-t border-gray-800 shadow-inner flex-shrink-0">
-                <button id="btn-open-timeline" class="w-full py-2.5 bg-indigo-900/40 text-indigo-400 border border-indigo-800/50 rounded-lg hover:bg-indigo-600 hover:text-white transition shadow-lg flex justify-center items-center font-bold text-sm"><i data-lucide="clock" class="w-4 h-4 mr-2"></i> 绝对时间轴图谱</button>
-                <button id="btn-open-relation" class="w-full py-2.5 bg-emerald-900/40 text-emerald-400 border border-emerald-800/50 rounded-lg hover:bg-emerald-600 hover:text-white transition shadow-lg flex justify-center items-center font-bold text-sm"><i data-lucide="network" class="w-4 h-4 mr-2"></i> 人物纠葛关系网</button>
-            </div>
-        </aside>
-
-        <section class="flex-1 flex flex-col bg-gray-950 relative overflow-hidden">
-            <div class="h-12 border-b border-gray-800 flex items-center justify-between px-6 bg-gray-900/80 backdrop-blur flex-shrink-0">
-                <div class="flex items-center min-w-0 gap-2">
-                    <button id="btn-toggle-outline" class="hidden px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 rounded text-[10px] font-bold items-center gap-1"><i data-lucide="list" class="w-3.5 h-3.5"></i>目录</button>
-                    <h2 id="current-chapter-title" class="font-bold text-sm text-white truncate max-w-sm">等待主脑接入...</h2>
-                </div>
-                <div class="flex space-x-1 bg-gray-950 p-1 rounded-lg border border-gray-800">
-                    <button id="tab-sop" class="px-3 py-1 text-xs font-bold rounded-md bg-purple-600 text-white transition">章节工作台</button>
-                    <button id="tab-editor" class="px-3 py-1 text-xs font-bold rounded-md text-gray-400 hover:text-white transition">正文执笔区</button>
-                </div>
-            </div>
-
-            <div class="flex-1 flex flex-col relative p-4 overflow-hidden">
-                <div id="view-sop" class="absolute inset-4 flex flex-col bg-gray-900 border border-gray-800 rounded-xl overflow-hidden z-20">
-                    <div class="p-3 border-b border-gray-800 bg-gray-950 flex justify-between items-center">
-                        <span class="text-xs font-black text-cyan-400"><i data-lucide="workflow" class="w-3.5 h-3.5 inline mr-1"></i>章节展开工作台</span>
-                    </div>
-                </div>
-
-                <div id="view-editor" class="absolute inset-4 flex flex-col bg-gray-950 z-10 hidden">
-                    <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 flex flex-col space-y-2 mb-3 flex-shrink-0">
-                        <div class="flex justify-between items-center border-b border-gray-800 pb-2">
-                            <span class="text-xs font-black text-purple-400 tracking-wider flex items-center uppercase"><i data-lucide="sliders" class="w-3.5 h-3.5 mr-1"></i>当前敲定大纲</span>
-                            <div class="flex space-x-3 items-center">
-                                <span id="save-status" class="text-xs text-gray-500 mt-0.5"></span>
-                                <button id="btn-toggle-editor-outline" class="hidden px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 text-[10px] font-bold rounded items-center border border-gray-700"></button>
-                                <button id="btn-save-chapter" class="px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 text-[10px] font-bold rounded flex items-center border border-gray-700"><i data-lucide="save" class="w-3 h-3 mr-1"></i>手动保存</button>
-                                <button id="btn-ai-write" class="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold rounded shadow-[0_0_10px_rgba(37,99,235,0.4)] flex items-center"><i data-lucide="pen-tool" class="w-3 h-3 mr-1"></i>AI 依大纲撰写</button>
-                            </div>
-                        </div>
-                        <p id="editor-sop-conflict" class="text-xs text-gray-300 leading-relaxed italic h-16 overflow-y-auto mt-2">尚未生成章节包，请先在【章节工作台】完成事件展开与检测。</p>
-                    </div>
-                    <textarea id="editor-textarea" class="flex-1 w-full bg-gray-900/30 border border-gray-800 rounded-xl p-6 text-gray-100 focus:outline-none focus:border-purple-500 focus:bg-gray-900/80 resize-none leading-loose text-base shadow-inner font-mono" placeholder="在此挥洒笔墨..."></textarea>
-                </div>
-            </div>
-        </section>
-
-        <aside id="chapter-side-panel" class="hidden w-72 flex-shrink-0 bg-gray-900 border-l border-gray-800 flex flex-col overflow-hidden">
-            <div class="p-3 border-b border-gray-800 bg-gray-950 flex justify-between items-center flex-shrink-0">
-                <span class="font-bold text-xs text-gray-400 tracking-wider flex items-center"><i data-lucide="shield-alert" class="w-3.5 h-3.5 mr-1 text-red-400"></i>设定与伏笔要素</span>
-                <button id="btn-open-asset-modal" class="flex items-center text-[10px] px-2 py-1 bg-blue-900/30 text-blue-400 border border-blue-800/50 rounded hover:bg-blue-600 hover:text-white transition"><i data-lucide="users" class="w-3 h-3 mr-0.5"></i> 全局资产</button>
-            </div>
-            <div class="flex-1 overflow-y-auto p-3 space-y-4">
-                <div class="bg-gray-950 border border-red-900/30 rounded-xl p-3 shadow-md">
-                    <h4 class="text-[10px] font-bold text-red-400 uppercase mb-2 flex items-center"><i data-lucide="anchor" class="w-3 h-3 mr-1"></i>本章要回收的伏笔</h4>
-                    <ul id="local-hooks" class="text-xs text-red-300 space-y-2"></ul>
-                    <h4 class="text-[10px] font-bold text-amber-400 uppercase mt-4 mb-2 flex items-center"><i data-lucide="milestone" class="w-3 h-3 mr-1"></i>本章种下的伏笔</h4>
-                    <ul id="local-source-hooks" class="text-xs text-amber-300 space-y-2"></ul>
-                </div>
-                <div class="bg-gray-950 border border-blue-900/30 rounded-xl p-3 shadow-md">
-                    <h4 class="text-[10px] font-bold text-blue-400 uppercase mb-2 flex items-center"><i data-lucide="contact" class="w-3 h-3 mr-1"></i>本章活跃群星</h4>
-                    <div id="local-characters" class="space-y-3"></div>
-                </div>
-                <div class="bg-gray-950 border border-cyan-900/30 rounded-xl p-3 shadow-md">
-                    <div class="flex items-center justify-between mb-2">
-                        <h4 class="text-[10px] font-bold text-cyan-400 uppercase tracking-wider flex items-center"><i data-lucide="map" class="w-3 h-3 mr-1"></i>本章事件范围</h4>
-                        <button id="btn-toggle-event-scope" class="text-[10px] px-2 py-1 bg-cyan-900/30 text-cyan-300 border border-cyan-800/50 rounded hover:bg-cyan-700 hover:text-white transition">展开</button>
-                    </div>
-                    <div id="local-event-scope" class="hidden text-xs text-cyan-200/70 space-y-2 leading-relaxed"></div>
-                </div>
-                <div class="bg-gray-950 border border-yellow-900/30 rounded-xl p-3 shadow-md">
-                    <div class="flex items-center justify-between mb-2">
-                        <h4 class="text-[10px] font-bold text-yellow-400 uppercase tracking-wider flex items-center"><i data-lucide="shield-alert" class="w-3 h-3 mr-1"></i>内容/设定偏离警告</h4>
-                        <div class="flex gap-1">
-                            <button id="btn-rerun-change-patch" class="text-[10px] px-2 py-1 bg-red-900/30 text-red-200 border border-red-800/50 rounded hover:bg-red-700 hover:text-white transition">重审变更</button>
-                            <button id="btn-review-current-draft" class="text-[10px] px-2 py-1 bg-yellow-900/30 text-yellow-300 border border-yellow-800/50 rounded hover:bg-yellow-700 hover:text-white transition">检测正文</button>
-                        </div>
-                    </div>
-                    <details class="mb-2">
-                        <summary class="cursor-pointer select-none text-[10px] text-gray-300 bg-gray-900 border border-gray-700 rounded px-2 py-1.5 hover:text-white">高级工具 / 手动重跑</summary>
-                    <div class="grid grid-cols-2 gap-1.5 mt-2">
-                        <button id="btn-export-book" class="text-[10px] px-2 py-1 bg-emerald-950/50 text-emerald-200 border border-emerald-700/50 rounded hover:bg-emerald-700 hover:text-white transition">导出整书</button>
-                        <button id="btn-finalize-chapter" class="text-[10px] px-2 py-1 bg-green-950/50 text-green-200 border border-green-700/50 rounded hover:bg-green-700 hover:text-white transition">标记定稿</button>
-                        <button id="btn-volume-plan" class="text-[10px] px-2 py-1 bg-indigo-950/50 text-indigo-200 border border-indigo-700/50 rounded hover:bg-indigo-700 hover:text-white transition">分卷结构</button>
-                        <button id="btn-rhythm-curve" class="text-[10px] px-2 py-1 bg-cyan-950/50 text-cyan-200 border border-cyan-700/50 rounded hover:bg-cyan-700 hover:text-white transition">节奏曲线</button>
-                        <button id="btn-source-citations" class="text-[10px] px-2 py-1 bg-amber-950/50 text-amber-200 border border-amber-700/50 rounded hover:bg-amber-700 hover:text-white transition">资料标注</button>
-                        <button id="btn-version-compare" class="text-[10px] px-2 py-1 bg-slate-800 text-slate-200 border border-slate-600 rounded hover:bg-slate-700 hover:text-white transition">版本对比</button>
-                        <button id="btn-book-audit" class="text-[10px] px-2 py-1 bg-red-950/50 text-red-200 border border-red-700/50 rounded hover:bg-red-700 hover:text-white transition">成书总审</button>
-                        <button id="btn-golden-three" class="text-[10px] px-2 py-1 bg-yellow-950/50 text-yellow-200 border border-yellow-700/50 rounded hover:bg-yellow-700 hover:text-white transition">黄金三章</button>
-                        <button id="btn-character-voice" class="text-[10px] px-2 py-1 bg-purple-950/50 text-purple-200 border border-purple-700/50 rounded hover:bg-purple-700 hover:text-white transition">角色声音</button>
-                        <button id="btn-dialogue-polish" class="text-[10px] px-2 py-1 bg-blue-950/50 text-blue-200 border border-blue-700/50 rounded hover:bg-blue-700 hover:text-white transition">对白打磨</button>
-                        <button id="btn-setpiece-director" class="text-[10px] px-2 py-1 bg-orange-950/50 text-orange-200 border border-orange-700/50 rounded hover:bg-orange-700 hover:text-white transition">场面导演</button>
-                        <button id="btn-relationship-line" class="text-[10px] px-2 py-1 bg-pink-950/50 text-pink-200 border border-pink-700/50 rounded hover:bg-pink-700 hover:text-white transition">情感关系</button>
-                        <button id="btn-theme-motif" class="text-[10px] px-2 py-1 bg-stone-800 text-stone-200 border border-stone-600 rounded hover:bg-stone-700 hover:text-white transition">主题母题</button>
-                        <button id="btn-word-budget" class="text-[10px] px-2 py-1 bg-lime-900/30 text-lime-300 border border-lime-800/50 rounded hover:bg-lime-700 hover:text-white transition">篇幅规划</button>
-                        <button id="btn-beat-sheet" class="text-[10px] px-2 py-1 bg-violet-900/30 text-violet-300 border border-violet-800/50 rounded hover:bg-violet-700 hover:text-white transition">节拍表</button>
-                        <button id="btn-continuity-ledger" class="text-[10px] px-2 py-1 bg-teal-900/30 text-teal-300 border border-teal-800/50 rounded hover:bg-teal-700 hover:text-white transition">连续性</button>
-                        <button id="btn-production-board" class="text-[10px] px-2 py-1 bg-gray-800/80 text-gray-300 border border-gray-700 rounded hover:bg-gray-700 hover:text-white transition">章节看板</button>
-                        <button id="btn-acceptance-gate" class="text-[10px] px-2 py-1 bg-green-900/30 text-green-300 border border-green-800/50 rounded hover:bg-green-700 hover:text-white transition">验收闸门</button>
-                        <button id="btn-arc-tracker" class="text-[10px] px-2 py-1 bg-rose-900/30 text-rose-300 border border-rose-800/50 rounded hover:bg-rose-700 hover:text-white transition">弧光表</button>
-                        <button id="btn-hollywood-blueprint" class="text-[10px] px-2 py-1 bg-fuchsia-900/30 text-fuchsia-300 border border-fuchsia-800/50 rounded hover:bg-fuchsia-700 hover:text-white transition">大片蓝图</button>
-                        <button id="btn-opposition-plan" class="text-[10px] px-2 py-1 bg-orange-900/30 text-orange-300 border border-orange-800/50 rounded hover:bg-orange-700 hover:text-white transition">阻力升级</button>
-                        <button id="btn-scene-card" class="text-[10px] px-2 py-1 bg-sky-900/30 text-sky-300 border border-sky-800/50 rounded hover:bg-sky-700 hover:text-white transition">场景卡</button>
-                        <button id="btn-rewrite-loop" class="text-[10px] px-2 py-1 bg-pink-900/30 text-pink-300 border border-pink-800/50 rounded hover:bg-pink-700 hover:text-white transition">改稿闭环</button>
-                        <button id="btn-longform-gate" class="text-[10px] px-2 py-1 bg-red-900/30 text-red-300 border border-red-800/50 rounded hover:bg-red-700 hover:text-white transition">事件闸门</button>
-                        <button id="btn-longform-hook" class="text-[10px] px-2 py-1 bg-purple-900/30 text-purple-300 border border-purple-800/50 rounded hover:bg-purple-700 hover:text-white transition">吸引力</button>
-                        <button id="btn-longform-state" class="text-[10px] px-2 py-1 bg-blue-900/30 text-blue-300 border border-blue-800/50 rounded hover:bg-blue-700 hover:text-white transition">人物状态</button>
-                        <button id="btn-longform-memory" class="text-[10px] px-2 py-1 bg-emerald-900/30 text-emerald-300 border border-emerald-800/50 rounded hover:bg-emerald-700 hover:text-white transition">阶段压缩</button>
-                    </div>
-                    </details>
-                    <div id="local-deviation-panel" class="text-xs text-yellow-200/80 space-y-2 leading-relaxed"></div>
-                    <div id="world-rules-container" class="hidden"></div>
-                </div>
-            </div>
-        </aside>
-    </main>
-
-    <div id="genesis-sandbox" class="fixed inset-0 top-14 bg-gray-950 z-[60] flex hidden" data-mobile-tab="task">
-        <div id="sandbox-mobile-task" class="hidden flex-col bg-gray-950">
-            <div class="p-4 border-b border-gray-800 bg-gray-900 shadow-md pr-16">
-                <div class="text-[10px] font-bold tracking-wider text-blue-300 uppercase">当前沙盒任务</div>
-                <div id="mobile-task-stage" class="mt-1 text-lg font-black text-white leading-tight">等待沙盒启动</div>
-                <div id="mobile-task-focus" class="mt-1 text-xs text-gray-400 leading-relaxed">手机端会把大面板拆成任务、对话、面板、警告和资产五个入口。</div>
-            </div>
-            <div class="flex-1 overflow-y-auto p-4 space-y-3">
-                <div class="bg-gray-900 border border-blue-900/50 rounded-xl p-4">
-                    <div class="text-[10px] font-bold text-blue-300 mb-2">需要你回答</div>
-                    <div id="mobile-task-question" class="text-sm text-gray-100 leading-relaxed whitespace-pre-wrap">暂无待回答问题。</div>
-                    <button id="mobile-task-go-chat" class="mt-3 w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-lg">去回答</button>
-                </div>
-                <div class="bg-gray-900 border border-amber-900/50 rounded-xl p-4">
-                    <div class="text-[10px] font-bold text-amber-300 mb-2">实时监督</div>
-                    <div id="mobile-task-alert" class="text-sm text-amber-50/90 leading-relaxed whitespace-pre-wrap">等待规则检测。</div>
-                    <button id="mobile-task-go-warning" class="mt-3 w-full py-2.5 bg-amber-900/60 hover:bg-amber-700 text-amber-50 text-sm font-bold rounded-lg">查看警告</button>
-                </div>
-                <div class="grid grid-cols-2 gap-3">
-                    <button id="mobile-task-go-panel" class="py-3 bg-purple-900/50 hover:bg-purple-700 text-purple-100 text-sm font-bold rounded-xl border border-purple-800/70">查看面板</button>
-                    <button id="mobile-task-go-assets" class="py-3 bg-emerald-900/50 hover:bg-emerald-700 text-emerald-100 text-sm font-bold rounded-xl border border-emerald-800/70">全局资产</button>
-                </div>
-            </div>
-        </div>
-        <div id="sandbox-chat-pane" class="w-2/5 flex flex-col border-r border-gray-800 bg-gray-900/50 shadow-2xl z-10">
-            <div class="p-4 border-b border-gray-800 bg-gray-900 flex justify-between items-center shadow-md">
-                <span class="font-bold flex items-center text-blue-400"><i data-lucide="message-square" class="w-5 h-5 mr-2"></i>文学主脑推演室</span>
-                <select id="sandbox-control-mode" class="bg-gray-950 border border-blue-800/60 text-blue-200 text-xs rounded-lg px-2 py-1.5" title="控制 AI 自动审核与修复权限">
-                    <option value="semi">半自动</option>
-                    <option value="auto">全自动</option>
-                    <option value="manual">手动</option>
-                </select>
-            </div>
-            <div id="chat-history" class="flex-1 overflow-y-auto p-6 space-y-6"></div>
-            <div class="p-4 border-t border-gray-800 bg-gray-900">
-                <div class="relative flex items-end">
-                    <textarea id="chat-input" class="w-full bg-gray-950 border border-gray-700 text-gray-100 rounded-xl p-3 pr-12 h-20 focus:outline-none focus:border-blue-500 resize-none transition" placeholder="与主脑探讨剧情... (回车快捷发送，Shift+回车换行)"></textarea>
-                    <button id="btn-send-chat" class="absolute right-3 bottom-3 p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition shadow-lg"><i data-lucide="send" class="w-4 h-4"></i></button>
-                </div>
-            </div>
-        </div>
-        <div id="sandbox-preview-pane" class="w-3/5 flex flex-col bg-gray-950 relative">
-            <div class="p-4 border-b border-gray-800 bg-gray-900 flex justify-between items-center shadow-md flex-shrink-0">
-                <div class="flex flex-col">
-                    <span class="font-bold flex items-center text-purple-400"><i data-lucide="database" class="w-5 h-5 mr-2"></i>实时灵感可视化面板</span>
-                    <span class="text-[10px] text-gray-500 mt-1">AI回复将自动填入右侧表格，您可以随时【手动修改】。最终定稿后点击右上角入库。</span>
-                </div>
-                <div class="flex items-center space-x-2">
-                    <button id="btn-toggle-sandbox-layout" class="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-blue-300 text-xs font-bold rounded-lg border border-blue-900/50 transition flex items-center" title="切换沙盒对话区位置">
-                        <i data-lucide="columns-2" class="w-3.5 h-3.5 mr-1.5"></i><span>布局：自动</span>
-                    </button>
-                    <button id="btn-refresh-preview" class="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-amber-300 text-xs font-bold rounded-lg border border-amber-900/50 transition flex items-center">
-                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5 mr-1.5"></i>从对话刷新面板
-                    </button>
-                    <button id="btn-confirm-crystallize" class="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-sm font-bold rounded-lg shadow-[0_0_15px_rgba(147,51,234,0.5)] transition flex items-center">
-                        <i data-lucide="check-circle" class="w-4 h-4 mr-1.5"></i>正式铸造入库
-                    </button>
-                </div>
-            </div>
-            <div id="sandbox-alert-center" class="mx-6 mt-4 shrink-0 bg-gray-950/95 border border-emerald-800/60 rounded-xl shadow-lg p-3 text-xs text-emerald-200">
-                <div class="flex items-center justify-between mb-1">
-                    <span class="font-bold flex items-center"><i data-lucide="shield-check" class="w-3.5 h-3.5 mr-1.5"></i>实时监督中心</span>
-                    <span id="sandbox-alert-level" class="text-[10px] px-2 py-0.5 rounded bg-emerald-900/40 text-emerald-200 border border-emerald-700/60">绿色</span>
-                </div>
-                <div id="sandbox-alert-summary" class="leading-relaxed text-emerald-100/90 max-h-20 overflow-y-auto">等待沙盒设定。每轮推演、面板修改和规则检测后会实时更新。</div>
-                <div id="sandbox-alert-actions" class="hidden mt-3 grid grid-cols-3 gap-2">
-                    <button id="btn-sandbox-auto-repair" class="px-2 py-1.5 bg-emerald-900/50 hover:bg-emerald-700 text-emerald-100 border border-emerald-700/60 rounded text-[10px] font-bold">自动修复</button>
-                    <button id="btn-sandbox-fix-options" class="px-2 py-1.5 bg-blue-900/50 hover:bg-blue-700 text-blue-100 border border-blue-700/60 rounded text-[10px] font-bold">讨论方案</button>
-                    <button id="btn-sandbox-risk-report" class="px-2 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-600 rounded text-[10px] font-bold">风险报告</button>
-                </div>
-                <div id="sandbox-rule-gate-actions" class="hidden mt-3 grid grid-cols-3 gap-2">
-                    <button id="btn-rule-gate-edit" class="px-2 py-1.5 bg-red-900/50 hover:bg-red-700 text-red-100 border border-red-700/70 rounded text-[10px] font-bold">修改设定</button>
-                    <button id="btn-rule-gate-recheck" class="px-2 py-1.5 bg-amber-900/50 hover:bg-amber-700 text-amber-100 border border-amber-700/70 rounded text-[10px] font-bold">重新检测</button>
-                    <button id="btn-rule-gate-ignore" class="px-2 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-600 rounded text-[10px] font-bold">暂时忽略</button>
-                </div>
-            </div>
-            <div class="flex-1 overflow-y-auto p-6 space-y-6" id="human-preview-container">
-                <div class="flex h-full items-center justify-center text-gray-600 italic">在左侧发问，数据将在此处实时结晶...</div>
-            </div>
-        </div>
-        <div id="sandbox-mobile-assets" class="hidden flex-col bg-gray-950">
-            <div class="p-4 border-b border-gray-800 bg-gray-900 shadow-md pr-16">
-                <div class="text-[10px] font-bold tracking-wider text-emerald-300 uppercase">沙盒资料入口</div>
-                <div class="mt-1 text-lg font-black text-white">需要查看资料时再打开</div>
-                <div class="mt-1 text-xs text-gray-400 leading-relaxed">这些入口保留，但不会挤在当前对话里打断你。</div>
-            </div>
-            <div class="flex-1 overflow-y-auto p-4 space-y-3">
-                <button id="mobile-open-asset-modal" class="w-full p-4 text-left bg-gray-900 border border-emerald-900/60 rounded-xl hover:bg-gray-800">
-                    <div class="text-sm font-bold text-emerald-200">全局资产</div>
-                    <div class="mt-1 text-xs text-gray-400">世界观、规则、人物卡、时间线、伏笔和上帝视角。</div>
-                </button>
-                <button id="mobile-open-timeline" class="w-full p-4 text-left bg-gray-900 border border-indigo-900/60 rounded-xl hover:bg-gray-800">
-                    <div class="text-sm font-bold text-indigo-200">绝对时间轴</div>
-                    <div class="mt-1 text-xs text-gray-400">查看或调整全局事件顺序。</div>
-                </button>
-                <button id="mobile-open-relation" class="w-full p-4 text-left bg-gray-900 border border-pink-900/60 rounded-xl hover:bg-gray-800">
-                    <div class="text-sm font-bold text-pink-200">人物关系网</div>
-                    <div class="mt-1 text-xs text-gray-400">检查人物关系和情感羁绊。</div>
-                </button>
-            </div>
-        </div>
-        <nav id="sandbox-mobile-nav" class="hidden fixed left-0 right-0 bottom-0 z-[90] grid-cols-5 gap-1 bg-gray-950/95 border-t border-gray-800 p-2 backdrop-blur">
-            <button data-sandbox-mobile-tab="task" class="rounded-xl border border-transparent py-2 text-[11px] font-bold text-gray-400">任务</button>
-            <button data-sandbox-mobile-tab="chat" class="rounded-xl border border-transparent py-2 text-[11px] font-bold text-gray-400">对话</button>
-            <button data-sandbox-mobile-tab="panel" class="rounded-xl border border-transparent py-2 text-[11px] font-bold text-gray-400">面板</button>
-            <button data-sandbox-mobile-tab="warning" class="rounded-xl border border-transparent py-2 text-[11px] font-bold text-gray-400">警告</button>
-            <button data-sandbox-mobile-tab="assets" class="rounded-xl border border-transparent py-2 text-[11px] font-bold text-gray-400">资产</button>
-        </nav>
-        <button id="btn-close-sandbox" class="absolute top-4 right-4 text-gray-500 hover:text-white z-50 bg-gray-900 p-2 rounded-full border border-gray-800"><i data-lucide="x" class="w-5 h-5"></i></button>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Novel Workflow Studio</h1>
+      <p>Canon + 事件溯源 + 章节状态审校</p>
     </div>
-
-    <div id="sandbox-rule-conflict-modal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-[78] hidden flex items-center justify-center p-6">
-        <div class="bg-gray-950 border border-red-700/80 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[86vh] flex flex-col overflow-hidden">
-            <div class="flex items-start justify-between gap-4 p-5 border-b border-red-900/50 bg-red-950/30">
-                <div>
-                    <div class="text-[11px] font-bold tracking-wider text-red-300 mb-1">规则最高权限 · 红色中断</div>
-                    <h3 class="text-xl font-bold text-white flex items-center">
-                        <i data-lucide="shield-alert" class="w-5 h-5 mr-2 text-red-300"></i>必须先处理规则冲突
-                    </h3>
-                </div>
-                <button id="btn-close-rule-conflict-modal" class="text-gray-500 hover:text-white p-1 rounded border border-transparent hover:border-gray-700" title="收起窗口，不解除中断">
-                    <i data-lucide="x" class="w-5 h-5"></i>
-                </button>
-            </div>
-            <div class="grid md:grid-cols-[1.7fr_1fr] gap-0 flex-1 min-h-0">
-                <div class="p-5 overflow-y-auto">
-                    <div class="text-xs text-gray-400 mb-2 font-bold">完整冲突报告</div>
-                    <div id="rule-conflict-list" class="space-y-3 mb-4"></div>
-                    <details class="text-xs text-gray-400">
-                        <summary class="cursor-pointer hover:text-white mb-2">查看完整原始报告</summary>
-                        <pre id="rule-conflict-report" class="whitespace-pre-wrap text-sm leading-relaxed text-red-50 bg-black/40 border border-red-900/40 rounded-xl p-4 min-h-[180px]"></pre>
-                    </details>
-                </div>
-                <div class="p-5 border-t md:border-t-0 md:border-l border-gray-800 bg-gray-950/80 flex flex-col">
-                    <div class="text-xs text-gray-400 mb-3 font-bold">处理流程</div>
-                    <div class="space-y-3 text-xs text-gray-300 leading-relaxed flex-1">
-                        <div class="bg-red-950/30 border border-red-900/50 rounded-xl p-3">1. 沙盒推演已暂停，当前输入会暂存。</div>
-                        <div class="bg-gray-900 border border-gray-800 rounded-xl p-3">2. 修改世界观、规则、专家资料或事件设定后，点击重新检测。</div>
-                        <div class="bg-gray-900 border border-gray-800 rounded-xl p-3">3. 检测通过后自动恢复发送；确实要以后解决时，可暂时忽略。</div>
-                    </div>
-                    <div class="grid grid-cols-1 gap-2 mt-5">
-                        <button id="btn-modal-rule-gate-autofix" class="py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg font-bold text-sm">一键修复未忽略项</button>
-                        <button id="btn-modal-rule-gate-edit" class="py-2.5 bg-red-700 hover:bg-red-600 text-white rounded-lg font-bold text-sm">修改设定</button>
-                        <button id="btn-modal-rule-gate-recheck" class="py-2.5 bg-amber-700 hover:bg-amber-600 text-white rounded-lg font-bold text-sm">重新检测</button>
-                        <button id="btn-modal-rule-gate-ignore" class="py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-100 rounded-lg font-bold text-sm">暂时忽略</button>
-                    </div>
-                </div>
-            </div>
-        </div>
+    <div class="status-strip">
+      <span id="connectionStatus">本地模式</span>
+      <span id="projectStatus">未选择项目</span>
+      <span id="auditStatus">Clean</span>
     </div>
+  </header>
 
-    <div id="timeline-modal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-50 hidden flex items-center justify-center p-8"><div class="bg-gray-900 border border-indigo-500/50 rounded-2xl p-6 w-full max-w-5xl h-full max-h-[85vh] shadow-2xl flex flex-col relative"><h3 class="text-xl font-bold text-white mb-4 flex items-center flex-shrink-0"><i data-lucide="clock" class="text-indigo-400 mr-2"></i> 上帝视角：绝对时间轴</h3><div class="flex-1 flex space-x-6 overflow-hidden"><div class="w-2/3 overflow-y-auto pr-4 relative"><div class="absolute left-[23px] top-0 bottom-0 w-0.5 bg-gray-800 z-0"></div><div id="timeline-display-list" class="space-y-6 relative z-10 mt-2"></div></div><div class="w-1/3 bg-gray-950 rounded-xl p-5 border border-gray-800 flex flex-col space-y-4"><button id="btn-ai-extract-timeline" class="w-full py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold rounded-lg transition shadow-[0_0_15px_rgba(79,70,229,0.5)] flex justify-center items-center text-sm mb-2"><i data-lucide="sparkles" class="w-4 h-4 mr-2"></i> AI 智能扫描当前章节</button><button id="btn-manual-hook" class="w-full py-2.5 bg-red-900/40 hover:bg-red-600 text-red-300 hover:text-white border border-red-800/50 font-bold rounded-lg transition flex justify-center items-center text-sm"><i data-lucide="anchor" class="w-4 h-4 mr-2"></i> 手动添加伏笔</button><div class="text-xs text-gray-500 leading-relaxed border-t border-gray-800 pt-4">新增叙事事件请在左侧“世界大纲轴”的事件前后点击 + 按钮。</div></div></div><button id="btn-close-timeline" class="absolute top-6 right-6 text-gray-500 hover:text-white"><i data-lucide="x" class="w-6 h-6"></i></button></div></div>
-    <div id="relation-modal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-50 hidden flex items-center justify-center p-8"><div class="bg-gray-900 border border-emerald-500/50 rounded-2xl p-6 w-full max-w-6xl h-full max-h-[85vh] shadow-2xl flex flex-col relative"><h3 class="text-xl font-bold text-white mb-4 flex items-center flex-shrink-0"><i data-lucide="network" class="text-emerald-400 mr-2"></i> 宇宙群星纠葛网</h3><div class="flex-1 flex space-x-6 overflow-hidden"><div class="w-3/4 bg-gray-950 rounded-xl border border-gray-800 relative overflow-hidden"><div id="relation-network" class="absolute inset-0 w-full h-full"></div></div><div class="w-1/4 bg-gray-950 rounded-xl p-5 border border-gray-800 flex flex-col space-y-4"><h4 class="text-sm font-bold text-emerald-400 border-b border-gray-800 pb-2">🔗 缔结关系羁绊</h4><select id="rel-from" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-white text-sm"></select><div class="text-center text-gray-600"><i data-lucide="arrow-down" class="w-4 h-4 mx-auto"></i></div><select id="rel-to" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-white text-sm"></select><input type="text" id="rel-label" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-2.5 text-white text-sm" placeholder="关系 (例: 父子)"><button id="btn-save-relation" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition shadow-lg">缔结羁绊</button><div class="mt-4 border-t border-gray-800 pt-4 flex-1 overflow-y-auto"><h4 class="text-xs font-bold text-gray-500 mb-2">已缔结的因果：</h4><ul id="relation-list" class="space-y-2 text-xs"></ul></div></div></div><button id="btn-close-relation" class="absolute top-6 right-6 text-gray-500 hover:text-white"><i data-lucide="x" class="w-6 h-6"></i></button></div></div>
-    <div id="asset-modal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-50 hidden flex items-center justify-center"><div class="bg-gray-900 border border-blue-500/50 rounded-2xl p-8 w-full max-w-6xl shadow-2xl relative flex flex-col h-[85vh]"><h3 class="text-xl font-bold text-white mb-6 flex items-center"><i data-lucide="users" class="text-blue-500 mr-2"></i>全局资产控制台</h3><div class="flex-1 flex space-x-6 overflow-hidden"><div class="w-1/4 flex flex-col border-r border-gray-800 pr-4"><div class="flex justify-between items-center mb-4"><span class="text-sm font-bold text-gray-400">人物卡</span></div><ul id="asset-character-list" class="space-y-2 overflow-y-auto flex-1"></ul></div><div class="w-3/4 asset-overview-pane flex flex-col pl-2 overflow-y-auto"></div></div><button id="btn-close-asset-modal" class="absolute top-6 right-6 text-gray-500 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button></div></div>
-    <div id="add-chapter-modal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-50 hidden flex items-center justify-center"><div class="bg-gray-900 border border-purple-500/50 rounded-2xl p-8 w-full max-w-3xl shadow-2xl relative max-h-[86vh] overflow-y-auto"><h3 class="text-xl font-bold text-white mb-6 flex items-center"><i data-lucide="git-branch" class="text-purple-500 mr-2"></i>插入叙事事件</h3><div class="grid grid-cols-2 gap-3 mb-4 text-xs text-gray-400"><div class="bg-gray-950 border border-gray-800 rounded-xl p-3"><div class="text-purple-400 font-bold mb-1">前置事件</div><div id="insert-prev-context">无</div></div><div class="bg-gray-950 border border-gray-800 rounded-xl p-3"><div class="text-purple-400 font-bold mb-1">后置事件</div><div id="insert-next-context">无</div></div></div><div class="space-y-4 mb-6"><input type="number" id="new-chapter-num" step="0.1" class="w-full bg-gray-950 border border-gray-700 rounded-xl p-3 text-white" placeholder="事件序号"><input type="text" id="new-chapter-title" class="w-full bg-gray-950 border border-gray-700 rounded-xl p-3 text-white" placeholder="事件标题"><select id="new-chapter-type" class="w-full bg-gray-950 border border-gray-700 rounded-xl p-3 text-white"><option value="main">主线</option><option value="sub">支线</option></select><textarea id="new-chapter-draft" class="w-full bg-gray-950 border border-gray-800 rounded-xl p-3 text-gray-300 h-24 resize-none text-sm" placeholder="事件草稿或你和 AI 讨论后的共识..."></textarea><div class="bg-gray-950 border border-purple-900/40 rounded-xl p-3"><div id="insert-event-chat-history" class="h-40 overflow-y-auto space-y-2 mb-3 text-xs"></div><div class="flex gap-2"><textarea id="insert-event-chat-input" class="flex-1 bg-gray-900 border border-gray-800 rounded-lg p-2 text-sm text-white h-16 resize-none" placeholder="和 AI 讨论这个新事件如何承接前后事件..."></textarea><button id="btn-insert-event-chat" class="px-4 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-bold">发送</button></div></div></div><div class="flex space-x-4"><button id="btn-cancel-chapter" class="flex-1 py-3 bg-gray-800 text-gray-400 rounded-xl">取消</button><button id="btn-confirm-chapter" class="flex-1 py-3 bg-purple-600 text-white rounded-xl font-bold">生成坐标</button></div></div></div>
-    <div id="floating-toolbar" class="fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-gray-900 border border-red-500/50 rounded-full shadow-[0_0_20px_rgba(239,68,68,0.3)] z-40 flex items-center p-1.5 space-x-2 transition-all opacity-0 pointer-events-none"><span class="text-xs text-gray-400 pl-3">已选中文本</span><button id="btn-trigger-hook" class="px-4 py-1.5 bg-blue-600/90 text-white text-sm font-bold rounded-full"><i data-lucide="sparkles" class="w-4 h-4 inline mr-2"></i>AI 重写</button><button id="btn-selection-hook" class="px-4 py-1.5 bg-red-600/90 text-white text-sm font-bold rounded-full"><i data-lucide="anchor" class="w-4 h-4 inline mr-2"></i>设为伏笔</button></div>
-    <div id="hook-modal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-50 hidden flex items-center justify-center"><div class="bg-gray-900 border border-red-500/50 rounded-2xl p-8 w-full max-w-md shadow-2xl relative"><h3 class="text-xl font-bold text-white mb-6 flex items-center"><i data-lucide="anchor" class="text-red-500 mr-2"></i>锚定伏笔</h3><div class="mb-4"><textarea id="hook-desc" class="w-full bg-gray-950 border border-red-900/40 rounded-xl p-3 text-red-100 h-20 resize-none text-sm" placeholder="伏笔内容..."></textarea></div><div class="mb-5"><textarea id="hook-annotation" class="w-full bg-gray-950 border border-gray-800 rounded-xl p-3 text-gray-300 h-20 resize-none text-sm" placeholder="导演注释..."></textarea></div><div class="mb-8"><select id="hook-target-chapter" class="w-full bg-gray-950 border border-gray-700 rounded-xl p-3 text-white"></select></div><div class="flex space-x-4"><button id="btn-cancel-hook" class="flex-1 py-3 bg-gray-800 text-gray-400 rounded-xl">取消</button><button id="btn-confirm-hook" class="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold">锁定时空</button></div></div></div>
+  <main class="layout">
+    <aside class="sidebar">
+      <section>
+        <h2>项目</h2>
+        <form id="projectForm" class="stack">
+          <input name="title" placeholder="小说名" required>
+          <textarea name="concept" rows="5" placeholder="输入你的概念故事" required></textarea>
+          <div class="grid-2">
+            <input name="target_words" type="number" value="200000" min="50000" step="10000">
+            <input name="style_profile" value="默认商业网文" placeholder="文风">
+          </div>
+          <button type="submit">创建项目</button>
+        </form>
+      </section>
 
-    <script src="./js/prompts.js"></script>
-    <script src="./js/workspace/memory.js"></script>
-    <script src="./js/workspace/preview.js"></script>
-    <script src="./js/workspace/cloud.js"></script>
-    <script src="./js/workspace.js"></script>
-    <script>lucide.createIcons();</script>
-<div id="sub-chat-modal" class="fixed inset-0 bg-black/95 backdrop-blur-md z-[70] hidden flex items-center justify-center p-8">
-        <div class="bg-gray-900 border border-blue-500/50 rounded-2xl p-6 w-full max-w-3xl h-[80vh] shadow-2xl flex flex-col relative">
-            <h3 id="sub-chat-title" class="text-xl font-bold text-white mb-2 flex items-center flex-shrink-0">
-                <i data-lucide="cpu" class="text-blue-400 mr-2"></i> 局部设定深度推演
-            </h3>
-            <div id="sub-chat-history" class="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-950 rounded-xl border border-gray-800 mb-4"></div>
-            <div class="relative flex items-end flex-shrink-0">
-                <textarea id="sub-chat-input" class="w-full bg-gray-950 border border-gray-700 text-gray-100 rounded-xl p-3 pr-12 h-20 focus:outline-none focus:border-blue-500 resize-none transition" placeholder="告诉 AI 你想怎么扩写这部分设定..."></textarea>
-                <button id="btn-send-sub-chat" class="absolute right-3 bottom-3 p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition"><i data-lucide="send" class="w-4 h-4"></i></button>
-            </div>
-            <div class="flex justify-end space-x-3 mt-4">
-                <button id="btn-cancel-sub-chat" class="px-5 py-2 bg-gray-800 text-gray-400 rounded-lg font-bold">关闭</button>
-                <button id="btn-apply-sub-chat" class="px-5 py-2 bg-emerald-600 text-white rounded-lg font-bold">提取最新设定应用到表单</button>
-            </div>
+      <section>
+        <h2>项目列表</h2>
+        <div id="projectList" class="list"></div>
+      </section>
+
+      <section>
+        <h2>章节</h2>
+        <div id="chapterList" class="list"></div>
+      </section>
+    </aside>
+
+    <section class="workspace">
+      <div class="actions">
+        <button id="generateBible">生成故事圣经</button>
+        <button id="approveBible">确认圣经 + Canon</button>
+        <button id="generateBeats">生成六节点</button>
+        <button id="generateEvents">扩展事件链</button>
+        <button id="planChapters">生成前10章契约</button>
+      </div>
+
+      <section class="panel">
+        <h2>故事圣经</h2>
+        <textarea id="bibleEditor" rows="14" placeholder="生成或编辑故事圣经 JSON"></textarea>
+      </section>
+
+      <section class="panel">
+        <h2>事件链</h2>
+        <div id="eventList" class="event-list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          <h2>章节正文</h2>
+          <div>
+            <button id="loadState">查看章前状态</button>
+            <button id="generateDraft">生成正文</button>
+            <button id="reviewDraft">审校正文</button>
+            <button id="approveDraft">批准入稿</button>
+          </div>
         </div>
-    </div>
+        <textarea id="chapterEditor" rows="18" placeholder="选择章节后生成正文"></textarea>
+      </section>
+    </section>
 
+    <aside class="inspector">
+      <section>
+        <h2>Canon 硬事实</h2>
+        <div id="canonList" class="fact-list"></div>
+      </section>
+
+      <section>
+        <h2>章前状态</h2>
+        <pre id="stateView"></pre>
+      </section>
+
+      <section>
+        <h2>审校</h2>
+        <div id="auditList" class="fact-list"></div>
+      </section>
+
+      <section>
+        <h2>新事实待确认</h2>
+        <div id="proposedFacts" class="fact-list"></div>
+      </section>
+    </aside>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <script src="/app.js"></script>
 </body>
 </html>

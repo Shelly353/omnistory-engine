@@ -1,138 +1,56 @@
-// backend/routes/projects.js
 const express = require('express');
 const router = express.Router();
-const { createClient } = require('@supabase/supabase-js');
+const { insert, supabase, memory } = require('../lib/db');
+const { getProject, listByProject } = require('../lib/repositories');
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
-
-function normalizeProjectTitle(title = '') {
-    return String(title || '').trim().replace(/\s+/g, ' ').toLowerCase();
-}
-
-function getProjectTimestamp(project = {}) {
-    return new Date(project.updated_at || project.created_at || 0).getTime() || 0;
-}
-
-function dedupeProjects(projects = []) {
-    const byTitle = new Map();
-    (projects || []).forEach(project => {
-        const key = normalizeProjectTitle(project.title) || project.id;
-        const existing = byTitle.get(key);
-        if (!existing || getProjectTimestamp(project) > getProjectTimestamp(existing)) {
-            byTitle.set(key, project);
-        }
+router.post('/', async (req, res, next) => {
+  try {
+    const { title, concept, target_words, genre, style_profile } = req.body;
+    if (!title || !concept) return res.status(400).json({ success: false, error: '缺少 title 或 concept' });
+    const project = await insert('projects', {
+      title,
+      concept,
+      target_words: Number(target_words || 200000),
+      genre: genre || '',
+      style_profile: style_profile || '默认商业网文',
+      status: 'concept'
     });
-    return Array.from(byTitle.values()).sort((a, b) => getProjectTimestamp(b) - getProjectTimestamp(a));
-}
-
-// 1. 获取所有项目列表 (大厅主页)
-router.get('/', async (req, res) => {
-    try {
-        const { data, error } = await supabase.from('projects').select('*').order('created_at', { ascending: false });
-        if (error) throw error;
-        res.json({ success: true, projects: dedupeProjects(data) });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    res.json({ success: true, project });
+  } catch (err) {
+    next(err);
+  }
 });
 
-// 2. 创建新项目 (开启新纪元)
-router.post('/create', async (req, res) => {
-    const title = String(req.body?.title || '').trim();
-    if (!title) return res.status(400).json({ success: false, error: '项目标题不能为空' });
-    try {
-        const { data: existing, error: existingError } = await supabase
-            .from('projects')
-            .select('id,title,created_at,updated_at')
-            .eq('title', title)
-            .order('created_at', { ascending: false })
-            .limit(1);
-        if (existingError) throw existingError;
-        if (existing && existing.length > 0) {
-            return res.json({ success: true, id: existing[0].id, reused: true });
-        }
-        const { data, error } = await supabase.from('projects').insert([{ title }]).select().single();
-        if (error) throw error;
-        res.json({ success: true, id: data.id });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+router.get('/', async (req, res, next) => {
+  try {
+    if (supabase) {
+      const { data, error } = await supabase.from('projects').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      return res.json({ success: true, projects: data || [] });
+    }
+    res.json({ success: true, projects: memory.projects.slice().reverse() });
+  } catch (err) {
+    next(err);
+  }
 });
 
-// 3. 💥 核弹级彻底删除 (级联抹除所有宇宙数据)
-router.delete('/:projectId', async (req, res) => {
-    const { projectId } = req.params;
-    try {
-        // 先手动清除该宇宙下的所有衍生数据，防止外键冲突
-        await supabase.from('chapters').delete().eq('project_id', projectId);
-        await supabase.from('characters').delete().eq('project_id', projectId);
-        await supabase.from('foreshadowing_hooks').delete().eq('project_id', projectId);
-        await supabase.from('workspace_cloud_state').delete().eq('project_id', projectId);
-        
-        // 最后删除宇宙主控记录
-        const { error } = await supabase.from('projects').delete().eq('id', projectId);
-        if (error) throw error;
-        res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-// 4. 📦 宇宙结晶导出 (提取全书内容)
-router.get('/export/:projectId', async (req, res) => {
-    const { projectId } = req.params;
-    const { format } = req.query; // 支持 'txt' 或 'md'
-    
-    try {
-        // 抓取宇宙名称
-        const { data: project } = await supabase.from('projects').select('title').eq('id', projectId).single();
-        if (!project) throw new Error("未找到该宇宙");
-
-        // 提取所有章节，严格按浮点数时空顺序排列！
-        const { data: chapters, error } = await supabase.from('chapters')
-            .select('chapter_number, title, content_text')
-            .eq('project_id', projectId)
-            .order('chapter_number', { ascending: true });
-
-        if (error) throw error;
-
-        let exportContent = "";
-        
-        // 智能拼接引擎
-        if (format === 'md') {
-            exportContent += `# ${project.title}\n\n`;
-            chapters.forEach(chap => {
-                exportContent += `## 第 ${chap.chapter_number} 章：${chap.title}\n\n`;
-                exportContent += `${chap.content_text || '（本章纪元尚未录入内容）'}\n\n`;
-                exportContent += `---\n\n`;
-            });
-        } else { // txt
-            exportContent += `《${project.title}》\n\n`;
-            chapters.forEach(chap => {
-                exportContent += `第 ${chap.chapter_number} 章：${chap.title}\n\n`;
-                exportContent += `${chap.content_text || '（本章纪元尚未录入内容）'}\n\n\n`;
-            });
-        }
-
-        res.json({ success: true, title: project.title, content: exportContent });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-// 5. 📖 获取单一宇宙的基础圣经设定 (类型、世界观、规则)
-router.get('/:projectId', async (req, res) => {
-    try {
-        const { data, error } = await supabase.from('projects').select('*').eq('id', req.params.projectId).single();
-        if (error) throw error;
-        res.json({ success: true, project: data });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-router.put('/:projectId', async (req, res) => {
-    const { genre, worldview, rules } = req.body;
-    try {
-        const { error } = await supabase
-            .from('projects')
-            .update({ genre, worldview, rules })
-            .eq('id', req.params.projectId);
-        if (error) throw error;
-        res.json({ success: true });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+router.get('/:projectId', async (req, res, next) => {
+  try {
+    const project = await getProject(req.params.projectId);
+    if (!project) return res.status(404).json({ success: false, error: '项目不存在' });
+    const [bibles, canon, characters, events, contracts, chapters, findings] = await Promise.all([
+      listByProject('story_bibles', project.id),
+      listByProject('canon_facts', project.id),
+      listByProject('characters', project.id),
+      listByProject('story_events', project.id, 'event_order'),
+      listByProject('chapter_contracts', project.id, 'chapter_number'),
+      listByProject('chapters', project.id, 'chapter_number'),
+      listByProject('audit_findings', project.id)
+    ]);
+    res.json({ success: true, project, bible: bibles[0] || null, canon, characters, events, contracts, chapters, findings });
+  } catch (err) {
+    next(err);
+  }
 });
 
 module.exports = router;
