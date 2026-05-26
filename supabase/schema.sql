@@ -192,6 +192,56 @@ create table if not exists public.generation_runs (
   created_at timestamptz not null default now()
 );
 
+alter table public.projects add column if not exists concept text not null default '';
+alter table public.projects add column if not exists target_words integer not null default 200000;
+alter table public.projects add column if not exists style_profile text not null default '默认商业网文';
+alter table public.projects add column if not exists status text not null default 'concept';
+alter table public.projects add column if not exists genre text not null default '';
+alter table public.projects add column if not exists updated_at timestamptz not null default now();
+
+alter table public.characters add column if not exists identity text not null default '';
+alter table public.characters add column if not exists personality text not null default '';
+alter table public.characters add column if not exists core_desire text not null default '';
+alter table public.characters add column if not exists goal text not null default '';
+alter table public.characters add column if not exists motivation text not null default '';
+alter table public.characters add column if not exists flaw text not null default '';
+alter table public.characters add column if not exists fear text not null default '';
+alter table public.characters add column if not exists skills text not null default '';
+alter table public.characters add column if not exists limits text not null default '';
+alter table public.characters add column if not exists voice_rules text not null default '';
+alter table public.characters add column if not exists reuse_plan jsonb not null default '[]'::jsonb;
+alter table public.characters add column if not exists status text not null default 'active';
+alter table public.characters add column if not exists updated_at timestamptz not null default now();
+
+alter table public.foreshadowing_hooks add column if not exists title text not null default '';
+alter table public.foreshadowing_hooks add column if not exists setup_chapter integer;
+alter table public.foreshadowing_hooks add column if not exists payoff_chapter integer;
+alter table public.foreshadowing_hooks add column if not exists misdirection text not null default '';
+alter table public.foreshadowing_hooks add column if not exists payoff_method text not null default '';
+
+alter table public.chapters add column if not exists outline text not null default '';
+alter table public.chapters add column if not exists summary text not null default '';
+alter table public.chapters add column if not exists word_count integer not null default 0;
+alter table public.chapters add column if not exists updated_at timestamptz not null default now();
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'chapters_project_chapter_number_unique'
+  ) then
+    alter table public.chapters add constraint chapters_project_chapter_number_unique unique(project_id, chapter_number);
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'chapter_contracts_project_chapter_number_unique'
+  ) then
+    alter table public.chapter_contracts add constraint chapter_contracts_project_chapter_number_unique unique(project_id, chapter_number);
+  end if;
+end $$;
+
 alter table public.projects enable row level security;
 alter table public.story_bibles enable row level security;
 alter table public.canon_facts enable row level security;
