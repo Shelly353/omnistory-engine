@@ -1,4 +1,4 @@
-const steps = ['bible', 'canon', 'beats', 'events', 'chapters', 'draft'];
+const steps = ['bible', 'canon', 'characters', 'beats', 'events', 'chapters', 'draft'];
 
 const state = {
   projectId: '',
@@ -142,6 +142,7 @@ function stepDoneMap() {
   return {
     bible: Boolean(bundle.bible?.payload),
     canon: Boolean((bundle.canon || []).length),
+    characters: Boolean((bundle.characters || []).length),
     beats: events.some(event => event.status === 'beat'),
     events: events.some(event => event.status !== 'beat'),
     chapters: Boolean(chapters.length),
@@ -227,11 +228,95 @@ function renderProjectBundle() {
   const findings = bundle.findings || [];
   $('auditStatus').textContent = findings.some(f => f.severity === 'blocking') ? 'Blocked' : (findings.length ? 'Warning' : 'Clean');
   renderCanon(bundle.canon || []);
+  renderCharacters(bundle.characters || []);
   renderEventEditors('beatList', (bundle.events || []).filter(event => event.status === 'beat'), 'beat');
   renderEventEditors('eventList', (bundle.events || []).filter(event => event.status !== 'beat'), 'planned');
   renderChapters(bundle.chapters || []);
   renderAudit(findings);
   updateStepStatus();
+}
+
+function renderCharacters(characters) {
+  const list = $('characterList');
+  list.innerHTML = '';
+  characters.forEach(character => list.appendChild(createCharacterCard(character)));
+  if (!characters.length) list.innerHTML = '<p class="empty">确认故事圣经后会生成基础人物卡，也可以手动新增。</p>';
+}
+
+function createCharacterCard(character) {
+  const card = document.createElement('article');
+  card.className = 'character-card';
+  card.dataset.characterId = character.id;
+  card.innerHTML = `
+    <div class="event-card-head">
+      <input name="name" value="${escapeAttr(character.name || '')}" placeholder="姓名">
+      <input name="role" value="${escapeAttr(character.role || '')}" placeholder="角色功能">
+      <input name="faction" value="${escapeAttr(character.faction || '')}" placeholder="阵营">
+    </div>
+    <div class="grid-2">
+      <label>身份<input name="identity" value="${escapeAttr(character.identity || '')}"></label>
+      <label>性格/MBTI推断<textarea name="personality" rows="3">${escapeHtml(character.personality || '')}</textarea></label>
+    </div>
+    <div class="grid-2">
+      <label>核心欲望<textarea name="core_desire" rows="2">${escapeHtml(character.core_desire || '')}</textarea></label>
+      <label>外部目标<textarea name="goal" rows="2">${escapeHtml(character.goal || '')}</textarea></label>
+    </div>
+    <div class="grid-2">
+      <label>动机<textarea name="motivation" rows="2">${escapeHtml(character.motivation || '')}</textarea></label>
+      <label>缺陷<textarea name="flaw" rows="2">${escapeHtml(character.flaw || '')}</textarea></label>
+    </div>
+    <div class="grid-2">
+      <label>恐惧<textarea name="fear" rows="2">${escapeHtml(character.fear || '')}</textarea></label>
+      <label>能力/限制<textarea name="skills" rows="2">${escapeHtml(character.skills || '')}</textarea></label>
+    </div>
+    <label>不能突破的限制<textarea name="limits" rows="2">${escapeHtml(character.limits || '')}</textarea></label>
+    <label>台词/叙述规则<textarea name="voice_rules" rows="2">${escapeHtml(character.voice_rules || '')}</textarea></label>
+    <label>复用计划 JSON<textarea name="reuse_plan" rows="3">${escapeHtml(safeJson(character.reuse_plan || []))}</textarea></label>
+    <div class="event-actions">
+      <button type="button" data-save>保存人物</button>
+      <button type="button" class="danger" data-delete>删除人物</button>
+    </div>
+  `;
+  card.querySelector('[data-save]').onclick = () => saveCharacterCard(card);
+  card.querySelector('[data-delete]').onclick = () => deleteCharacterCard(card);
+  return card;
+}
+
+function characterPayloadFromCard(card) {
+  return {
+    name: card.querySelector('[name="name"]').value.trim(),
+    role: card.querySelector('[name="role"]').value,
+    faction: card.querySelector('[name="faction"]').value,
+    identity: card.querySelector('[name="identity"]').value,
+    personality: card.querySelector('[name="personality"]').value,
+    core_desire: card.querySelector('[name="core_desire"]').value,
+    goal: card.querySelector('[name="goal"]').value,
+    motivation: card.querySelector('[name="motivation"]').value,
+    flaw: card.querySelector('[name="flaw"]').value,
+    fear: card.querySelector('[name="fear"]').value,
+    skills: card.querySelector('[name="skills"]').value,
+    limits: card.querySelector('[name="limits"]').value,
+    voice_rules: card.querySelector('[name="voice_rules"]').value,
+    reuse_plan: parseJsonField(card.querySelector('[name="reuse_plan"]').value, []),
+    status: 'active'
+  };
+}
+
+async function saveCharacterCard(card) {
+  if (!state.projectId) return toast('先选择项目');
+  await runStep('characters', '保存人物卡', async () => {
+    await api(`/api/projects/${state.projectId}/characters/${card.dataset.characterId}`, {
+      method: 'PUT',
+      body: JSON.stringify(characterPayloadFromCard(card))
+    });
+  });
+}
+
+async function deleteCharacterCard(card) {
+  if (!confirm('删除这个人物？已关联事件会保留，但行动人物可能需要重新选择。')) return;
+  await runStep('characters', '删除人物', async () => {
+    await api(`/api/projects/${state.projectId}/characters/${card.dataset.characterId}`, { method: 'DELETE' });
+  });
 }
 
 function renderCanon(canonFacts) {
@@ -259,6 +344,19 @@ function renderEventEditors(containerId, events, defaultStatus) {
   }
 }
 
+function characterBrief(characterId) {
+  const character = (state.projectBundle?.characters || []).find(item => item.id === characterId);
+  if (!character) return '<p class="empty compact">行动人物未指定。请从人物卡中选择，避免事件变成无源事件。</p>';
+  return `
+    <div class="character-brief">
+      <strong>${escapeHtml(character.name)} · ${escapeHtml(character.role || '角色')}</strong>
+      <span>${escapeHtml(character.personality || '未填写性格/MBTI')}</span>
+      <span>欲望：${escapeHtml(character.core_desire || '未填写')}；缺陷：${escapeHtml(character.flaw || '未填写')}</span>
+      <span>复用：${escapeHtml((character.reuse_plan || []).join(' / ') || '未填写')}</span>
+    </div>
+  `;
+}
+
 function createEventCard(event, characters) {
   const card = document.createElement('article');
   card.className = 'event-card';
@@ -283,6 +381,7 @@ function createEventCard(event, characters) {
       <label>行动人物<select name="actor_character_id">${characterOptions(characters, event.actor_character_id)}</select></label>
       <label>冲突目标<input name="conflict_target" value="${escapeAttr(event.conflict_target || '')}"></label>
     </div>
+    <div class="linked-character">${characterBrief(event.actor_character_id)}</div>
     <label>状态变化 JSON<textarea name="state_changes" rows="4">${escapeHtml(safeJson(event.state_changes || []))}</textarea></label>
     <div class="event-actions">
       <button type="button" data-move="-1">上移</button>
@@ -292,6 +391,9 @@ function createEventCard(event, characters) {
     </div>
   `;
   card.querySelector('[name="status"]').value = event.status || 'planned';
+  card.querySelector('[name="actor_character_id"]').onchange = event => {
+    card.querySelector('.linked-character').innerHTML = characterBrief(event.currentTarget.value);
+  };
   card.querySelector('[data-save]').onclick = () => saveEventCard(card);
   card.querySelector('[data-delete]').onclick = () => deleteEventCard(card);
   card.querySelectorAll('[data-move]').forEach(button => {
@@ -386,13 +488,29 @@ async function addEvent(defaultStatus) {
 function renderChapters(chapters) {
   const list = $('chapterList');
   list.innerHTML = '';
+  const contracts = state.projectBundle?.contracts || [];
+  const characters = state.projectBundle?.characters || [];
+  const characterNames = new Map(characters.map(character => [character.id, character.name]));
+  const maxChapter = chapters.reduce((max, chapter) => Math.max(max, Number(chapter.chapter_number || 0)), 0);
+  $('chapterStart').value = maxChapter ? maxChapter + 1 : '';
   chapters.forEach(chapter => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = `${chapter.chapter_number}. ${chapter.title} · ${chapter.status}`;
-    button.className = chapter.id === state.chapterId ? 'active' : '';
-    button.onclick = () => selectChapter(chapter.id);
-    list.appendChild(button);
+    const contract = contracts.find(item => Number(item.chapter_number) === Number(chapter.chapter_number));
+    const item = document.createElement('article');
+    item.className = `chapter-card ${chapter.id === state.chapterId ? 'active' : ''}`;
+    const allowed = (contract?.allowed_characters || []).map(id => characterNames.get(id) || id).join('、') || '未指定';
+    const requiredEvents = (contract?.required_events || []).join('、') || '未指定';
+    item.innerHTML = `
+      <button type="button">${chapter.chapter_number}. ${escapeHtml(chapter.title)} · ${escapeHtml(chapter.status)}</button>
+      <div>
+        <strong>契约摘要</strong>
+        <p>${escapeHtml(contract?.summary || chapter.outline || '未填写')}</p>
+        <span>允许人物：${escapeHtml(allowed)}</span>
+        <span>必需事件：${escapeHtml(requiredEvents)}</span>
+        <span>章末状态：${escapeHtml(safeJson(contract?.expected_end_state || {}))}</span>
+      </div>
+    `;
+    item.querySelector('button').onclick = () => selectChapter(chapter.id);
+    list.appendChild(item);
   });
   if (!chapters.length) list.innerHTML = '<p class="empty">还没有章节契约。</p>';
 }
@@ -496,7 +614,29 @@ $('approveBible').onclick = async () => {
       method: 'PUT',
       body: JSON.stringify({ payload })
     });
+  }, 'characters');
+};
+
+$('enrichCharacters').onclick = async () => {
+  if (!state.projectId) return toast('先选择项目');
+  await runStep('characters', 'MBTI补全人物卡', async () => {
+    await api(`/api/projects/${state.projectId}/characters/enrich-mbti`, { method: 'POST', body: '{}' });
   }, 'beats');
+};
+
+$('addCharacter').onclick = async () => {
+  if (!state.projectId) return toast('先选择项目');
+  await runStep('characters', '新增人物', async () => {
+    await api(`/api/projects/${state.projectId}/characters`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: '新人物',
+        role: '待定义',
+        personality: 'MBTI推断：待补全',
+        reuse_plan: ['至少参与两个未来事件']
+      })
+    });
+  });
 };
 
 $('generateBeats').onclick = async () => {
@@ -517,9 +657,11 @@ $('generateEvents').onclick = async () => {
 $('planChapters').onclick = async () => {
   if (!state.projectId) return toast('先选择项目');
   await runStep('chapters', '生成章节契约', async () => {
+    const count = Math.min(Math.max(Number($('chapterCount').value || 10), 1), 120);
+    const startChapter = Number($('chapterStart').value || 0);
     await api(`/api/projects/${state.projectId}/chapters/plan`, {
       method: 'POST',
-      body: JSON.stringify({ count: 10 })
+      body: JSON.stringify({ count, startChapter: startChapter || undefined })
     });
   }, 'draft');
 };

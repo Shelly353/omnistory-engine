@@ -89,6 +89,15 @@ async function getEvent(eventId) {
   return memory.story_events.find(event => event.id === eventId) || null;
 }
 
+async function getCharacter(characterId) {
+  if (supabase) {
+    const { data, error } = await supabase.from('characters').select('*').eq('id', characterId).maybeSingle();
+    if (error) throw enrichDbError(error, 'characters');
+    return data;
+  }
+  return memory.characters.find(character => character.id === characterId) || null;
+}
+
 async function patchEvent(eventId, patch) {
   if (supabase) {
     const { data, error } = await supabase
@@ -115,14 +124,63 @@ async function deleteEvent(eventId) {
   memory.story_events = memory.story_events.filter(event => event.id !== eventId);
 }
 
+async function patchCharacter(characterId, patch) {
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('characters')
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq('id', characterId)
+      .select()
+      .single();
+    if (error) throw enrichDbError(error, 'characters');
+    return data;
+  }
+  const found = memory.characters.find(character => character.id === characterId);
+  if (!found) return null;
+  Object.assign(found, patch, { updated_at: new Date().toISOString() });
+  return found;
+}
+
+async function deleteCharacter(characterId) {
+  if (supabase) {
+    const { error } = await supabase.from('characters').delete().eq('id', characterId);
+    if (error) throw enrichDbError(error, 'characters');
+    return;
+  }
+  memory.characters = memory.characters.filter(character => character.id !== characterId);
+}
+
+async function upsertContract(row) {
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('chapter_contracts')
+      .upsert(row, { onConflict: 'project_id,chapter_number' })
+      .select()
+      .single();
+    if (error) throw enrichDbError(error, 'chapter_contracts');
+    return data;
+  }
+  let found = memory.chapter_contracts.find(item => item.project_id === row.project_id && item.chapter_number === row.chapter_number);
+  if (found) Object.assign(found, row);
+  else {
+    found = { id: crypto.randomUUID(), created_at: new Date().toISOString(), ...row };
+    memory.chapter_contracts.push(found);
+  }
+  return found;
+}
+
 module.exports = {
   listByProject,
   getProject,
   getChapter,
   getEvent,
+  getCharacter,
   getContractForChapter,
+  upsertContract,
   upsertChapter,
   patchChapter,
   patchEvent,
-  deleteEvent
+  deleteEvent,
+  patchCharacter,
+  deleteCharacter
 };

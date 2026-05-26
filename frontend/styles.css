@@ -251,7 +251,7 @@ body.busy button {
 
 .step-tabs {
   display: grid;
-  grid-template-columns: repeat(6, minmax(130px, 1fr));
+  grid-template-columns: repeat(7, minmax(126px, 1fr));
   gap: 8px;
   margin-bottom: 14px;
   overflow-x: auto;
@@ -295,7 +295,8 @@ body.busy button {
 
 .list,
 .fact-list,
-.event-editor-list {
+.event-editor-list,
+.character-editor-list {
   display: grid;
   gap: 10px;
 }
@@ -316,6 +317,8 @@ body.busy button {
 }
 
 .event-card,
+.character-card,
+.chapter-card,
 .fact {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -323,9 +326,47 @@ body.busy button {
   background: #fff;
 }
 
-.event-card {
+.event-card,
+.character-card,
+.chapter-card {
   display: grid;
   gap: 10px;
+}
+
+.chapter-card.active {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.chapter-card button {
+  width: 100%;
+  text-align: left;
+}
+
+.chapter-card div {
+  display: grid;
+  gap: 6px;
+}
+
+.chapter-card span,
+.character-brief span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.character-brief {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  background: var(--accent-soft);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.small-input {
+  width: 96px;
 }
 
 .event-card-head {

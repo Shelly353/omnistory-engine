@@ -1,7 +1,18 @@
 const express = require('express');
 const router = express.Router({ mergeParams: true });
 const { insert, insertMany } = require('../lib/db');
-const { getProject, getEvent, listByProject, upsertChapter, patchEvent, deleteEvent } = require('../lib/repositories');
+const {
+  getProject,
+  getEvent,
+  getCharacter,
+  listByProject,
+  upsertChapter,
+  upsertContract,
+  patchEvent,
+  deleteEvent,
+  patchCharacter,
+  deleteCharacter
+} = require('../lib/repositories');
 const { callAi } = require('../lib/aiClient');
 const { demoBeats, demoEvents, demoChapterContracts } = require('../lib/fallbacks');
 const { matchCharacterForEvent } = require('../lib/characterMatcher');
@@ -38,6 +49,27 @@ function normalizeEventPayload(body, projectId, fallbackOrder = 1) {
   };
 }
 
+function normalizeCharacterPayload(body, projectId, fallbackName = '新人物') {
+  return {
+    project_id: projectId,
+    name: cleanText(body.name, fallbackName),
+    role: body.role || '',
+    faction: body.faction || '',
+    identity: body.identity || '',
+    personality: body.personality || '',
+    core_desire: body.core_desire || '',
+    goal: body.goal || '',
+    motivation: body.motivation || '',
+    flaw: body.flaw || '',
+    fear: body.fear || '',
+    skills: body.skills || '',
+    limits: body.limits || '',
+    voice_rules: body.voice_rules || '',
+    reuse_plan: asArray(body.reuse_plan),
+    status: body.status || 'active'
+  };
+}
+
 async function assertProjectEvent(projectId, eventId) {
   const event = await getEvent(eventId);
   if (!event || event.project_id !== projectId) {
@@ -47,6 +79,105 @@ async function assertProjectEvent(projectId, eventId) {
   }
   return event;
 }
+
+async function assertProjectCharacter(projectId, characterId) {
+  const character = await getCharacter(characterId);
+  if (!character || character.project_id !== projectId) {
+    const err = new Error('人物不存在或不属于当前项目');
+    err.status = 404;
+    throw err;
+  }
+  return character;
+}
+
+router.get('/characters', async (req, res, next) => {
+  try {
+    await getProject(req.params.projectId);
+    const characters = await listByProject('characters', req.params.projectId);
+    res.json({ success: true, characters });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/characters', async (req, res, next) => {
+  try {
+    await getProject(req.params.projectId);
+    const character = await insert('characters', normalizeCharacterPayload(req.body, req.params.projectId, '新人物'));
+    res.json({ success: true, character });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/characters/:characterId', async (req, res, next) => {
+  try {
+    await assertProjectCharacter(req.params.projectId, req.params.characterId);
+    const patch = normalizeCharacterPayload(req.body, req.params.projectId);
+    delete patch.project_id;
+    const character = await patchCharacter(req.params.characterId, patch);
+    res.json({ success: true, character });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/characters/:characterId', async (req, res, next) => {
+  try {
+    await assertProjectCharacter(req.params.projectId, req.params.characterId);
+    await deleteCharacter(req.params.characterId);
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/characters/enrich-mbti', async (req, res, next) => {
+  try {
+    const project = await getProject(req.params.projectId);
+    const characters = await listByProject('characters', project.id);
+    const fallback = {
+      characters: characters.map(character => ({
+        id: character.id,
+        name: character.name,
+        personality: character.personality || 'MBTI推断：INTJ。外冷内紧，依赖结构化判断。',
+        core_desire: character.core_desire || '获得能证明自身价值的结果',
+        motivation: character.motivation || '由旧伤、责任或未完成承诺驱动',
+        flaw: character.flaw || '过度相信自己的主要认知方式',
+        fear: character.fear || '失控、失败或被迫面对真实需求',
+        voice_rules: character.voice_rules || '语言节奏与其MBTI压力反应一致',
+        reuse_plan: character.reuse_plan?.length ? character.reuse_plan : ['至少参与两次主线事件', '在人物弧线转折处承担功能']
+      }))
+    };
+    const ai = await callAi({
+      json: true,
+      fallback,
+      system: '你是人物心理建模编辑。用 MBTI 作为推理工具补全缺失人物卡，但不要把人物写成标签；必须服务于长篇复用、冲突选择和成长弧线。只输出 JSON。',
+      user: `项目概念：${project.concept}
+现有人物：
+${JSON.stringify(characters)}
+
+请输出 JSON：{"characters":[{"id":"","name":"","personality":"包含MBTI推断和压力反应","core_desire":"","motivation":"","flaw":"","fear":"","voice_rules":"","reuse_plan":["至少两个复用点"]}]}`
+    });
+    const updates = [];
+    for (const item of ai.parsed?.characters || fallback.characters) {
+      const existing = characters.find(character => character.id === item.id || character.name === item.name);
+      if (!existing) continue;
+      updates.push(await patchCharacter(existing.id, {
+        personality: item.personality || existing.personality,
+        core_desire: item.core_desire || existing.core_desire,
+        motivation: item.motivation || existing.motivation,
+        flaw: item.flaw || existing.flaw,
+        fear: item.fear || existing.fear,
+        voice_rules: item.voice_rules || existing.voice_rules,
+        reuse_plan: asArray(item.reuse_plan).length ? asArray(item.reuse_plan) : existing.reuse_plan
+      }));
+    }
+    res.json({ success: true, characters: updates });
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.get('/events', async (req, res, next) => {
   try {
@@ -204,29 +335,36 @@ ${JSON.stringify(existingEvents)}
 router.post('/chapters/plan', async (req, res, next) => {
   try {
     const project = await getProject(req.params.projectId);
-    const [characters, events] = await Promise.all([
+    const [characters, events, existingChapters] = await Promise.all([
       listByProject('characters', project.id),
-      listByProject('story_events', project.id, 'event_order')
+      listByProject('story_events', project.id, 'event_order'),
+      listByProject('chapters', project.id, 'chapter_number')
     ]);
-    const count = Math.min(Number(req.body.count || 10), 120);
-    const fallback = { chapters: demoChapterContracts(events, characters, count) };
+    const count = Math.min(Math.max(Number(req.body.count || 10), 1), 120);
+    const maxChapter = existingChapters.reduce((max, chapter) => Math.max(max, Number(chapter.chapter_number || 0)), 0);
+    const startChapter = Math.max(Number(req.body.startChapter || maxChapter + 1), 1);
+    const fallback = { chapters: demoChapterContracts(events, characters, count).map((chapter, index) => ({ ...chapter, chapter_number: startChapter + index })) };
     const ai = await callAi({
       json: true,
       fallback,
-      system: '你是章节契约规划师。每章必须规定允许人物、禁止事实、预期章前和章后状态；必须包含节奏压力、人物弧线阶段和场景连续性要求。只输出 JSON。',
+      system: '你是章节契约规划师。每章必须规定允许人物、必需事件、禁止事实、预期章前和章后状态；必须包含节奏压力、人物弧线阶段、场景连续性要求。allowed_characters 必须使用角色 id，不允许留空；只输出 JSON。',
       user: `项目：${project.title}
 目标字数：${project.target_words}
+本次起始章：${startChapter}
+本次数量：${count}
 角色：
 ${JSON.stringify(characters)}
 事件链：
 ${JSON.stringify(events)}
+已有章节：
+${JSON.stringify(existingChapters)}
 
-请生成前 ${count} 章契约，JSON：{"chapters":[{"chapter_number":1,"title":"","summary":"","required_events":[],"allowed_characters":[],"forbidden_facts":[],"secret_permissions":{},"expected_start_state":{"scene_continuity":""},"expected_end_state":{"scene_continuity":"","character_arc_change":"","pressure":1},"style_requirements":""}]}`
+请生成第 ${startChapter} 章到第 ${startChapter + count - 1} 章契约，JSON：{"chapters":[{"chapter_number":${startChapter},"title":"","summary":"","required_events":["事件id"],"allowed_characters":["角色id"],"forbidden_facts":[],"secret_permissions":{},"expected_start_state":{"scene_continuity":"","character_status":{}},"expected_end_state":{"scene_continuity":"","character_arc_change":"","pressure":1},"style_requirements":""}]}`
     });
     const contracts = (ai.parsed?.chapters || fallback.chapters).map((item, index) => ({
       project_id: project.id,
-      chapter_number: item.chapter_number,
-      title: cleanText(item.title, `第${item.chapter_number || index + 1}章`),
+      chapter_number: item.chapter_number || startChapter + index,
+      title: cleanText(item.title, `第${item.chapter_number || startChapter + index}章`),
       summary: item.summary || '',
       required_events: item.required_events || [],
       allowed_characters: item.allowed_characters?.length ? item.allowed_characters : characters.map(char => char.id),
@@ -237,7 +375,10 @@ ${JSON.stringify(events)}
       style_requirements: item.style_requirements || project.style_profile,
       status: 'ready_to_draft'
     }));
-    const savedContracts = await insertMany('chapter_contracts', contracts);
+    const savedContracts = [];
+    for (const contract of contracts) {
+      savedContracts.push(await upsertContract(contract));
+    }
     const chapters = [];
     for (const contract of savedContracts) {
       chapters.push(await upsertChapter({
