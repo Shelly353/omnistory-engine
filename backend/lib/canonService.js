@@ -1,5 +1,6 @@
 const { insertMany } = require('./db');
 const { listByProject } = require('./repositories');
+const { cleanText } = require('./normalize');
 
 function factsFromBible(projectId, bible = {}) {
   const facts = [];
@@ -14,11 +15,12 @@ function factsFromBible(projectId, bible = {}) {
       status: 'active'
     });
   });
-  (bible.main_characters || []).forEach(char => {
+  (bible.main_characters || []).forEach((char, index) => {
+    const name = cleanText(char.name, index === 0 ? '主角' : `角色${index + 1}`);
     facts.push({
       project_id: projectId,
       fact_type: 'character_identity',
-      subject: char.name,
+      subject: name,
       predicate: '身份',
       object: char.identity || char.role || '未定',
       source: 'story_bible',
@@ -28,7 +30,7 @@ function factsFromBible(projectId, bible = {}) {
       facts.push({
         project_id: projectId,
         fact_type: 'character_limit',
-        subject: char.name,
+        subject: name,
         predicate: '限制',
         object: char.limits,
         source: 'story_bible',
@@ -36,11 +38,11 @@ function factsFromBible(projectId, bible = {}) {
       });
     }
   });
-  (bible.core_secrets || []).forEach(secret => {
+  (bible.core_secrets || []).forEach((secret, index) => {
     facts.push({
       project_id: projectId,
       fact_type: 'core_secret',
-      subject: secret.title,
+      subject: cleanText(secret.title || secret.name, `未命名秘密${index + 1}`),
       predicate: '上帝视角',
       object: secret.god_view || '',
       source: 'story_bible',

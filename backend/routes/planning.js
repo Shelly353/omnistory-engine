@@ -5,6 +5,7 @@ const { getProject, listByProject, upsertChapter } = require('../lib/repositorie
 const { callAi } = require('../lib/aiClient');
 const { demoBeats, demoEvents, demoChapterContracts } = require('../lib/fallbacks');
 const { matchCharacterForEvent } = require('../lib/characterMatcher');
+const { cleanText } = require('../lib/normalize');
 
 router.post('/beats/generate', async (req, res, next) => {
   try {
@@ -24,7 +25,7 @@ ${JSON.stringify(bible)}
     const beats = (ai.parsed?.beats || fallback.beats).map((beat, index) => ({
       project_id: project.id,
       event_order: index + 1,
-      title: beat.title,
+      title: cleanText(beat.title, `关键节点${index + 1}`),
       summary: beat.summary || beat.content || '',
       trigger: beat.function || '',
       conflict_target: beat.beat || '',
@@ -71,7 +72,7 @@ ${JSON.stringify(existingEvents)}
       return {
         project_id: project.id,
         event_order: event.event_order || index + 1,
-        title: event.title,
+        title: cleanText(event.title, `事件${index + 1}`),
         summary: event.summary || '',
         trigger: event.trigger || '',
         actor_character_id: actor?.id || match.recommended?.id || null,
@@ -114,7 +115,7 @@ ${JSON.stringify(events)}
     const contracts = (ai.parsed?.chapters || fallback.chapters).map(item => ({
       project_id: project.id,
       chapter_number: item.chapter_number,
-      title: item.title,
+      title: cleanText(item.title, `第${item.chapter_number || index + 1}章`),
       summary: item.summary || '',
       required_events: item.required_events || [],
       allowed_characters: item.allowed_characters?.length ? item.allowed_characters : characters.map(char => char.id),

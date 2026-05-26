@@ -5,6 +5,7 @@ const { getProject } = require('../lib/repositories');
 const { callAi } = require('../lib/aiClient');
 const { demoBible } = require('../lib/fallbacks');
 const { createCanonFromBible } = require('../lib/canonService');
+const { cleanText, normalizeBiblePayload } = require('../lib/normalize');
 
 router.post('/generate', async (req, res, next) => {
   try {
@@ -23,7 +24,7 @@ ${project.concept}
 
 请输出 JSON，包含 genre, theme, worldview, protagonist_arc, antagonist_arc, main_characters, core_secrets, rules, style。`
     });
-    const payload = ai.parsed || fallback;
+    const payload = normalizeBiblePayload(ai.parsed || fallback, fallback);
     const bible = await insert('story_bibles', { project_id: project.id, payload, version: 1, approved: false });
     await insert('generation_runs', {
       project_id: project.id,
@@ -49,7 +50,7 @@ router.put('/approve', async (req, res, next) => {
     if (supabase) {
       const { data: existing, error: existingError } = await supabase.from('story_bibles').select('*').eq('project_id', project.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
       if (existingError) throw enrichDbError(existingError, 'story_bibles');
-      const source = payload || existing?.payload || demoBible(project);
+      const source = normalizeBiblePayload(payload || existing?.payload || demoBible(project), demoBible(project));
       const { data, error } = await supabase
         .from('story_bibles')
         .upsert({ id: existing?.id, project_id: project.id, payload: source, approved: true, updated_at: new Date().toISOString() })
@@ -64,15 +65,15 @@ router.put('/approve', async (req, res, next) => {
       bible.approved = true;
     }
 
-    const source = bible.payload || payload || demoBible(project);
+    const source = normalizeBiblePayload(bible.payload || payload || demoBible(project), demoBible(project));
     await Promise.all([
       deleteByProject('characters', project.id),
       deleteByProject('secrets', project.id),
       deleteByProject('canon_facts', project.id)
     ]);
-    const characters = await insertMany('characters', (source.main_characters || []).map(char => ({
+    const characters = await insertMany('characters', (source.main_characters || []).map((char, index) => ({
       project_id: project.id,
-      name: char.name,
+      name: cleanText(char.name, index === 0 ? '主角' : `角色${index + 1}`),
       role: char.role || '',
       faction: char.faction || '',
       identity: char.identity || '',
@@ -88,9 +89,9 @@ router.put('/approve', async (req, res, next) => {
       reuse_plan: char.reuse_plan || [],
       status: 'active'
     })));
-    const secrets = await insertMany('secrets', (source.core_secrets || []).map(secret => ({
+    const secrets = await insertMany('secrets', (source.core_secrets || []).map((secret, index) => ({
       project_id: project.id,
-      title: secret.title,
+      title: cleanText(secret.title || secret.name, `未命名秘密${index + 1}`),
       audience_view: secret.audience_view || '',
       god_view: secret.god_view || '',
       status: secret.status || 'hidden',
