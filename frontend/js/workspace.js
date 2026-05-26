@@ -5000,6 +5000,11 @@ ${JSON.stringify(normalizePipelineArray(chapterPipelineState.chapter_cuts).filte
         const currentNodes = cut?.node_ids?.length
             ? normalizePipelineArray(chapterPipelineState.event_nodes).filter(node => cut.node_ids.includes(node.node_id))
             : getCurrentEventNodes();
+        const currentNodeIds = currentNodes.map(node => node.node_id).filter(Boolean);
+        const relevantTracks = normalizePipelineArray(chapterPipelineState.character_state_tracks).map(track => ({
+            ...track,
+            states: normalizePipelineArray(track.states).filter(state => currentNodeIds.includes(state.node_id))
+        })).filter(track => track.states.length);
         return `${buildPipelineCanonPrompt()}
 
 【当前章节】
@@ -5011,10 +5016,11 @@ ${JSON.stringify(cut || {}, null, 2)}
 【本章 event_nodes】
 ${JSON.stringify(currentNodes, null, 2)}
 
-【character_state_tracks】
-${JSON.stringify(chapterPipelineState.character_state_tracks || [], null, 2)}
+【本章 character_state_tracks】
+${JSON.stringify(relevantTracks, null, 2)}
 
 请生成“章节写作包”。章节包正文侧不能包含完整上帝视角，只能包含观众视角、角色视角、can_hint、must_hide。必须从 event_nodes 和人物状态轨道提取，不得新增重大剧情。
+如果本章没有需要隐藏的上帝视角，information_permissions.must_hide 输出空数组即可；不要为了凑字段编造禁区。
 
 只输出 JSON：
 {
@@ -5050,8 +5056,58 @@ ${JSON.stringify(chapterPipelineState.character_state_tracks || [], null, 2)}
         }
         const parsed = await requestPipelineJson(buildChapterPackagePrompt(), value => value.chapter_identity && Array.isArray(value.must_write));
         const key = getCurrentChapterPipelineKey();
-        chapterPipelineState.chapter_packages = { ...(chapterPipelineState.chapter_packages || {}), [key]: { ...parsed, audit_status: '待检测' } };
+        chapterPipelineState.chapter_packages = { ...(chapterPipelineState.chapter_packages || {}), [key]: { ...normalizeChapterPackageForCurrentEvent(parsed), audit_status: '待检测' } };
         setPipelineStatus('章节包待检测', `已生成事件 ${currentLocalContext.chapterNumber}《${currentLocalContext.title}》章节包，请检测后再扩写。`);
+    }
+
+    function normalizeChapterPackageForCurrentEvent(pkg = {}) {
+        const cut = getCurrentChapterCut();
+        const currentNodes = getCurrentEventNodes();
+        const nodeIds = cut?.node_ids?.length
+            ? cut.node_ids.filter(id => currentNodes.some(node => node.node_id === id))
+            : currentNodes.map(node => node.node_id).filter(Boolean);
+        const mustWrite = Array.isArray(pkg.must_write) && pkg.must_write.length
+            ? pkg.must_write
+            : currentNodes.map(node => node.result || node.summary).filter(Boolean);
+        const sceneChain = Array.isArray(pkg.scene_chain) && pkg.scene_chain.length
+            ? pkg.scene_chain
+            : currentNodes.map(node => ({
+                node_id: node.node_id,
+                scene_goal: node.summary || node.quality_function || '',
+                conflict: node.obstacle || '',
+                outcome: node.result || ''
+            }));
+        const permissions = pkg.information_permissions || {};
+        return {
+            ...pkg,
+            chapter_identity: {
+                ...(pkg.chapter_identity || {}),
+                chapter_id: currentLocalContext.chapterId || getCurrentChapterPipelineKey(),
+                chapter_number: Number(currentLocalContext.chapterNumber || pkg.chapter_identity?.chapter_number || 1),
+                title: currentLocalContext.title || pkg.chapter_identity?.title || '',
+                source_event_nodes: nodeIds
+            },
+            chapter_goal: pkg.chapter_goal || cut?.chapter_goal || currentNodes[0]?.summary || '完成当前事件推进。',
+            opening_state: pkg.opening_state || cut?.opening_state || currentNodes[0]?.trigger || currentNodes[0]?.summary || '承接上一事件状态。',
+            ending_state: pkg.ending_state || cut?.ending_state || currentNodes[currentNodes.length - 1]?.result || '抵达下一事件触发点。',
+            must_write: mustWrite,
+            may_write: Array.isArray(pkg.may_write) ? pkg.may_write : [],
+            must_not_write: Array.isArray(pkg.must_not_write) ? pkg.must_not_write : [],
+            active_characters: Array.isArray(pkg.active_characters) ? pkg.active_characters : [],
+            information_permissions: {
+                audience_knows: Array.isArray(permissions.audience_knows) ? permissions.audience_knows : [],
+                pov_character_knows: Array.isArray(permissions.pov_character_knows) ? permissions.pov_character_knows : [],
+                other_characters_know: Array.isArray(permissions.other_characters_know) ? permissions.other_characters_know : [],
+                can_reveal: Array.isArray(permissions.can_reveal) ? permissions.can_reveal : [],
+                can_hint: Array.isArray(permissions.can_hint) ? permissions.can_hint : [],
+                must_hide: Array.isArray(permissions.must_hide) ? permissions.must_hide : []
+            },
+            rules_constraints: Array.isArray(pkg.rules_constraints) ? pkg.rules_constraints : [],
+            foreshadowing: pkg.foreshadowing || { must_payoff: [], can_plant: [] },
+            scene_chain: sceneChain,
+            style_target: pkg.style_target || {},
+            acceptance_checks: Array.isArray(pkg.acceptance_checks) ? pkg.acceptance_checks : []
+        };
     }
 
     function formatChapterPackageSynopsis(pkg = getCurrentChapterPackage()) {
@@ -5120,10 +5176,7 @@ ${JSON.stringify(pkg.information_permissions || {}, null, 2)}
         const issues = [];
         if (!pkg) return ['当前章节包不存在。'];
         if (!Array.isArray(pkg.must_write) || pkg.must_write.length === 0) issues.push('must_write 为空，正文没有硬事件依据。');
-        if (!Array.isArray(pkg.must_not_write) || pkg.must_not_write.length < 4) issues.push('must_not_write 不足，缺少反向边界。');
-        if (!Array.isArray(pkg.active_characters) || pkg.active_characters.length === 0) issues.push('active_characters 为空，人物状态无法锁定。');
         if (!pkg.opening_state || !pkg.ending_state) issues.push('缺少 opening_state 或 ending_state。');
-        if (!pkg.information_permissions?.must_hide) issues.push('缺少 information_permissions.must_hide。');
         if (!Array.isArray(pkg.scene_chain) || pkg.scene_chain.length === 0) issues.push('scene_chain 为空，正文容易临时补场景。');
         return issues;
     }
@@ -5142,13 +5195,17 @@ ${JSON.stringify(pkg.information_permissions || {}, null, 2)}
 【当前章节包】
 ${JSON.stringify(pkg, null, 2)}
 
-【event_nodes】
-${JSON.stringify(chapterPipelineState.event_nodes || [], null, 2)}
+【当前事件 event_nodes】
+${JSON.stringify(getCurrentEventNodes() || [], null, 2)}
 
-【character_state_tracks】
-${JSON.stringify(chapterPipelineState.character_state_tracks || [], null, 2)}
+【当前事件 character_state_tracks】
+${JSON.stringify(normalizePipelineArray(chapterPipelineState.character_state_tracks).map(track => ({
+    ...track,
+    states: normalizePipelineArray(track.states).filter(state => (pkg.chapter_identity?.source_event_nodes || []).includes(state.node_id))
+})).filter(track => track.states.length), null, 2)}
 
 你是章节包闸门。请检查：章节包是否只包含本章信息；是否继承正确人物状态；是否隐藏上帝视角；must_not_write 是否覆盖关键禁区；是否足够支撑正文扩写；是否提前越过下一事件。
+只有出现明确泄露上帝视角、违反世界规则、引用不存在节点、提前越过下一事件、缺少 must_write/scene_chain/opening_state/ending_state 时，才判定不通过。风格、精彩度、吸引力、节奏建议只列为黄色问题，不要阻断。
 
 输出：
 【结论】通过/不通过
@@ -5163,10 +5220,12 @@ ${JSON.stringify(chapterPipelineState.character_state_tracks || [], null, 2)}
         });
         const data = await readApiJson(res, '章节包检测失败');
         const report = data.success ? (stripFencedBlocks(data.reply) || data.reply) : `章节包检测失败：${data.error || '未知错误'}`;
-        const failed = /【结论】\s*不通过|结论[:：]\s*不通过|红色问题[\s\S]*(泄露|越过|缺少|不符合|违反|不能)/.test(report || '');
+        const failed = /【结论】\s*不通过|结论[:：]\s*不通过/.test(report || '')
+            && /红色问题[\s\S]*(泄露|违反世界|违反规则|不存在节点|引用不存在|提前越过|缺少 must_write|缺少 scene_chain|缺少 opening_state|缺少 ending_state)/.test(report || '');
         const key = getCurrentChapterPipelineKey();
-        chapterPipelineState.chapter_packages[key] = { ...pkg, audit_status: failed ? '不通过' : '通过', audit_report: report };
-        setPipelineStatus(failed ? '章节包检测未通过' : '可扩写正文', report);
+        chapterPipelineState.chapter_packages[key] = { ...normalizeChapterPackageForCurrentEvent(pkg), audit_status: failed ? '不通过' : '通过', audit_report: report };
+        const softWarning = /【结论】\s*不通过|结论[:：]\s*不通过|红色问题|黄色问题/.test(report || '');
+        setPipelineStatus(failed ? '章节包检测未通过' : '可扩写正文', failed ? report : `${softWarning ? '【黄色提示】章节包有建议，但不阻断正文扩写。\n\n' : ''}${report}`);
         if (!failed) await applyChapterPackageToCurrentSynopsis(chapterPipelineState.chapter_packages[key]);
         return !failed;
     }
