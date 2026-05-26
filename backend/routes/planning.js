@@ -185,6 +185,11 @@ function completeBridgeGaps(rows, beats, characters, existingBridgeEvents, minPe
   return completed;
 }
 
+function chapterSourceLimit(eventCount) {
+  if (!eventCount) return 10;
+  return Math.min(Math.max(eventCount * 3, eventCount, 10), 120);
+}
+
 async function assertProjectEvent(projectId, eventId) {
   const event = await getEvent(eventId);
   if (!event || event.project_id !== projectId) {
@@ -457,20 +462,20 @@ router.post('/chapters/plan', async (req, res, next) => {
       listByProject('chapters', project.id, 'chapter_number')
     ]);
     const plannedEvents = events.filter(event => event.status !== 'beat' && event.status !== 'archived');
-    const countSource = Number(req.body.count || 0) || Math.max(plannedEvents.length, 1);
-    const count = Math.min(Math.max(countSource, 1), 120);
+    const chapterSourceEvents = plannedEvents.length ? plannedEvents : events;
+    const userChapterLimit = Number(req.body.count || 0);
+    const chapterLimit = Math.min(Math.max(userChapterLimit || chapterSourceLimit(chapterSourceEvents.length), 1), 120);
     const maxChapter = existingChapters.reduce((max, chapter) => Math.max(max, Number(chapter.chapter_number || 0)), 0);
     const startChapter = Math.max(Number(req.body.startChapter || maxChapter + 1), 1);
-    const chapterSourceEvents = plannedEvents.length ? plannedEvents : events;
-    const fallback = { chapters: demoChapterContracts(chapterSourceEvents, characters, count).map((chapter, index) => ({ ...chapter, chapter_number: startChapter + index })) };
+    const fallback = { chapters: demoChapterContracts(chapterSourceEvents, characters, Math.max(chapterSourceEvents.length, 1)).map((chapter, index) => ({ ...chapter, chapter_number: startChapter + index })) };
     const ai = await callAi({
       json: true,
       fallback,
-      system: '你是章节契约规划师。现在不要先判断全文总章数。先根据已有事件链生成可写作的故事单元契约：一个小事件可以是一章，也可以被拆成多章，但本阶段默认每章至少绑定一个事件。每章必须规定允许人物、必需事件、禁止事实、预期章前和章后状态；allowed_characters 必须使用角色 id，不允许留空；只输出 JSON。',
+      system: '你是章节契约规划师。不要先判断全文总章数。你要逐个阅读事件链，判断每个事件需要几章才能讲清楚：简单过渡可 1 章，含关键冲突、人物转变、揭示或场景行动的事件可拆 2-5 章。每章必须规定允许人物、必需事件、禁止事实、预期章前和章后状态；allowed_characters 必须使用角色 id，不允许留空；只输出 JSON。',
       user: `项目：${project.title}
 目标字数：${project.target_words}
 本次起始章：${startChapter}
-本次数量：${count}
+章节上限：${chapterLimit}
 角色：
 ${JSON.stringify(characters)}
 事件链：
@@ -480,14 +485,31 @@ ${JSON.stringify(chapterSourceEvents)}
 已有章节：
 ${JSON.stringify(existingChapters)}
 
-请生成第 ${startChapter} 章到第 ${startChapter + count - 1} 章契约。不要试图规划全文总章数，只把事件链转成下一批可写章节。JSON：{"chapters":[{"chapter_number":${startChapter},"title":"","summary":"","required_events":["事件id"],"allowed_characters":["角色id"],"forbidden_facts":[],"secret_permissions":{},"expected_start_state":{"scene_continuity":"","character_status":{}},"expected_end_state":{"scene_continuity":"","character_arc_change":"","pressure":1},"style_requirements":""}]}`
+请按事件复杂度自行决定生成多少章，但不要超过 ${chapterLimit} 章。不要试图规划全文总章数，只把当前事件链拆成下一批可写章节。每个事件至少出现在一个 required_events 中；复杂事件可以连续多章绑定同一个事件。JSON：{"chapters":[{"chapter_number":${startChapter},"source_event_id":"事件id","split_reason":"为什么这个事件需要这一章/这些章","title":"","summary":"","required_events":["事件id"],"allowed_characters":["角色id"],"forbidden_facts":[],"secret_permissions":{},"expected_start_state":{"scene_continuity":"","character_status":{}},"expected_end_state":{"scene_continuity":"","character_arc_change":"","pressure":1},"style_requirements":""}]}`
     });
-    const contracts = (ai.parsed?.chapters || fallback.chapters).map((item, index) => ({
+    const incomingChapters = (ai.parsed?.chapters?.length ? ai.parsed.chapters : fallback.chapters).slice(0, chapterLimit);
+    const coveredEventIds = new Set(incomingChapters.flatMap(chapter => asArray(chapter.required_events).concat(chapter.source_event_id || [])).filter(Boolean));
+    for (const event of chapterSourceEvents) {
+      if (incomingChapters.length >= chapterLimit) break;
+      if (coveredEventIds.has(event.id)) continue;
+      incomingChapters.push({
+        title: `${event.title}：事件章`,
+        source_event_id: event.id,
+        split_reason: 'AI 未覆盖该事件，系统补充一章以保证事件链不断档。',
+        summary: event.summary || event.result || '围绕该事件完成一章叙事推进。',
+        required_events: [event.id],
+        allowed_characters: event.actor_character_id ? [event.actor_character_id] : characters.map(char => char.id),
+        expected_start_state: { scene_continuity: '承接上一章章末状态。' },
+        expected_end_state: { scene_continuity: event.result || '完成该事件后的状态变化。' }
+      });
+      coveredEventIds.add(event.id);
+    }
+    const contracts = incomingChapters.map((item, index) => ({
       project_id: project.id,
-      chapter_number: item.chapter_number || startChapter + index,
-      title: cleanText(item.title, `第${item.chapter_number || startChapter + index}章`),
-      summary: item.summary || '',
-      required_events: item.required_events || [],
+      chapter_number: startChapter + index,
+      title: cleanText(item.title, `第${startChapter + index}章`),
+      summary: [item.summary, item.split_reason ? `拆章理由：${item.split_reason}` : ''].filter(Boolean).join('\n'),
+      required_events: asArray(item.required_events).length ? asArray(item.required_events) : (item.source_event_id ? [item.source_event_id] : []),
       allowed_characters: item.allowed_characters?.length ? item.allowed_characters : characters.map(char => char.id),
       forbidden_facts: item.forbidden_facts || ['不得提前揭露 hidden 秘密', '不得改写 Canon'],
       secret_permissions: item.secret_permissions || { hidden_mode: 'audience_view_only' },

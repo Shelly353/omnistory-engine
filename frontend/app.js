@@ -708,7 +708,7 @@ $('generateEvents').onclick = async () => {
 
 $('planChapters').onclick = async () => {
   if (!state.projectId) return toast('先选择项目');
-  await runStep('chapters', '按事件生成章节契约', async () => {
+  await runStep('chapters', 'AI拆章生成契约', async () => {
     const rawCount = Number($('chapterCount').value || 0);
     const count = rawCount ? Math.min(Math.max(rawCount, 1), 120) : undefined;
     const startChapter = Number($('chapterStart').value || 0);
