@@ -3,6 +3,22 @@ const router = express.Router();
 const { insert, supabase, memory } = require('../lib/db');
 const { getProject, listByProject } = require('../lib/repositories');
 
+const PROJECT_SCOPED_TABLES = [
+  'story_bibles',
+  'canon_facts',
+  'characters',
+  'secrets',
+  'foreshadowing_hooks',
+  'story_events',
+  'chapter_contracts',
+  'chapters',
+  'state_snapshots',
+  'state_transitions',
+  'proposed_facts',
+  'audit_findings',
+  'generation_runs'
+];
+
 router.post('/', async (req, res, next) => {
   try {
     const { title, concept, target_words, genre, style_profile } = req.body;
@@ -48,6 +64,24 @@ router.get('/:projectId', async (req, res, next) => {
       listByProject('audit_findings', project.id)
     ]);
     res.json({ success: true, project, bible: bibles[0] || null, canon, characters, events, contracts, chapters, findings });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/:projectId', async (req, res, next) => {
+  try {
+    const projectId = req.params.projectId;
+    if (supabase) {
+      const { error } = await supabase.from('projects').delete().eq('id', projectId);
+      if (error) throw error;
+      return res.json({ success: true });
+    }
+    PROJECT_SCOPED_TABLES.forEach(table => {
+      memory[table] = memory[table].filter(row => row.project_id !== projectId);
+    });
+    memory.projects = memory.projects.filter(project => project.id !== projectId);
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }

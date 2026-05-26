@@ -153,6 +153,14 @@ button:hover {
   background: var(--accent-dark);
 }
 
+body.busy {
+  cursor: progress;
+}
+
+body.busy button {
+  opacity: .72;
+}
+
 .list {
   display: grid;
   gap: 6px;
@@ -169,9 +177,32 @@ button:hover {
   border-radius: 5px;
 }
 
+.project-row {
+  display: grid;
+  grid-template-columns: 1fr 44px;
+  gap: 6px;
+}
+
+.project-row button {
+  min-width: 0;
+}
+
+.project-row.active button:first-child,
 .list button.active {
   border-color: var(--accent);
   box-shadow: inset 3px 0 0 var(--accent);
+}
+
+button.danger {
+  border-color: var(--danger);
+  background: #fff;
+  color: var(--danger);
+  text-align: center;
+}
+
+button.danger:hover {
+  background: var(--danger);
+  color: #fff;
 }
 
 .event-list {
