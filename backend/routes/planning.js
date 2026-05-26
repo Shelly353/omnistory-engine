@@ -70,6 +70,71 @@ function normalizeCharacterPayload(body, projectId, fallbackName = '新人物') 
   };
 }
 
+function characterNeedsCompletion(character) {
+  return ['identity', 'personality', 'core_desire', 'goal', 'motivation', 'flaw', 'fear', 'skills', 'limits', 'voice_rules']
+    .some(field => !String(character[field] || '').trim()) || !asArray(character.reuse_plan).length;
+}
+
+function fallbackCompletedCharacter(character, project) {
+  const role = character.role || '功能人物';
+  return {
+    id: character.id,
+    name: character.name,
+    role,
+    faction: character.faction || '未定阵营',
+    identity: character.identity || `${project.title || '本书'}中的${role}，其身份必须能影响至少一个主线事件。`,
+    personality: character.personality || 'MBTI推断：INTJ。偏向结构化判断，压力下会收紧控制，错误时倾向独自承担。',
+    core_desire: character.core_desire || '获得能证明自身选择正确的结果',
+    goal: character.goal || '在当前主线阶段完成一个清晰、可行动、可失败的外部目标',
+    motivation: character.motivation || '由旧伤、责任、利益或未完成承诺驱动，动机必须能解释其关键选择',
+    flaw: character.flaw || '过度依赖自己的主要认知方式，导致关系或判断偏差',
+    fear: character.fear || '失控、失败、被看穿真实需求或再次失去重要事物',
+    skills: character.skills || '拥有与角色功能匹配的专业能力，但能力使用必须有成本',
+    limits: character.limits || '不能全知全能；不能无成本解决冲突；不能突破世界规则和 Canon',
+    voice_rules: character.voice_rules || '语言节奏、用词和回避点要体现其身份、MBTI压力反应和关系位置',
+    reuse_plan: asArray(character.reuse_plan).length ? asArray(character.reuse_plan) : ['首次登场承担明确事件功能', '在后续桥段制造选择压力', '在六事件转折处体现人物变化'],
+    status: character.status || 'active'
+  };
+}
+
+function buildBridgeFallbackEvents(beats, characters) {
+  const orderedBeats = beats.filter(event => event.status === 'beat').sort((a, b) => Number(a.event_order || 0) - Number(b.event_order || 0));
+  const actor = characters[0] || null;
+  const rows = [];
+  for (let i = 0; i < orderedBeats.length - 1; i += 1) {
+    const from = orderedBeats[i];
+    const to = orderedBeats[i + 1];
+    for (let step = 1; step <= 3; step += 1) {
+      rows.push({
+        event_order: Number(from.event_order) + step / 10,
+        title: `${from.title} 到 ${to.title} 的过渡${step}`,
+        summary: `承接“${from.title}”的结果，逐步制造人物选择压力，并把剧情推向“${to.title}”。`,
+        trigger: step === 1 ? from.result || from.summary : '上一小事件留下的新压力继续升级',
+        actor_name: actor?.name || '',
+        actor_character_id: actor?.id || null,
+        conflict_target: to.conflict_target || to.title,
+        result: step === 3 ? `形成进入“${to.title}”的直接原因` : '人物关系、线索或局势发生阶段性变化',
+        pressure: Math.min(10, 2 + i + step),
+        arc_stage: to.conflict_target || '',
+        scene_continuity: '明确本小事件结束时地点、交通、姿态和正在进行的动作。',
+        state_changes: [
+          {
+            target_type: 'character',
+            target: actor?.name || '主角',
+            before: `处于“${from.title}”后的状态`,
+            after: `更接近“${to.title}”所需的人物选择`,
+            evidence: `桥段${step}`
+          }
+        ],
+        status: 'bridge',
+        bridge_from_event_id: from.id,
+        bridge_to_event_id: to.id
+      });
+    }
+  }
+  return rows;
+}
+
 async function assertProjectEvent(projectId, eventId) {
   const event = await getEvent(eventId);
   if (!event || event.project_id !== projectId) {
@@ -136,42 +201,28 @@ router.post('/characters/enrich-mbti', async (req, res, next) => {
   try {
     const project = await getProject(req.params.projectId);
     const characters = await listByProject('characters', project.id);
-    const fallback = {
-      characters: characters.map(character => ({
-        id: character.id,
-        name: character.name,
-        personality: character.personality || 'MBTI推断：INTJ。外冷内紧，依赖结构化判断。',
-        core_desire: character.core_desire || '获得能证明自身价值的结果',
-        motivation: character.motivation || '由旧伤、责任或未完成承诺驱动',
-        flaw: character.flaw || '过度相信自己的主要认知方式',
-        fear: character.fear || '失控、失败或被迫面对真实需求',
-        voice_rules: character.voice_rules || '语言节奏与其MBTI压力反应一致',
-        reuse_plan: character.reuse_plan?.length ? character.reuse_plan : ['至少参与两次主线事件', '在人物弧线转折处承担功能']
-      }))
-    };
+    const fallback = { characters: characters.map(character => fallbackCompletedCharacter(character, project)) };
     const ai = await callAi({
       json: true,
       fallback,
-      system: '你是人物心理建模编辑。用 MBTI 作为推理工具补全缺失人物卡，但不要把人物写成标签；必须服务于长篇复用、冲突选择和成长弧线。只输出 JSON。',
+      system: '你是人物心理建模编辑。补齐人物卡所有关键空字段；MBTI 只能作为推理工具，不要把人物写成标签。每个人物必须有外部目标、内在欲望、动机、缺陷、恐惧、能力、限制、声音规则和至少三个复用点。只输出 JSON。',
       user: `项目概念：${project.concept}
 现有人物：
 ${JSON.stringify(characters)}
 
-请输出 JSON：{"characters":[{"id":"","name":"","personality":"包含MBTI推断和压力反应","core_desire":"","motivation":"","flaw":"","fear":"","voice_rules":"","reuse_plan":["至少两个复用点"]}]}`
+只补齐或强化空白/薄弱字段，不要抹掉用户已经写得具体的设定。请输出 JSON：{"characters":[{"id":"","name":"","role":"","faction":"","identity":"","personality":"包含MBTI推断和压力反应","core_desire":"","goal":"","motivation":"","flaw":"","fear":"","skills":"","limits":"","voice_rules":"","reuse_plan":["至少三个复用点"],"status":"active"}]}`
     });
     const updates = [];
     for (const item of ai.parsed?.characters || fallback.characters) {
       const existing = characters.find(character => character.id === item.id || character.name === item.name);
       if (!existing) continue;
-      updates.push(await patchCharacter(existing.id, {
-        personality: item.personality || existing.personality,
-        core_desire: item.core_desire || existing.core_desire,
-        motivation: item.motivation || existing.motivation,
-        flaw: item.flaw || existing.flaw,
-        fear: item.fear || existing.fear,
-        voice_rules: item.voice_rules || existing.voice_rules,
-        reuse_plan: asArray(item.reuse_plan).length ? asArray(item.reuse_plan) : existing.reuse_plan
-      }));
+      const completed = fallbackCompletedCharacter({ ...existing, ...item }, project);
+      const patch = {};
+      for (const field of ['role', 'faction', 'identity', 'personality', 'core_desire', 'goal', 'motivation', 'flaw', 'fear', 'skills', 'limits', 'voice_rules', 'status']) {
+        patch[field] = String(existing[field] || '').trim() ? existing[field] : completed[field];
+      }
+      patch.reuse_plan = asArray(existing.reuse_plan).length >= 3 ? existing.reuse_plan : completed.reuse_plan;
+      updates.push(await patchCharacter(existing.id, patch));
     }
     res.json({ success: true, characters: updates });
   } catch (err) {
@@ -281,18 +332,25 @@ router.post('/events/generate', async (req, res, next) => {
       listByProject('characters', project.id),
       listByProject('story_events', project.id, 'event_order')
     ]);
-    const fallbackEvents = demoEvents(characters);
+    const beats = existingEvents.filter(event => event.status === 'beat').sort((a, b) => Number(a.event_order || 0) - Number(b.event_order || 0));
+    if (beats.length < 2) {
+      return res.status(400).json({ success: false, error: '请先生成或手动创建至少两个六事件，再扩展两个六事件之间的小事件。' });
+    }
+    const existingBridgeEvents = existingEvents.filter(event => event.status !== 'beat');
+    const fallbackEvents = buildBridgeFallbackEvents(beats, characters);
     const ai = await callAi({
       json: true,
       fallback: { events: fallbackEvents },
-      system: '你是长篇小说事件图规划师。事件必须来自角色选择，并造成状态变化。每个事件必须记录节奏压力、人物弧线阶段、场景连续性约束。新具名人物必须有至少两个未来复用点。',
+      system: '你是长篇小说桥段事件规划师。六事件是一级骨架，不能改写、不能重复输出为小事件。你的任务是在每两个相邻六事件之间生成一组过渡小事件。AI 需要判断每个小事件由哪个人物推动、造成什么状态变化、如何把前一六事件推向后一六事件。新具名人物必须有至少两个未来复用点。只输出 JSON。',
       user: `项目概念：${project.concept}
 已有角色：
 ${JSON.stringify(characters)}
 六节点：
-${JSON.stringify(existingEvents)}
+${JSON.stringify(beats)}
+已有小事件，避免重复：
+${JSON.stringify(existingBridgeEvents)}
 
-请输出 JSON：{"events":[{"event_order":1,"title":"","summary":"","trigger":"","actor_name":"","conflict_target":"","result":"","pressure":1,"arc_stage":"","scene_continuity":"","state_changes":[{"target_type":"character|relationship|scene_continuity","target":"","before":"","after":"","evidence":""}],"event_need":"","new_character_candidate":null}]}.`
+请为每两个相邻六事件之间生成 3-6 个小事件。event_order 必须落在两个六事件序号之间，例如 1.1、1.2、1.3；status 必须是 "bridge"。请输出 JSON：{"events":[{"event_order":1.1,"title":"","summary":"","trigger":"","actor_name":"","conflict_target":"","result":"","pressure":1,"arc_stage":"","scene_continuity":"","bridge_from_event_id":"前一个六事件id","bridge_to_event_id":"后一个六事件id","state_changes":[{"target_type":"character|relationship|scene_continuity","target":"","before":"","after":"","evidence":""}],"event_need":"","new_character_candidate":null,"status":"bridge"}]}.`
     });
     const incoming = ai.parsed?.events || fallbackEvents;
     const warnings = [];
@@ -303,26 +361,30 @@ ${JSON.stringify(existingEvents)}
         const uses = event.new_character_candidate.future_uses || [];
         if (uses.length < 2) warnings.push(`新人物 ${event.new_character_candidate.name || '未命名'} 缺少至少 2 个未来复用点，建议合并或降级为无名功能人物。`);
       }
+      const fromBeat = beats.find(beat => beat.id === event.bridge_from_event_id) || beats.find((beat, beatIndex) => Number(event.event_order) > Number(beat.event_order) && Number(event.event_order) < Number(beats[beatIndex + 1]?.event_order || Infinity)) || beats[0];
+      const toBeat = beats.find(beat => beat.id === event.bridge_to_event_id) || beats[beats.indexOf(fromBeat) + 1] || beats[1];
       return {
         project_id: project.id,
-        event_order: event.event_order || index + 1,
-        title: cleanText(event.title, `事件${index + 1}`),
+        event_order: event.event_order || Number(fromBeat.event_order || 1) + ((index % 6) + 1) / 10,
+        title: cleanText(event.title, `过渡事件${index + 1}`),
         summary: event.summary || '',
         trigger: event.trigger || '',
-        actor_character_id: actor?.id || match.recommended?.id || null,
+        actor_character_id: event.actor_character_id || actor?.id || match.recommended?.id || null,
         conflict_target: event.conflict_target || '',
         result: event.result || '',
         state_changes: Array.isArray(event.state_changes) && event.state_changes.length ? event.state_changes : [
           {
             target_type: 'scene_continuity',
             target: '主场景',
-            before: '承接上一事件状态',
+            before: `承接“${fromBeat.title}”后的状态`,
             after: event.scene_continuity || '本事件结束时必须明确地点、交通、姿态和动作状态',
             evidence: event.summary || ''
           }
         ],
         related_character_ids: actor?.id ? [actor.id] : characters.map(char => char.id).slice(0, 2),
-        status: 'planned'
+        related_secret_ids: [],
+        related_hook_ids: [fromBeat.id, toBeat.id].filter(Boolean),
+        status: event.status && event.status !== 'beat' ? event.status : 'bridge'
       };
     });
     const events = await insertMany('story_events', rows);
@@ -340,14 +402,17 @@ router.post('/chapters/plan', async (req, res, next) => {
       listByProject('story_events', project.id, 'event_order'),
       listByProject('chapters', project.id, 'chapter_number')
     ]);
-    const count = Math.min(Math.max(Number(req.body.count || 10), 1), 120);
+    const plannedEvents = events.filter(event => event.status !== 'beat' && event.status !== 'archived');
+    const countSource = Number(req.body.count || 0) || Math.max(plannedEvents.length, 1);
+    const count = Math.min(Math.max(countSource, 1), 120);
     const maxChapter = existingChapters.reduce((max, chapter) => Math.max(max, Number(chapter.chapter_number || 0)), 0);
     const startChapter = Math.max(Number(req.body.startChapter || maxChapter + 1), 1);
-    const fallback = { chapters: demoChapterContracts(events, characters, count).map((chapter, index) => ({ ...chapter, chapter_number: startChapter + index })) };
+    const chapterSourceEvents = plannedEvents.length ? plannedEvents : events;
+    const fallback = { chapters: demoChapterContracts(chapterSourceEvents, characters, count).map((chapter, index) => ({ ...chapter, chapter_number: startChapter + index })) };
     const ai = await callAi({
       json: true,
       fallback,
-      system: '你是章节契约规划师。每章必须规定允许人物、必需事件、禁止事实、预期章前和章后状态；必须包含节奏压力、人物弧线阶段、场景连续性要求。allowed_characters 必须使用角色 id，不允许留空；只输出 JSON。',
+      system: '你是章节契约规划师。现在不要先判断全文总章数。先根据已有事件链生成可写作的故事单元契约：一个小事件可以是一章，也可以被拆成多章，但本阶段默认每章至少绑定一个事件。每章必须规定允许人物、必需事件、禁止事实、预期章前和章后状态；allowed_characters 必须使用角色 id，不允许留空；只输出 JSON。',
       user: `项目：${project.title}
 目标字数：${project.target_words}
 本次起始章：${startChapter}
@@ -356,10 +421,12 @@ router.post('/chapters/plan', async (req, res, next) => {
 ${JSON.stringify(characters)}
 事件链：
 ${JSON.stringify(events)}
+本次优先覆盖的小事件：
+${JSON.stringify(chapterSourceEvents)}
 已有章节：
 ${JSON.stringify(existingChapters)}
 
-请生成第 ${startChapter} 章到第 ${startChapter + count - 1} 章契约，JSON：{"chapters":[{"chapter_number":${startChapter},"title":"","summary":"","required_events":["事件id"],"allowed_characters":["角色id"],"forbidden_facts":[],"secret_permissions":{},"expected_start_state":{"scene_continuity":"","character_status":{}},"expected_end_state":{"scene_continuity":"","character_arc_change":"","pressure":1},"style_requirements":""}]}`
+请生成第 ${startChapter} 章到第 ${startChapter + count - 1} 章契约。不要试图规划全文总章数，只把事件链转成下一批可写章节。JSON：{"chapters":[{"chapter_number":${startChapter},"title":"","summary":"","required_events":["事件id"],"allowed_characters":["角色id"],"forbidden_facts":[],"secret_permissions":{},"expected_start_state":{"scene_continuity":"","character_status":{}},"expected_end_state":{"scene_continuity":"","character_arc_change":"","pressure":1},"style_requirements":""}]}`
     });
     const contracts = (ai.parsed?.chapters || fallback.chapters).map((item, index) => ({
       project_id: project.id,

@@ -94,7 +94,7 @@
         <div class="panel-title">
           <h2>人物卡</h2>
           <div class="actions">
-            <button id="enrichCharacters" type="button">MBTI补全人物卡</button>
+            <button id="enrichCharacters" type="button">补齐人物卡空白</button>
             <button id="addCharacter" type="button">新增人物</button>
           </div>
         </div>
@@ -119,9 +119,9 @@
     <section class="tab-panel" data-panel="events">
       <div class="panel">
         <div class="panel-title">
-          <h2>拓展事件链</h2>
-          <div class="actions">
-            <button id="generateEvents" type="button">扩展事件链</button>
+            <h2>拓展事件链</h2>
+            <div class="actions">
+            <button id="generateEvents" type="button">生成六事件间小事件</button>
             <button id="addEvent" type="button">新增小事件</button>
             <button id="saveEventOrder" type="button">保存顺序</button>
           </div>
@@ -137,8 +137,8 @@
             <h2>章节契约</h2>
             <div class="actions">
               <input id="chapterStart" class="small-input" type="number" min="1" placeholder="起始章">
-              <input id="chapterCount" class="small-input" type="number" min="1" max="120" value="10" aria-label="生成章数">
-              <button id="planChapters" type="button">生成/续写契约</button>
+              <input id="chapterCount" class="small-input" type="number" min="1" max="120" placeholder="按事件" aria-label="生成章数">
+              <button id="planChapters" type="button">按事件生成契约</button>
             </div>
           </div>
           <div id="chapterList" class="list"></div>

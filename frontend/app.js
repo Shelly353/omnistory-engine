@@ -335,12 +335,55 @@ function renderEventEditors(containerId, events, defaultStatus) {
   const list = $(containerId);
   list.innerHTML = '';
   const characters = state.projectBundle?.characters || [];
-  events.forEach(event => list.appendChild(createEventCard(event, characters)));
+  if (defaultStatus === 'beat') {
+    events.forEach(event => list.appendChild(createEventCard(event, characters)));
+  } else {
+    renderBridgeEventGroups(list, events, characters);
+  }
   if (!events.length) {
     const empty = document.createElement('p');
     empty.className = 'empty';
-    empty.textContent = defaultStatus === 'beat' ? '还没有六事件。' : '还没有拓展事件。';
+    empty.textContent = defaultStatus === 'beat' ? '还没有六事件。' : '还没有六事件之间的小事件。';
     list.appendChild(empty);
+  }
+}
+
+function renderBridgeEventGroups(list, bridgeEvents, characters) {
+  const beats = (state.projectBundle?.events || [])
+    .filter(event => event.status === 'beat')
+    .sort((a, b) => Number(a.event_order || 0) - Number(b.event_order || 0));
+  if (beats.length < 2) {
+    bridgeEvents.forEach(event => list.appendChild(createEventCard(event, characters)));
+    return;
+  }
+  for (let index = 0; index < beats.length - 1; index += 1) {
+    const from = beats[index];
+    const to = beats[index + 1];
+    const groupEvents = bridgeEvents.filter(event => Number(event.event_order) > Number(from.event_order) && Number(event.event_order) < Number(to.event_order));
+    const group = document.createElement('section');
+    group.className = 'event-group';
+    group.innerHTML = `
+      <div class="event-group-title">
+        <strong>${escapeHtml(from.event_order)}. ${escapeHtml(from.title)} -> ${escapeHtml(to.event_order)}. ${escapeHtml(to.title)}</strong>
+        <span>${groupEvents.length} 个小事件</span>
+      </div>
+    `;
+    groupEvents.forEach(event => group.appendChild(createEventCard(event, characters)));
+    if (!groupEvents.length) {
+      const empty = document.createElement('p');
+      empty.className = 'empty compact';
+      empty.textContent = '这一组还没有过渡小事件。点击“生成六事件间小事件”自动补齐。';
+      group.appendChild(empty);
+    }
+    list.appendChild(group);
+  }
+  const outsideEvents = bridgeEvents.filter(event => !beats.some((from, index) => Number(event.event_order) > Number(from.event_order) && Number(event.event_order) < Number(beats[index + 1]?.event_order || Infinity)));
+  if (outsideEvents.length) {
+    const group = document.createElement('section');
+    group.className = 'event-group';
+    group.innerHTML = '<div class="event-group-title"><strong>未归组事件</strong><span>请调整 event_order 到两个六事件之间</span></div>';
+    outsideEvents.forEach(event => group.appendChild(createEventCard(event, characters)));
+    list.appendChild(group);
   }
 }
 
@@ -366,7 +409,8 @@ function createEventCard(event, characters) {
       <input class="order" name="event_order" type="number" step="0.1" value="${Number(event.event_order || 1)}" aria-label="顺序">
       <select name="status" aria-label="事件类型">
         <option value="beat">六事件</option>
-        <option value="planned">小事件</option>
+        <option value="bridge">过渡小事件</option>
+        <option value="planned">普通小事件</option>
         <option value="drafted">已写入</option>
         <option value="archived">归档</option>
       </select>
@@ -460,12 +504,20 @@ function syncVisibleOrder(list) {
 }
 
 async function saveOrder(containerId, step) {
-  const cards = [...$(containerId).querySelectorAll('.event-card')];
-  const orderedIds = cards.map(card => card.dataset.eventId);
+  const cards = [...$(containerId).querySelectorAll('.event-card')].sort((a, b) => Number(a.querySelector('[name="event_order"]').value || 0) - Number(b.querySelector('[name="event_order"]').value || 0));
   await runStep(step, '保存事件顺序', async () => {
+    if (step === 'events') {
+      for (const card of cards) {
+        await api(`/api/projects/${state.projectId}/events/${card.dataset.eventId}`, {
+          method: 'PUT',
+          body: JSON.stringify(eventPayloadFromCard(card))
+        });
+      }
+      return;
+    }
     await api(`/api/projects/${state.projectId}/events/reorder`, {
       method: 'POST',
-      body: JSON.stringify({ orderedIds })
+      body: JSON.stringify({ orderedIds: cards.map(card => card.dataset.eventId) })
     });
   });
 }
@@ -619,7 +671,7 @@ $('approveBible').onclick = async () => {
 
 $('enrichCharacters').onclick = async () => {
   if (!state.projectId) return toast('先选择项目');
-  await runStep('characters', 'MBTI补全人物卡', async () => {
+  await runStep('characters', '补齐人物卡空白', async () => {
     await api(`/api/projects/${state.projectId}/characters/enrich-mbti`, { method: 'POST', body: '{}' });
   }, 'beats');
 };
@@ -648,7 +700,7 @@ $('generateBeats').onclick = async () => {
 
 $('generateEvents').onclick = async () => {
   if (!state.projectId) return toast('先选择项目');
-  await runStep('events', '扩展事件链', async () => {
+  await runStep('events', '生成六事件间小事件', async () => {
     const data = await api(`/api/projects/${state.projectId}/events/generate`, { method: 'POST', body: '{}' });
     if (data.warnings?.length) toast(data.warnings[0]);
   }, 'chapters');
@@ -656,8 +708,9 @@ $('generateEvents').onclick = async () => {
 
 $('planChapters').onclick = async () => {
   if (!state.projectId) return toast('先选择项目');
-  await runStep('chapters', '生成章节契约', async () => {
-    const count = Math.min(Math.max(Number($('chapterCount').value || 10), 1), 120);
+  await runStep('chapters', '按事件生成章节契约', async () => {
+    const rawCount = Number($('chapterCount').value || 0);
+    const count = rawCount ? Math.min(Math.max(rawCount, 1), 120) : undefined;
     const startChapter = Number($('chapterStart').value || 0);
     await api(`/api/projects/${state.projectId}/chapters/plan`, {
       method: 'POST',

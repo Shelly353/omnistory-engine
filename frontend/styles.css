@@ -319,6 +319,7 @@ body.busy button {
 .event-card,
 .character-card,
 .chapter-card,
+.event-group,
 .fact {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -331,6 +332,24 @@ body.busy button {
 .chapter-card {
   display: grid;
   gap: 10px;
+}
+
+.event-group {
+  display: grid;
+  gap: 10px;
+  background: #f9fafb;
+}
+
+.event-group-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.event-group-title span {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .chapter-card.active {
