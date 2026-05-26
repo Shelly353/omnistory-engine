@@ -226,14 +226,15 @@ async function loadProposedFacts() {
 
 $('projectForm').addEventListener('submit', async event => {
   event.preventDefault();
+  const projectForm = event.currentTarget;
   await runAction('创建项目', async () => {
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(projectForm);
     const data = await api('/api/projects', {
       method: 'POST',
       body: JSON.stringify(Object.fromEntries(form.entries()))
     });
     toast('项目已创建');
-    event.currentTarget.reset();
+    projectForm.reset();
     await loadProjects();
     await selectProject(data.project.id);
   });
