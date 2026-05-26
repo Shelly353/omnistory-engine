@@ -5,6 +5,7 @@ const express = require('express');
 const cors = require('cors');
 const { aiRateLimit, requireAccessToken, warnIfAccessTokenMissing } = require('./security');
 const { readSetupSql } = require('./lib/db');
+const supabase = require('./lib/supabaseClient');
 
 const projects = require('./routes/projects');
 const bible = require('./routes/bible');
@@ -30,6 +31,24 @@ app.get('/api/health', (req, res) => {
 
 app.get('/api/setup/sql', (req, res) => {
   res.type('text/plain').send(readSetupSql());
+});
+
+app.get('/api/diagnostics/supabase', async (req, res) => {
+  const url = process.env.SUPABASE_URL || '';
+  const info = {
+    configured: Boolean(url && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)),
+    url,
+    ref: url.match(/https:\/\/([^.]+)\.supabase\.co/)?.[1] || '',
+    keySource: process.env.SUPABASE_SERVICE_ROLE_KEY ? 'SUPABASE_SERVICE_ROLE_KEY' : (process.env.SUPABASE_ANON_KEY ? 'SUPABASE_ANON_KEY' : '')
+  };
+  const checks = {};
+  if (supabase) {
+    for (const table of ['projects', 'story_bibles', 'chapters']) {
+      const { error } = await supabase.from(table).select('id').limit(1);
+      checks[table] = error ? { ok: false, code: error.code, message: error.message } : { ok: true };
+    }
+  }
+  res.json({ success: true, supabase: { ...info, url: info.url ? info.url.replace(/\/$/, '') : '' }, checks });
 });
 
 app.use('/api', requireAccessToken);
