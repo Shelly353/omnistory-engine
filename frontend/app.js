@@ -209,6 +209,7 @@ async function loadChapterState() {
   if (!state.chapterId) return toast('先选择章节');
   const data = await api(`/api/chapters/${state.chapterId}/state`);
   $('stateView').textContent = safeJson(data.state);
+  toast('章前状态已加载');
 }
 
 async function loadProposedFacts() {
@@ -292,7 +293,9 @@ $('planChapters').onclick = async () => {
   });
 };
 
-$('loadState').onclick = loadChapterState;
+$('loadState').onclick = async () => {
+  await runAction('查看章前状态', loadChapterState);
+};
 
 $('generateDraft').onclick = async () => {
   if (!state.chapterId) return toast('先选择章节');
@@ -310,8 +313,10 @@ $('reviewDraft').onclick = async () => {
     const data = await api(`/api/chapters/${state.chapterId}/review`, { method: 'POST', body: '{}' });
     renderAudit(data.audit.findings || []);
     await loadProposedFacts();
-    toast(data.audit.pass ? '审校通过，等待批准' : '审校阻塞，请处理问题');
+    const firstFinding = data.audit.findings?.[0]?.message || '';
+    toast(data.audit.pass ? '审校通过，等待批准' : `审校阻塞：${firstFinding || '请查看右侧审校栏'}`);
     await refreshProject();
+    renderAudit(data.audit.findings || []);
   });
 };
 

@@ -115,12 +115,24 @@ async function approveDraft(chapterId) {
     snapshot_type: 'chapter_end',
     payload: {
       summary: extraction.summary,
+      scene_end_state: extraction.scene_end_state || {},
       state_delta: extraction.state_delta || [],
       actual_events: extraction.actual_events || []
     }
   });
 
-  await insertMany('state_transitions', (extraction.state_delta || []).map(item => ({
+  const stateDelta = extraction.state_delta || [];
+  if (extraction.scene_end_state && !stateDelta.some(item => item.target_type === 'scene_continuity')) {
+    stateDelta.push({
+      target_type: 'scene_continuity',
+      target: '主场景',
+      before: '',
+      after: JSON.stringify(extraction.scene_end_state),
+      evidence: extraction.scene_end_state.continuity_note || ''
+    });
+  }
+
+  await insertMany('state_transitions', stateDelta.map(item => ({
     project_id: chapter.project_id,
     chapter_number: chapter.chapter_number,
     source_event_id: null,

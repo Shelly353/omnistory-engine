@@ -17,6 +17,26 @@ function normalizeBiblePayload(payload = {}, fallback = {}) {
     rules: cleanArray(source.rules || fallback.rules)
   };
 
+  normalized.pacing_map = source.pacing_map || fallback.pacing_map || {
+    act_1: '建立旧秩序、诱因和不可逆选择。',
+    act_2a: '主角用旧方法推进，得到带代价的小胜。',
+    midpoint: '中点改变信息格局，虚假胜利或虚假失败。',
+    act_2b: '反派逼近，旧方法失效。',
+    dark_night: '外部失败击穿内部缺陷。',
+    act_3: '主角用新选择完成终局。'
+  };
+
+  normalized.protagonist_arc = normalized.protagonist_arc || fallback.protagonist_arc || {};
+  if (!Array.isArray(normalized.protagonist_arc.growth_ladder)) {
+    normalized.protagonist_arc.growth_ladder = fallback.protagonist_arc?.growth_ladder || [
+      { stage: '旧我', function: '暴露缺陷' },
+      { stage: '被迫选择', function: '越过安全边界' },
+      { stage: '虚假进步', function: '带代价的小胜' },
+      { stage: '崩塌', function: '旧方法失败' },
+      { stage: '新选择', function: '完成终局弧线' }
+    ];
+  }
+
   normalized.main_characters = normalized.main_characters.map((char = {}, index) => ({
     ...char,
     name: cleanText(char.name, index === 0 ? '主角' : `角色${index + 1}`),

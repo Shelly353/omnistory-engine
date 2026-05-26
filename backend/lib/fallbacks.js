@@ -11,7 +11,14 @@ function demoBible(project = {}) {
       fear: '再次因为判断错误失去重要的人',
       start: '谨慎、孤立、依赖个人判断',
       end: '愿意承担代价，并建立可信任的同盟',
-      turning_points: ['第一转折被迫入局', '中点误判代价', '至暗时刻信念崩塌', '终局主动承担']
+      turning_points: ['第一转折被迫入局', '中点误判代价', '至暗时刻信念崩塌', '终局主动承担'],
+      growth_ladder: [
+        { stage: '旧我', function: '用旧方法处理问题，暴露核心缺陷' },
+        { stage: '被迫选择', function: '外部事件逼主角越过安全边界' },
+        { stage: '虚假进步', function: '看似变强，实际仍被旧信念驱动' },
+        { stage: '崩塌', function: '旧方法造成不可承受的代价' },
+        { stage: '新选择', function: '以新的价值和行动方式解决终局问题' }
+      ]
     },
     antagonist_arc: {
       want: '掩盖核心秘密并维持既得秩序',
@@ -63,6 +70,14 @@ function demoBible(project = {}) {
         reveal_chapter: 42
       }
     ],
+    pacing_map: {
+      act_1: '建立旧秩序、人物缺陷、主线诱因；节奏以悬念和压力递增为主。',
+      act_2a: '进入新战场，连续测试人物方法；每个胜利都必须带代价。',
+      midpoint: '中点必须改变信息格局或权力格局，不只是普通发现。',
+      act_2b: '反派/阻力主动反制，主角旧方法逐渐失效。',
+      dark_night: '主角外部失败与内部缺陷同时爆发。',
+      act_3: '主角用新的选择完成终局，不靠偶然或降智。'
+    },
     rules: [
       '正文不得擅自改变角色身份、核心秘密、世界规则和事件结果。',
       '角色变化必须由事件触发，并写入状态迁移。',
@@ -74,12 +89,12 @@ function demoBible(project = {}) {
 
 function demoBeats() {
   return [
-    { beat: 'opening', title: '旧秩序裂缝', summary: '主角在稳定但压抑的状态中发现异常线索。', function: '打破旧秩序' },
-    { beat: 'first_turn', title: '不可逆入局', summary: '主角做出无法撤回的选择，正式进入冲突场。', function: '锁定主线目标' },
-    { beat: 'midpoint_false_victory', title: '虚假胜利', summary: '主角看似获得关键证据，实际踩入反派布置的误导。', function: '改变局势并埋下代价' },
-    { beat: 'opposition_rises', title: '反派逼近', summary: '核心阻力聪明反制，主角旧方法失效。', function: '压迫升级' },
-    { beat: 'dark_night', title: '至暗时刻', summary: '主角因自身缺陷造成严重后果，信念被击穿。', function: '暴露内在缺陷' },
-    { beat: 'finale', title: '终局选择', summary: '主角以新的选择面对真相和阻力，完成弧线。', function: '完成外部闭环和内在变化' }
+    { beat: 'opening', title: '旧秩序裂缝', summary: '主角在稳定但压抑的状态中发现异常线索。', function: '打破旧秩序', pressure: 2, arc_stage: '旧我' },
+    { beat: 'first_turn', title: '不可逆入局', summary: '主角做出无法撤回的选择，正式进入冲突场。', function: '锁定主线目标', pressure: 4, arc_stage: '被迫选择' },
+    { beat: 'midpoint_false_victory', title: '虚假胜利', summary: '主角看似获得关键证据，实际踩入反派布置的误导。', function: '改变局势并埋下代价', pressure: 6, arc_stage: '虚假进步' },
+    { beat: 'opposition_rises', title: '反派逼近', summary: '核心阻力聪明反制，主角旧方法失效。', function: '压迫升级', pressure: 7, arc_stage: '旧方法失效' },
+    { beat: 'dark_night', title: '至暗时刻', summary: '主角因自身缺陷造成严重后果，信念被击穿。', function: '暴露内在缺陷', pressure: 9, arc_stage: '崩塌' },
+    { beat: 'finale', title: '终局选择', summary: '主角以新的选择面对真相和阻力，完成弧线。', function: '完成外部闭环和内在变化', pressure: 10, arc_stage: '新选择' }
   ];
 }
 
@@ -93,13 +108,23 @@ function demoEvents(characters = []) {
     actor_character_id: protagonist,
     conflict_target: index < 5 ? '核心阻力' : '最终真相',
     result: beat.function,
-    state_changes: [
-      {
-        target: characters[0]?.name || '主角',
-        change: `${beat.title}后，目标和认知发生阶段性变化`,
-        source_event: beat.title
-      }
-    ],
+      state_changes: [
+        {
+          target_type: 'character',
+          target: characters[0]?.name || '主角',
+          before: index === 0 ? '旧秩序中的稳定状态' : '上一节点造成的新压力',
+          after: `${beat.title}后，目标和认知发生阶段性变化`,
+          evidence: beat.summary,
+          source_event: beat.title
+        },
+        {
+          target_type: 'scene_continuity',
+          target: '主场景',
+          before: '承接上一事件的地点、交通工具和身体姿态',
+          after: '必须明确交代地点/交通/姿态如何变化；未交代则视为延续',
+          evidence: '场景连续性约束'
+        }
+      ],
     related_character_ids: characters.map(char => char.id).filter(Boolean),
     status: 'planned'
   }));
@@ -117,7 +142,11 @@ function demoChapterContracts(events = [], characters = [], count = 10) {
       forbidden_facts: ['不得提前揭露 hidden 秘密的 god_view', '不得新增改变主线的具名角色'],
       secret_permissions: { hidden_mode: 'audience_view_only' },
       expected_start_state: { chapter: index + 1, note: '由上一章章后状态编译' },
-      expected_end_state: { chapter: index + 1, required_change: event.result || '主线状态必须推进' },
+      expected_end_state: {
+        chapter: index + 1,
+        required_change: event.result || '主线状态必须推进',
+        scene_continuity: '必须记录本章结束时的地点、交通方式、人物身体姿态和正在进行的动作；下一章默认继承，除非正文明确过渡。'
+      },
       style_requirements: '遵循项目文风；风格只改变表达，不改变事实。',
       status: 'ready_to_draft'
     };

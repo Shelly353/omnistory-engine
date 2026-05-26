@@ -15,14 +15,15 @@ router.post('/generate', async (req, res, next) => {
     const ai = await callAi({
       json: true,
       fallback,
-      system: '你是长篇小说架构师。只输出 JSON 故事圣经，不写正文。硬事实、人物弧线、核心秘密必须清楚。',
+      system: '你是长篇小说架构师。只输出 JSON 故事圣经，不写正文。必须按好莱坞三幕式建立节奏：opening、first_turn、midpoint_false_victory、opposition_rises、dark_night、finale 六节点；主角弧线必须有 want/need/lie/fear/start/end/growth_ladder；反派弧线必须有目标、反制升级和失败闭环。',
       user: `项目：${project.title}
 目标字数：${project.target_words}
 风格：${project.style_profile}
 概念故事：
 ${project.concept}
 
-请输出 JSON，包含 genre, theme, worldview, protagonist_arc, antagonist_arc, main_characters, core_secrets, rules, style。`
+请输出 JSON，包含 genre, theme, worldview, pacing_map, protagonist_arc, antagonist_arc, main_characters, core_secrets, rules, style。
+pacing_map 说明三幕节奏、压力曲线和每个阶段的读者期待；protagonist_arc.growth_ladder 至少包含 5 阶段人物成长；不要只写抽象主题。`
     });
     const payload = normalizeBiblePayload(ai.parsed || fallback, fallback);
     const bible = await insert('story_bibles', { project_id: project.id, payload, version: 1, approved: false });

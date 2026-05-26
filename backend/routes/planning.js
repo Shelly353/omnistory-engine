@@ -15,12 +15,12 @@ router.post('/beats/generate', async (req, res, next) => {
     const ai = await callAi({
       json: true,
       fallback,
-      system: '你是好莱坞商业叙事架构师。只输出 JSON 六节点，不写正文。',
+      system: '你是好莱坞商业叙事架构师。六节点必须体现三幕式节奏、压力曲线和人物成长弧线。只输出 JSON，不写正文。',
       user: `项目：${project.title}
 故事圣经：
 ${JSON.stringify(bible)}
 
-请输出 JSON：{"beats":[{"beat":"opening|first_turn|midpoint_false_victory|opposition_rises|dark_night|finale","title":"","summary":"","function":"","state_changes":[]}]}.`
+请输出 JSON：{"beats":[{"beat":"opening|first_turn|midpoint_false_victory|opposition_rises|dark_night|finale","title":"","summary":"","function":"","pressure":1,"arc_stage":"","state_changes":[]}]}.`
     });
     const beats = (ai.parsed?.beats || fallback.beats).map((beat, index) => ({
       project_id: project.id,
@@ -31,6 +31,8 @@ ${JSON.stringify(bible)}
       conflict_target: beat.beat || '',
       result: beat.function || '',
       state_changes: beat.state_changes || [],
+      related_hook_ids: [],
+      related_secret_ids: [],
       status: 'beat'
     }));
     const events = await insertMany('story_events', beats);
@@ -51,14 +53,14 @@ router.post('/events/generate', async (req, res, next) => {
     const ai = await callAi({
       json: true,
       fallback: { events: fallbackEvents },
-      system: '你是长篇小说事件图规划师。事件必须来自角色选择，并造成状态变化。新具名人物必须有至少两个未来复用点。',
+      system: '你是长篇小说事件图规划师。事件必须来自角色选择，并造成状态变化。每个事件必须记录节奏压力、人物弧线阶段、场景连续性约束。新具名人物必须有至少两个未来复用点。',
       user: `项目概念：${project.concept}
 已有角色：
 ${JSON.stringify(characters)}
 六节点：
 ${JSON.stringify(existingEvents)}
 
-请输出 JSON：{"events":[{"event_order":1,"title":"","summary":"","trigger":"","actor_name":"","conflict_target":"","result":"","state_changes":[],"event_need":"","new_character_candidate":null}]}.`
+请输出 JSON：{"events":[{"event_order":1,"title":"","summary":"","trigger":"","actor_name":"","conflict_target":"","result":"","pressure":1,"arc_stage":"","scene_continuity":"","state_changes":[{"target_type":"character|relationship|scene_continuity","target":"","before":"","after":"","evidence":""}],"event_need":"","new_character_candidate":null}]}.`
     });
     const incoming = ai.parsed?.events || fallbackEvents;
     const warnings = [];
@@ -78,7 +80,15 @@ ${JSON.stringify(existingEvents)}
         actor_character_id: actor?.id || match.recommended?.id || null,
         conflict_target: event.conflict_target || '',
         result: event.result || '',
-        state_changes: event.state_changes || [],
+        state_changes: Array.isArray(event.state_changes) && event.state_changes.length ? event.state_changes : [
+          {
+            target_type: 'scene_continuity',
+            target: '主场景',
+            before: '承接上一事件状态',
+            after: event.scene_continuity || '本事件结束时必须明确地点、交通、姿态和动作状态',
+            evidence: event.summary || ''
+          }
+        ],
         related_character_ids: actor?.id ? [actor.id] : characters.map(char => char.id).slice(0, 2),
         status: 'planned'
       };
@@ -102,7 +112,7 @@ router.post('/chapters/plan', async (req, res, next) => {
     const ai = await callAi({
       json: true,
       fallback,
-      system: '你是章节契约规划师。每章必须规定允许人物、禁止事实、预期章前和章后状态。只输出 JSON。',
+      system: '你是章节契约规划师。每章必须规定允许人物、禁止事实、预期章前和章后状态；必须包含节奏压力、人物弧线阶段和场景连续性要求。只输出 JSON。',
       user: `项目：${project.title}
 目标字数：${project.target_words}
 角色：
@@ -110,7 +120,7 @@ ${JSON.stringify(characters)}
 事件链：
 ${JSON.stringify(events)}
 
-请生成前 ${count} 章契约，JSON：{"chapters":[{"chapter_number":1,"title":"","summary":"","required_events":[],"allowed_characters":[],"forbidden_facts":[],"secret_permissions":{},"expected_start_state":{},"expected_end_state":{},"style_requirements":""}]}`
+请生成前 ${count} 章契约，JSON：{"chapters":[{"chapter_number":1,"title":"","summary":"","required_events":[],"allowed_characters":[],"forbidden_facts":[],"secret_permissions":{},"expected_start_state":{"scene_continuity":""},"expected_end_state":{"scene_continuity":"","character_arc_change":"","pressure":1},"style_requirements":""}]}`
     });
     const contracts = (ai.parsed?.chapters || fallback.chapters).map(item => ({
       project_id: project.id,
@@ -121,8 +131,8 @@ ${JSON.stringify(events)}
       allowed_characters: item.allowed_characters?.length ? item.allowed_characters : characters.map(char => char.id),
       forbidden_facts: item.forbidden_facts || ['不得提前揭露 hidden 秘密', '不得改写 Canon'],
       secret_permissions: item.secret_permissions || { hidden_mode: 'audience_view_only' },
-      expected_start_state: item.expected_start_state || {},
-      expected_end_state: item.expected_end_state || {},
+      expected_start_state: item.expected_start_state || { scene_continuity: '默认继承上一章结束地点、交通、姿态和动作。' },
+      expected_end_state: item.expected_end_state || { scene_continuity: '必须输出本章结束地点、交通、姿态和动作。' },
       style_requirements: item.style_requirements || project.style_profile,
       status: 'ready_to_draft'
     }));

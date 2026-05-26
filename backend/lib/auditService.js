@@ -27,6 +27,17 @@ function localAudit({ text, contract, state, extraction }) {
     });
   }
 
+  const expectedScene = contract.expected_end_state?.scene_continuity || contract.expected_start_state?.scene_continuity;
+  const sceneDelta = (extraction.state_delta || []).find(item => item.target_type === 'scene_continuity');
+  if (expectedScene && !sceneDelta && !extraction.scene_end_state) {
+    findings.push({
+      type: 'scene_continuity_missing',
+      severity: 'warning',
+      message: '正文没有明确记录本章结束时的地点、交通方式、身体姿态和正在进行的动作，下一章容易发生场景漂移。',
+      suggested_fix: '在结尾补一句能锁定连续性的动作或位置，例如车是否停下、谁在驾驶、谁坐在哪、人物是否已下车。'
+    });
+  }
+
   const proposedHighRisk = (extraction.proposed_facts || []).filter(item => item.risk_level === 'high');
   proposedHighRisk.forEach(item => {
     findings.push({
@@ -80,13 +91,20 @@ ${text}
   });
 
   const parsed = result.parsed || fallback;
-  const combined = [...fallbackFindings, ...(parsed.findings || [])];
+  const combined = [...fallbackFindings, ...(parsed.findings || [])]
+    .filter(item => item && item.message && !/状态迁移|state_transition_weak/i.test(item.type || ''));
   const unique = Array.from(new Map(combined.map(item => [`${item.type}:${item.message}`, item])).values());
+  const normalized = unique.map(item => ({
+    ...item,
+    severity: item.severity === 'blocking' && /场景|节奏|状态迁移|scene|transition/i.test(`${item.type} ${item.message}`)
+      ? 'warning'
+      : item.severity
+  }));
   return {
     ...parsed,
-    findings: unique,
-    pass: !unique.some(item => item.severity === 'blocking'),
-    severity: unique.some(item => item.severity === 'blocking') ? 'blocking' : (unique.length ? 'warning' : 'pass')
+    findings: normalized,
+    pass: !normalized.some(item => item.severity === 'blocking'),
+    severity: normalized.some(item => item.severity === 'blocking') ? 'blocking' : (normalized.length ? 'warning' : 'pass')
   };
 }
 

@@ -11,6 +11,8 @@ async function buildChapterContext({ project, contract, state }) {
       '正文只负责表达章节契约，不能擅自创造重大事实。',
       '只允许使用 allowed_characters 中的人物；无名路人不能推动剧情结果。',
       '角色变化必须来自本章事件，并能写入状态迁移。',
+      '必须继承 current_scene_state：地点、交通方式、人物身体姿态、正在进行的动作不能无解释跳变。',
+      '本章结尾必须留下 scene_end_state，可被下一章继承。',
       '风格只改变表达，不改变事实、身份、秘密、事件结果。',
       '输出纯正文，不输出解释。'
     ]
