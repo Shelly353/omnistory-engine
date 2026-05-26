@@ -80,11 +80,49 @@ async function patchChapter(chapterId, patch) {
   return found;
 }
 
+async function getEvent(eventId) {
+  if (supabase) {
+    const { data, error } = await supabase.from('story_events').select('*').eq('id', eventId).maybeSingle();
+    if (error) throw enrichDbError(error, 'story_events');
+    return data;
+  }
+  return memory.story_events.find(event => event.id === eventId) || null;
+}
+
+async function patchEvent(eventId, patch) {
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('story_events')
+      .update(patch)
+      .eq('id', eventId)
+      .select()
+      .single();
+    if (error) throw enrichDbError(error, 'story_events');
+    return data;
+  }
+  const found = memory.story_events.find(event => event.id === eventId);
+  if (!found) return null;
+  Object.assign(found, patch);
+  return found;
+}
+
+async function deleteEvent(eventId) {
+  if (supabase) {
+    const { error } = await supabase.from('story_events').delete().eq('id', eventId);
+    if (error) throw enrichDbError(error, 'story_events');
+    return;
+  }
+  memory.story_events = memory.story_events.filter(event => event.id !== eventId);
+}
+
 module.exports = {
   listByProject,
   getProject,
   getChapter,
+  getEvent,
   getContractForChapter,
   upsertChapter,
-  patchChapter
+  patchChapter,
+  patchEvent,
+  deleteEvent
 };

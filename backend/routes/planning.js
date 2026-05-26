@@ -1,11 +1,112 @@
 const express = require('express');
 const router = express.Router({ mergeParams: true });
 const { insert, insertMany } = require('../lib/db');
-const { getProject, listByProject, upsertChapter } = require('../lib/repositories');
+const { getProject, getEvent, listByProject, upsertChapter, patchEvent, deleteEvent } = require('../lib/repositories');
 const { callAi } = require('../lib/aiClient');
 const { demoBeats, demoEvents, demoChapterContracts } = require('../lib/fallbacks');
 const { matchCharacterForEvent } = require('../lib/characterMatcher');
 const { cleanText } = require('../lib/normalize');
+
+function asArray(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+      return [];
+    }
+  }
+  return [];
+}
+
+function normalizeEventPayload(body, projectId, fallbackOrder = 1) {
+  return {
+    project_id: projectId,
+    event_order: Number(body.event_order || fallbackOrder),
+    title: cleanText(body.title, `事件${fallbackOrder}`),
+    summary: body.summary || '',
+    trigger: body.trigger || '',
+    actor_character_id: body.actor_character_id || null,
+    conflict_target: body.conflict_target || '',
+    result: body.result || '',
+    state_changes: asArray(body.state_changes),
+    related_character_ids: asArray(body.related_character_ids),
+    related_secret_ids: asArray(body.related_secret_ids),
+    related_hook_ids: asArray(body.related_hook_ids),
+    status: body.status || 'planned'
+  };
+}
+
+async function assertProjectEvent(projectId, eventId) {
+  const event = await getEvent(eventId);
+  if (!event || event.project_id !== projectId) {
+    const err = new Error('事件不存在或不属于当前项目');
+    err.status = 404;
+    throw err;
+  }
+  return event;
+}
+
+router.get('/events', async (req, res, next) => {
+  try {
+    await getProject(req.params.projectId);
+    const events = await listByProject('story_events', req.params.projectId, 'event_order');
+    res.json({ success: true, events });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/events', async (req, res, next) => {
+  try {
+    const project = await getProject(req.params.projectId);
+    const existing = await listByProject('story_events', project.id, 'event_order');
+    const maxOrder = existing.reduce((max, event) => Math.max(max, Number(event.event_order || 0)), 0);
+    const event = await insert('story_events', normalizeEventPayload(req.body, project.id, maxOrder + 1));
+    res.json({ success: true, event });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/events/:eventId', async (req, res, next) => {
+  try {
+    await assertProjectEvent(req.params.projectId, req.params.eventId);
+    const patch = normalizeEventPayload(req.body, req.params.projectId, req.body.event_order || 1);
+    delete patch.project_id;
+    const event = await patchEvent(req.params.eventId, patch);
+    res.json({ success: true, event });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/events/:eventId', async (req, res, next) => {
+  try {
+    await assertProjectEvent(req.params.projectId, req.params.eventId);
+    await deleteEvent(req.params.eventId);
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/events/reorder', async (req, res, next) => {
+  try {
+    const projectId = req.params.projectId;
+    const orderedIds = Array.isArray(req.body.orderedIds) ? req.body.orderedIds : [];
+    const events = await listByProject('story_events', projectId, 'event_order');
+    const eventIds = new Set(events.map(event => event.id));
+    const updates = [];
+    for (const [index, eventId] of orderedIds.entries()) {
+      if (eventIds.has(eventId)) updates.push(await patchEvent(eventId, { event_order: index + 1 }));
+    }
+    res.json({ success: true, events: updates });
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.post('/beats/generate', async (req, res, next) => {
   try {
@@ -122,7 +223,7 @@ ${JSON.stringify(events)}
 
 请生成前 ${count} 章契约，JSON：{"chapters":[{"chapter_number":1,"title":"","summary":"","required_events":[],"allowed_characters":[],"forbidden_facts":[],"secret_permissions":{},"expected_start_state":{"scene_continuity":""},"expected_end_state":{"scene_continuity":"","character_arc_change":"","pressure":1},"style_requirements":""}]}`
     });
-    const contracts = (ai.parsed?.chapters || fallback.chapters).map(item => ({
+    const contracts = (ai.parsed?.chapters || fallback.chapters).map((item, index) => ({
       project_id: project.id,
       chapter_number: item.chapter_number,
       title: cleanText(item.title, `第${item.chapter_number || index + 1}章`),

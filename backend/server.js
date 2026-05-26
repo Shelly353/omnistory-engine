@@ -65,7 +65,7 @@ app.use('/api', audit);
 
 app.use((err, req, res, next) => {
   console.error(err);
-  res.status(err.setupRequired ? 501 : 500).json({
+  res.status(err.status || (err.setupRequired ? 501 : 500)).json({
     success: false,
     error: err.message || '服务器错误',
     setupRequired: Boolean(err.setupRequired),

@@ -8,97 +8,152 @@
 </head>
 <body>
   <header class="topbar">
-    <div>
+    <button id="backToProjects" class="ghost hidden" type="button">项目</button>
+    <div class="brand">
       <h1>Novel Workflow Studio</h1>
-      <p>Canon + 事件溯源 + 章节状态审校</p>
+      <p id="subtitle">长篇小说一致性工作流</p>
     </div>
     <div class="status-strip">
-      <span id="connectionStatus">本地模式</span>
-      <span id="projectStatus">未选择项目</span>
+      <span id="connectionStatus">连接中</span>
+      <span id="projectStatus">项目管理</span>
       <span id="auditStatus">Clean</span>
     </div>
   </header>
 
-  <main class="layout">
-    <aside class="sidebar">
-      <section>
-        <h2>项目</h2>
-        <form id="projectForm" class="stack">
-          <input name="title" placeholder="小说名" required>
-          <textarea name="concept" rows="5" placeholder="输入你的概念故事" required></textarea>
-          <div class="grid-2">
-            <input name="target_words" type="number" value="200000" min="50000" step="10000">
-            <input name="style_profile" value="默认商业网文" placeholder="文风">
-          </div>
-          <button type="submit">创建项目</button>
-        </form>
-      </section>
-
-      <section>
-        <h2>项目列表</h2>
-        <div id="projectList" class="list"></div>
-      </section>
-
-      <section>
-        <h2>章节</h2>
-        <div id="chapterList" class="list"></div>
-      </section>
-    </aside>
-
-    <section class="workspace">
-      <div class="actions">
-        <button id="generateBible">生成故事圣经</button>
-        <button id="approveBible">确认圣经 + Canon</button>
-        <button id="generateBeats">生成六节点</button>
-        <button id="generateEvents">扩展事件链</button>
-        <button id="planChapters">生成前10章契约</button>
+  <main id="projectPage" class="project-page">
+    <section class="project-hero">
+      <div>
+        <h2>项目管理</h2>
+        <p>先创建或打开项目，再进入故事圣经、Canon、六事件、拓展事件链、章节和审校流程。</p>
       </div>
+      <button id="refreshProjects" type="button">刷新列表</button>
+    </section>
 
-      <section class="panel">
-        <h2>故事圣经</h2>
-        <textarea id="bibleEditor" rows="14" placeholder="生成或编辑故事圣经 JSON"></textarea>
-      </section>
-
-      <section class="panel">
-        <h2>事件链</h2>
-        <div id="eventList" class="event-list"></div>
-      </section>
+    <section class="project-grid">
+      <form id="projectForm" class="panel stack">
+        <h2>创建新项目</h2>
+        <input name="title" placeholder="小说名" required>
+        <textarea name="concept" rows="8" placeholder="输入你的概念故事" required></textarea>
+        <div class="grid-2">
+          <label>目标字数
+            <input name="target_words" type="number" value="200000" min="50000" step="10000">
+          </label>
+          <label>作家风格
+            <input name="style_profile" value="默认商业网文" placeholder="文风">
+          </label>
+        </div>
+        <button type="submit">创建并进入</button>
+      </form>
 
       <section class="panel">
         <div class="panel-title">
-          <h2>章节正文</h2>
-          <div>
-            <button id="loadState">查看章前状态</button>
-            <button id="generateDraft">生成正文</button>
-            <button id="reviewDraft">审校正文</button>
-            <button id="approveDraft">批准入稿</button>
-          </div>
+          <h2>项目列表</h2>
+          <span id="projectCount" class="muted">0 个项目</span>
         </div>
-        <textarea id="chapterEditor" rows="18" placeholder="选择章节后生成正文"></textarea>
+        <div id="projectList" class="project-list"></div>
       </section>
     </section>
+  </main>
 
-    <aside class="inspector">
-      <section>
-        <h2>Canon 硬事实</h2>
+  <main id="workspacePage" class="workspace-page hidden">
+    <nav id="stepTabs" class="step-tabs" aria-label="工作流步骤">
+      <button class="tab active" data-tab="bible" type="button"><span>故事圣经</span><b>待创建</b></button>
+      <button class="tab" data-tab="canon" type="button"><span>Canon</span><b>待创建</b></button>
+      <button class="tab" data-tab="beats" type="button"><span>六事件</span><b>待创建</b></button>
+      <button class="tab" data-tab="events" type="button"><span>拓展事件链</span><b>待创建</b></button>
+      <button class="tab" data-tab="chapters" type="button"><span>章节契约</span><b>待创建</b></button>
+      <button class="tab" data-tab="draft" type="button"><span>正文审校</span><b>待创建</b></button>
+    </nav>
+
+    <section class="tab-panel active" data-panel="bible">
+      <div class="panel">
+        <div class="panel-title">
+          <h2>故事圣经</h2>
+          <div class="actions">
+            <button id="generateBible" type="button">生成故事圣经</button>
+            <button id="approveBible" type="button">确认圣经 + Canon</button>
+          </div>
+        </div>
+        <textarea id="bibleEditor" rows="18" placeholder="生成或编辑故事圣经 JSON"></textarea>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="canon">
+      <div class="panel">
+        <div class="panel-title">
+          <h2>Canon 硬事实</h2>
+          <button id="reloadCanon" type="button">刷新</button>
+        </div>
         <div id="canonList" class="fact-list"></div>
-      </section>
+      </div>
+    </section>
 
-      <section>
-        <h2>章前状态</h2>
-        <pre id="stateView"></pre>
-      </section>
+    <section class="tab-panel" data-panel="beats">
+      <div class="panel">
+        <div class="panel-title">
+          <h2>六事件</h2>
+          <div class="actions">
+            <button id="generateBeats" type="button">生成六事件</button>
+            <button id="addBeat" type="button">新增六事件</button>
+            <button id="saveBeatOrder" type="button">保存顺序</button>
+          </div>
+        </div>
+        <div id="beatList" class="event-editor-list"></div>
+      </div>
+    </section>
 
-      <section>
-        <h2>审校</h2>
-        <div id="auditList" class="fact-list"></div>
-      </section>
+    <section class="tab-panel" data-panel="events">
+      <div class="panel">
+        <div class="panel-title">
+          <h2>拓展事件链</h2>
+          <div class="actions">
+            <button id="generateEvents" type="button">扩展事件链</button>
+            <button id="addEvent" type="button">新增小事件</button>
+            <button id="saveEventOrder" type="button">保存顺序</button>
+          </div>
+        </div>
+        <div id="eventList" class="event-editor-list"></div>
+      </div>
+    </section>
 
-      <section>
-        <h2>新事实待确认</h2>
-        <div id="proposedFacts" class="fact-list"></div>
-      </section>
-    </aside>
+    <section class="tab-panel" data-panel="chapters">
+      <div class="two-column">
+        <section class="panel">
+          <div class="panel-title">
+            <h2>章节契约</h2>
+            <button id="planChapters" type="button">生成前10章契约</button>
+          </div>
+          <div id="chapterList" class="list"></div>
+        </section>
+        <section class="panel">
+          <h2>章前状态</h2>
+          <pre id="stateView"></pre>
+        </section>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="draft">
+      <div class="two-column wide-left">
+        <section class="panel">
+          <div class="panel-title">
+            <h2>章节正文</h2>
+            <div class="actions">
+              <button id="loadState" type="button">查看章前状态</button>
+              <button id="generateDraft" type="button">生成正文</button>
+              <button id="reviewDraft" type="button">审校正文</button>
+              <button id="approveDraft" type="button">批准入稿</button>
+            </div>
+          </div>
+          <textarea id="chapterEditor" rows="22" placeholder="选择章节后生成正文"></textarea>
+        </section>
+        <section class="panel inspector-panel">
+          <h2>审校</h2>
+          <div id="auditList" class="fact-list"></div>
+          <h2>新事实待确认</h2>
+          <div id="proposedFacts" class="fact-list"></div>
+        </section>
+      </div>
+    </section>
   </main>
 
   <div id="toast" class="toast"></div>
