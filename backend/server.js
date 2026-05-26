@@ -33,7 +33,7 @@ app.get('/api/setup/sql', (req, res) => {
   res.type('text/plain').send(readSetupSql());
 });
 
-app.get('/api/diagnostics/supabase', async (req, res) => {
+async function renderSupabaseDiagnostics(req, res) {
   const url = process.env.SUPABASE_URL || '';
   const info = {
     configured: Boolean(url && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)),
@@ -49,7 +49,10 @@ app.get('/api/diagnostics/supabase', async (req, res) => {
     }
   }
   res.json({ success: true, supabase: { ...info, url: info.url ? info.url.replace(/\/$/, '') : '' }, checks });
-});
+}
+
+app.get('/diagnostics/supabase', renderSupabaseDiagnostics);
+app.get('/api/diagnostics/supabase', renderSupabaseDiagnostics);
 
 app.use('/api', requireAccessToken);
 app.use('/api', aiRateLimit);
