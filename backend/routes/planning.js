@@ -135,6 +135,56 @@ function buildBridgeFallbackEvents(beats, characters) {
   return rows;
 }
 
+function eventBelongsToGap(event, fromBeat, toBeat) {
+  return Number(event.event_order) > Number(fromBeat.event_order)
+    && Number(event.event_order) < Number(toBeat.event_order);
+}
+
+function dedupeIncomingBridgeEvents(rows, existingBridgeEvents) {
+  const seen = new Set(existingBridgeEvents.map(event => `${Number(event.event_order).toFixed(3)}:${event.title}`));
+  return rows.filter(row => {
+    const key = `${Number(row.event_order).toFixed(3)}:${row.title}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function keepRowsForIncompleteGaps(rows, beats, existingBridgeEvents, minPerGap = 3) {
+  return rows.filter(row => {
+    const gapIndex = beats.findIndex((beat, index) => eventBelongsToGap(row, beat, beats[index + 1] || {}));
+    if (gapIndex < 0) return true;
+    const fromBeat = beats[gapIndex];
+    const toBeat = beats[gapIndex + 1];
+    const existingCount = existingBridgeEvents.filter(event => eventBelongsToGap(event, fromBeat, toBeat)).length;
+    return existingCount < minPerGap;
+  });
+}
+
+function completeBridgeGaps(rows, beats, characters, existingBridgeEvents, minPerGap = 3) {
+  const fallbackRows = buildBridgeFallbackEvents(beats, characters);
+  const completed = [...rows];
+  for (let index = 0; index < beats.length - 1; index += 1) {
+    const fromBeat = beats[index];
+    const toBeat = beats[index + 1];
+    const current = [
+      ...existingBridgeEvents.filter(event => eventBelongsToGap(event, fromBeat, toBeat)),
+      ...completed.filter(event => eventBelongsToGap(event, fromBeat, toBeat))
+    ];
+    const usedOrders = new Set(current.map(event => Number(event.event_order).toFixed(3)));
+    const candidates = fallbackRows.filter(event => eventBelongsToGap(event, fromBeat, toBeat));
+    for (const candidate of candidates) {
+      if (current.length >= minPerGap) break;
+      const orderKey = Number(candidate.event_order).toFixed(3);
+      if (usedOrders.has(orderKey)) continue;
+      completed.push(candidate);
+      current.push(candidate);
+      usedOrders.add(orderKey);
+    }
+  }
+  return completed;
+}
+
 async function assertProjectEvent(projectId, eventId) {
   const event = await getEvent(eventId);
   if (!event || event.project_id !== projectId) {
@@ -354,7 +404,7 @@ ${JSON.stringify(existingBridgeEvents)}
     });
     const incoming = ai.parsed?.events || fallbackEvents;
     const warnings = [];
-    const rows = incoming.map((event, index) => {
+    let rows = incoming.map((event, index) => {
       const actor = characters.find(char => char.name === event.actor_name) || characters[0] || null;
       const match = matchCharacterForEvent(event.event_need || event.summary || '', characters);
       if (event.new_character_candidate) {
@@ -387,6 +437,10 @@ ${JSON.stringify(existingBridgeEvents)}
         status: event.status && event.status !== 'beat' ? event.status : 'bridge'
       };
     });
+    const minPerGap = Math.min(Math.max(Number(req.body.eventsPerGap || 3), 1), 8);
+    rows = dedupeIncomingBridgeEvents(rows, existingBridgeEvents);
+    rows = keepRowsForIncompleteGaps(rows, beats, existingBridgeEvents, minPerGap);
+    rows = completeBridgeGaps(rows, beats, characters, existingBridgeEvents, minPerGap);
     const events = await insertMany('story_events', rows);
     res.json({ success: true, events, warnings });
   } catch (err) {
